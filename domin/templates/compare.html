@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Compare · {{ domain.name }} · domin{% endblock %}
+{% block page %}compare{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="crumbs"><a href="/">Overview</a> / <a href="/d/{{ domain.name }}">{{ domain.name }}</a> /</p>
+    <h1>{{ a.started[:10] }} → {{ b.started[:10] }}</h1>
+    <p class="muted">{{ a.hosts }} → {{ b.hosts }} host names · {{ a.ips }} → {{ b.ips }} addresses</p>
+  </div>
+  <form class="compare" action="/d/{{ domain.name }}/compare">
+    <select name="a">{% for s in scans|reverse %}<option value="{{ s.id }}" {{ 'selected' if s.id == a.id }}>{{ s.started[:10] }}</option>{% endfor %}</select>
+    <select name="b">{% for s in scans|reverse %}<option value="{{ s.id }}" {{ 'selected' if s.id == b.id }}>{{ s.started[:10] }}</option>{% endfor %}</select>
+    <button class="btn primary" type="submit">Compare</button>
+  </form>
+</section>
+<section class="grid g2">
+  {% for key, label, cls in [('hosts_added', 'Host names added', 'up'), ('hosts_removed', 'Host names removed', 'down'),
+                             ('hosts_changed', 'Host names with new addresses', 'flat'), ('ips_added', 'Addresses added', 'up'),
+                             ('ips_removed', 'Addresses removed', 'down')] %}
+  <div class="card">
+    <h2 class="{{ cls }}">{{ label }} <small>{{ change[key]|length }}</small></h2>
+    {% if change[key] %}<ul class="chips">{% for h in change[key] %}<li>{{ h }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">None</p>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

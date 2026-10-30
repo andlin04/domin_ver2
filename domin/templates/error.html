@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · domin{% endblock %}
+{% block page %}error{% endblock %}
+{% block content %}
+<section class="card empty">
+  <h1>{{ code }}</h1>
+  <p>{{ message }}</p>
+  <p><a class="btn" href="/">Back to the overview</a></p>
+</section>
+{% endblock %}

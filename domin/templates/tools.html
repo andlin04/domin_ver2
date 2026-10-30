@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Tools · domin{% endblock %}
+{% block page %}tools{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Domain tools</h1>
+    <p class="muted">Registration data (RDAP, the successor of whois) and e-mail security records for one domain.</p>
+  </div>
+  <form class="scan-form" data-tools-form>
+    <input name="domain" value="{{ domain }}" placeholder="example.com" required autocomplete="off" aria-label="Domain">
+    <button class="btn primary" type="submit">Look up</button>
+  </form>
+</section>
+<section class="grid g2">
+  <div class="card"><h2>Registration</h2><div data-rdap><p class="muted">Enter a domain.</p></div></div>
+  <div class="card"><h2>E-mail security <small data-score></small></h2><div data-email><p class="muted">Enter a domain.</p></div></div>
+</section>
+{% endblock %}

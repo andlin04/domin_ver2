@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ domain.name }} · domin{% endblock %}
+{% block page %}domain{% endblock %}
+{% macro delta(cur, prev, key) -%}
+  {%- if prev -%}{%- set d = cur[key] - prev[key] -%}
+    {%- if d > 0 %}<em class="up">+{{ d }}</em>{% elif d < 0 %}<em class="down">{{ d }}</em>{% else %}<em class="flat">±0</em>{% endif -%}
+  {%- endif -%}
+{%- endmacro %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="crumbs"><a href="/">Overview</a> /</p>
+    <h1>{{ domain.name }}</h1>
+    <p class="muted">{{ scans|length }} scans · first {{ scans[0].started[:10] }} · showing
+      <b>{{ current.started[:10] }}</b>{% if current.source == 'import' %} (imported){% endif %}</p>
+  </div>
+  <div class="actions">
+    <form class="scan-form inline" data-scan-form>
+      <input type="hidden" name="domain" value="{{ domain.name }}">
+      <button class="btn primary" type="submit">Scan now</button>
+      <div class="scan-status" data-scan-status {% if not open_job %}hidden{% endif %} data-job="{{ open_job or '' }}"></div>
+    </form>
+    <a class="btn" href="/tools?domain={{ domain.name }}">Whois &amp; e-mail</a>
+    <a class="btn" href="/scans/{{ current.id }}.csv">CSV</a>
+  </div>
+</section>
+
+<section class="toolbar card">
+  <label>Scan
+    <select data-scan-select>
+      {% for s in scans|reverse %}<option value="{{ s.id }}" {{ 'selected' if s.id == current.id }}>{{ s.started[:10] }} · {{ s.hosts }} hosts</option>{% endfor %}
+    </select>
+  </label>
+  {% if scans|length > 1 %}
+  <form action="/d/{{ domain.name }}/compare" class="compare">
+    <label>Compare <select name="a">{% for s in scans|reverse %}<option value="{{ s.id }}" {{ 'selected' if previous and s.id == previous.id }}>{{ s.started[:10] }}</option>{% endfor %}</select></label>
+    <label>with <select name="b">{% for s in scans|reverse %}<option value="{{ s.id }}" {{ 'selected' if s.id == current.id }}>{{ s.started[:10] }}</option>{% endfor %}</select></label>
+    <button class="btn" type="submit">Compare</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="kpis">
+  <div class="kpi"><span>Host names</span><b>{{ current.hosts }}</b>{{ delta(current, previous, 'hosts') }}</div>
+  <div class="kpi"><span>Resolving</span><b>{{ current.resolved }}</b>{{ delta(current, previous, 'resolved') }}</div>
+  <div class="kpi"><span>Addresses</span><b>{{ current.ips }}</b>{{ delta(current, previous, 'ips') }}</div>
+  <div class="kpi"><span>ASNs</span><b>{{ current.asns }}</b>{{ delta(current, previous, 'asns') }}</div>
+  <div class="kpi"><span>Countries</span><b>{{ current.countries }}</b>{{ delta(current, previous, 'countries') }}</div>
+</section>
+
+<section class="grid g2">
+  <div class="card wide">
+    <h2>Footprint over time <small>click a point to open that scan</small></h2>
+    <div class="chart h260"><canvas id="history"></canvas></div>
+  </div>
+  {% if charts.churn %}
+  <div class="card wide">
+    <h2>Host names added and removed per scan</h2>
+    <div class="chart h200"><canvas id="churn"></canvas></div>
+  </div>
+  {% endif %}
+  <div class="card">
+    <h2>Countries <small>distinct addresses</small></h2>
+    <div class="chart h260"><canvas id="countries"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Providers <small>network name</small></h2>
+    <div class="chart h260"><canvas id="netnames"></canvas></div>
+  </div>
+</section>
+
+{% if change %}
+<section class="card">
+  <h2>Changes since {{ previous.started[:10] }}</h2>
+  {% if not (change.hosts_added or change.hosts_removed or change.hosts_changed) %}
+    <p class="muted">No host names added, removed or moved.</p>
+  {% else %}
+  <div class="changes">
+    {% for key, label, cls in [('hosts_added', 'Added', 'up'), ('hosts_removed', 'Removed', 'down'), ('hosts_changed', 'New address', 'flat')] %}
+      {% if change[key] %}
+      <div><h3 class="{{ cls }}">{{ label }} <small>{{ change[key]|length }}</small></h3>
+        <ul class="chips">{% for h in change[key][:60] %}<li>{{ h }}</li>{% endfor %}
+          {% if change[key]|length > 60 %}<li class="muted">+{{ change[key]|length - 60 }} more</li>{% endif %}</ul></div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>Records <small>{{ rows|length }}</small></h2>
+    <input class="filter" placeholder="Filter host, address, provider…" data-filter="#records" aria-label="Filter records">
+  </div>
+  <div class="table-wrap">
+    <table id="records" class="sortable">
+      <thead><tr><th data-sort="text">Host</th><th data-sort="ip">Address</th><th data-sort="num">ASN</th>
+        <th data-sort="text">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
+        <th data-sort="text">Country</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td>{{ r.host }}</td><td class="mono">{{ r.ip or '—' }}</td><td>{{ r.asn }}</td>
+          <td class="mono">{{ r.prefix }}</td><td>{{ r.netname }}</td><td class="clip" title="{{ r.descr }}">{{ r.descr }}</td>
+          <td>{{ r.country }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<script type="application/json" id="page-data">{{ charts|tojson }}</script>
+{% endblock %}
