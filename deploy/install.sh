@@ -40,7 +40,7 @@ apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
 
 id -u domin >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin domin
-[ -d "$DATA" ] || install -d -o domin -g domin -m 750 "$DATA"
+[ -d "$DATA" ] || install -d -o domin -g domin -m 700 "$DATA"
 [ -d "$APP" ] || install -d -m 755 "$APP"
 rsync -a --delete --exclude .git/ --exclude tests/ --exclude '*.db' "$SRC/" "$APP/app/"
 chown -R root:root "$APP/app"
@@ -53,7 +53,8 @@ python3 -c 'import tomllib, sys; [print(d) for d in tomllib.load(open(sys.argv[1
 "$APP/venv/bin/pip" install -q -r "$APP/requirements.txt"
 
 if [ ! -f /etc/domin.env ]; then
-  ( umask 027; printf 'DOMIN_DB=%s/domin.db\nDOMIN_REFRESH_DAYS=0\n' "$DATA" > /etc/domin.env )
+  ( umask 027; printf 'DOMIN_DB=%s/domin.db\nDOMIN_REFRESH_DAYS=0\nDOMIN_QUEUE_MAX=50\nDOMIN_LOOKUPS_PER_MINUTE=30\n' \
+      "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
 
@@ -99,14 +100,25 @@ unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app
 unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker"
 
 cat > /etc/nginx/sites-available/domin <<EOF
-limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=30r/m;
+limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;
 limit_req_zone \$binary_remote_addr zone=domin_pages:10m rate=10r/s;
+limit_conn_zone \$binary_remote_addr zone=domin_conn:10m;
+server {   # unknown Host headers: close the connection (the app has no host check)
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
 server {
     listen 80;
     listen [::]:80;
     server_name $DOMAIN;
     server_tokens off;
-    client_max_body_size 16k;
+    client_max_body_size 4k;   # the only request body is a domain name in JSON
+    large_client_header_buffers 4 8k;
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    limit_conn domin_conn 20;
     location / {
         limit_req zone=domin_pages burst=40 nodelay;
         include /etc/nginx/domin-proxy.conf;
@@ -123,7 +135,7 @@ proxy_set_header Host $host;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Forwarded-Proto $scheme;
-proxy_read_timeout 60s;
+proxy_read_timeout 40s;
 limit_req_status 429;
 EOF
 ln -sf /etc/nginx/sites-available/domin /etc/nginx/sites-enabled/domin
