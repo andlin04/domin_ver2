@@ -57,6 +57,22 @@ CREATE TABLE IF NOT EXISTS ip_cache (
     asn TEXT, prefix TEXT, netname TEXT, descr TEXT, country TEXT,
     fetched TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- admin password, tuning, salts
+CREATE TABLE IF NOT EXISTS admin_sessions (token_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS admin_fails (client TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS visits (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    visitor TEXT NOT NULL,             -- daily-salted hash of address + user agent, never the address
+    kind TEXT NOT NULL,                -- page | tool | download | scan | limited
+    path TEXT NOT NULL,
+    domain TEXT NOT NULL DEFAULT '',
+    ref TEXT NOT NULL DEFAULT '',      -- referring site's host name, external only
+    country TEXT NOT NULL DEFAULT '',
+    bot INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS visits_at ON visits(at);
+CREATE TABLE IF NOT EXISTS geo (start TEXT PRIMARY KEY, end TEXT NOT NULL, cc TEXT NOT NULL) WITHOUT ROWID;
 """
 
 RECORD_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")

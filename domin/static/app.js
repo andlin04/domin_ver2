@@ -63,6 +63,7 @@ function describe(job) {
   if (job.status === "queued") return `Queued${job.ahead ? ` (${job.ahead} ahead)` : ""}…`;
   if (job.status === "running") return `Scanning ${job.domain}: ${job.progress || "starting"}…`;
   if (job.status === "failed") return `Scan failed: ${job.error || "unknown error"}`;
+  if (job.status === "cancelled") return "The scan was cancelled";
   return "Done";
 }
 async function follow(jobId, status, button) {
@@ -80,7 +81,7 @@ async function follow(jobId, status, button) {
     }
     status.textContent = describe(job);
     if (job.status === "done") { location.href = `/d/${job.domain}?scan=${job.scan_id}`; return; }
-    if (job.status === "failed") { if (button) button.disabled = false; return; }
+    if (job.status === "failed" || job.status === "cancelled") { if (button) button.disabled = false; return; }
     await new Promise((ok) => setTimeout(ok, 2000));
   }
 }
@@ -230,9 +231,28 @@ function toolsPage() {
   if (form.domain.value) run(form.domain.value.trim());
 }
 
+// --- admin ---------------------------------------------------------------------------------------------------------
+function adminCharts() {
+  const d = pageData();
+  const el = $("#visits");
+  if (!d.length) { el.parentElement.innerHTML = '<p class="muted">No visits yet</p>'; return; }
+  const series = (label, key, color) => ({ label, data: d.map((r) => r[key] || 0), backgroundColor: color, borderRadius: 4 });
+  new Chart(el, {
+    type: "bar",
+    data: { labels: d.map((r) => r.day), datasets: [series("Page views", "views", css("--accent")),
+      series("Visitors", "visitors", css("--accent-2")), series("Downloads", "downloads", "#f59e0b"),
+      series("Scans", "scans", "#8b5cf6")] },
+    options: { scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } },
+  });
+}
+$$("form[data-confirm]").forEach((f) => f.addEventListener("submit", (ev) => {
+  if (!confirm(f.dataset.confirm)) ev.preventDefault();
+}));
+
 const page = document.body.dataset.page;
 if (page === "tools") toolsPage();
 if (chartDefaults()) {
   if (page === "overview") overviewCharts();
   if (page === "domain") domainCharts();
+  if (page === "admin") adminCharts();
 }

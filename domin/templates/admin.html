@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Admin · domin{% endblock %}
+{% block page %}admin{% endblock %}
+{% macro dur(s) %}{% if s is none %}–{% elif s < 60 %}{{ s }} s{% else %}{{ s // 60 }} min {{ s % 60 }} s{% endif %}{% endmacro %}
+{% macro top(title, note, rows, link=false) %}
+<div class="card">
+  <h2>{{ title }} <small>{{ note }}</small></h2>
+  {% if rows %}
+  <div class="table-wrap short"><table>
+    <thead><tr><th></th><th class="num">Hits</th><th class="num">Visitors</th></tr></thead>
+    <tbody>{% for r in rows %}<tr>
+      <td class="clip">{% if link %}<a href="/d/{{ r.label }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
+      <td class="num">{{ r.hits }}</td><td class="num">{{ r.visitors }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">Nothing yet</p>{% endif %}
+</div>
+{% endmacro %}
+{% block content %}
+{% set k = stats.kpi %}
+<section class="hero">
+  <div>
+    <h1>Admin</h1>
+    <p class="muted">Last {{ stats.days }} days, people only ({{ stats.bots }} bot requests left out). No IP addresses
+      are stored: a visitor is a hash that changes every day.</p>
+  </div>
+  <form method="post" action="{{ base }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Sign out</button></form>
+</section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<section class="kpis">
+  <div class="kpi"><span>Visitors</span><b>{{ k.visitors }}</b></div>
+  <div class="kpi"><span>Page views</span><b>{{ k.views }}</b></div>
+  <div class="kpi"><span>Median visit</span><b class="small">{{ dur(k.median_seconds) }}</b></div>
+  <div class="kpi"><span>CSV downloads</span><b>{{ k.downloads }}</b></div>
+  <div class="kpi"><span>Scans started</span><b>{{ k.scans }}</b></div>
+  <div class="kpi"><span>Scans refused <i>limits</i></span><b>{{ k.limited }}</b></div>
+</section>
+
+<section class="card">
+  <h2>Visits per day <small>last 30 days</small></h2>
+  <div class="chart h220"><canvas id="visits"></canvas></div>
+</section>
+
+<section class="grid g2">
+  {{ top("Pages", "most viewed", stats.pages) }}
+  {{ top("Domains", "viewed, looked up, downloaded or scanned", stats.domains, true) }}
+  {{ top("Downloads", "CSV exports per domain", stats.downloads, true) }}
+  {{ top("Tools", "RDAP and e-mail lookups", stats.tools) }}
+  {{ top("Referrers", "external sites that sent visitors", stats.refs) }}
+  {{ top("Countries", "visitor country" if stats.geo else "no country table loaded: python -m domin geoip", stats.countries) }}
+</section>
+
+<section class="card">
+  <h2>Recent visits <small>pages in order, time spent on each</small></h2>
+  {% if stats.sessions %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Start</th><th>Visitor</th><th>Country</th><th>From</th><th class="num">Length</th><th>Path</th></tr></thead>
+    <tbody>{% for s in stats.sessions %}<tr>
+      <td>{{ s.start[5:16].replace('T', ' ') }}</td><td class="mono">{{ s.visitor }}</td><td>{{ s.country }}</td>
+      <td class="clip">{{ s.ref }}</td><td class="num">{{ dur(s.seconds) }}</td>
+      <td class="path">{% for st in s.steps[:12] %}<span class="step {{ st.kind }}">{{ st.path }}{% if st.seconds is not none %} <i>{{ dur(st.seconds) }}</i>{% endif %}</span>{% endfor %}{% if s.steps|length > 12 %}<span class="muted">+{{ s.steps|length - 12 }}</span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">No visits yet</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Scan jobs <small>{{ jobs.open|length }} open</small></h2>
+  <ul class="jobs">
+    {% for j in jobs.open + jobs.done %}
+    <li><span class="pill {{ j.status }}">{{ j.status }}</span>
+      <a href="/d/{{ j.domain }}">{{ j.domain }}</a>
+      <span class="muted">{{ j.created[:16].replace('T', ' ') }}</span>
+      {% if j.status == 'running' %}<span class="muted">{{ j.progress }}</span>{% endif %}
+      {% if j.error %}<span class="bad-text">{{ j.error }}</span>{% endif %}
+      {% if j.status in ('queued', 'running') %}
+      <form method="post" action="{{ base }}/jobs/{{ j.id }}/cancel" data-confirm="{{ 'Stop' if j.status == 'running' else 'Cancel' }} the scan of {{ j.domain }}?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">{{ 'Kill' if j.status == 'running' else 'Cancel' }}</button></form>
+      {% elif j.status in ('failed', 'cancelled') %}
+      <form method="post" action="{{ base }}/jobs/{{ j.id }}/retry">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Retry</button></form>
+      {% endif %}</li>
+    {% else %}<li class="muted">No jobs</li>{% endfor %}
+  </ul>
+  {% if jobs.per_day %}
+  <div class="table-wrap short"><table>
+    <thead><tr><th>Day</th><th class="num">Jobs</th><th class="num">Done</th><th class="num">Failed</th>
+      <th class="num">Cancelled</th><th class="num">Clients</th></tr></thead>
+    <tbody>{% for d in jobs.per_day %}<tr><td>{{ d.day }}</td><td class="num">{{ d.jobs }}</td><td class="num">{{ d.done }}</td>
+      <td class="num">{{ d.failed }}</td><td class="num">{{ d.cancelled }}</td><td class="num">{{ d.clients }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Tuning <small>applies at once; server defaults come from /etc/domin.env</small></h2>
+  <form method="post" action="{{ base }}/tune" class="tune">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for name, label, lo, hi, value in tunable %}
+    {% if lo is none %}
+    <label class="tick"><input type="checkbox" name="{{ name }}"{% if value %} checked{% endif %}> {{ label }}</label>
+    {% else %}
+    <label>{{ label }} <input type="number" name="{{ name }}" value="{{ value }}" min="{{ lo }}" max="{{ hi }}" required></label>
+    {% endif %}
+    {% endfor %}
+    <button class="btn primary" type="submit">Save</button>
+  </form>
+</section>
+{% if stats.geo %}<p class="muted small-print">Country data: <a href="https://db-ip.com">IP Geolocation by DB-IP</a> (CC BY 4.0).</p>{% endif %}
+<script type="application/json" id="page-data">{{ stats.per_day|tojson }}</script>
+{% endblock %}

@@ -6,10 +6,14 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 
-from . import db, scanner
+from . import admin, db, scanner
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
+
+
+class Cancelled(Exception):
+    """The admin cancelled the running job; the worker stops at its next progress step."""
 
 
 def _public(row: sqlite3.Row) -> dict:
@@ -38,6 +42,23 @@ def forget_clients(conn: sqlite3.Connection, hours: int = 24) -> int:
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
     return conn.execute("UPDATE jobs SET client = '' WHERE client NOT IN ('', 'refresh') AND created < ?",
                         (since,)).rowcount
+
+
+def cancel(conn: sqlite3.Connection, job_id: int) -> bool:
+    return conn.execute("UPDATE jobs SET status = 'cancelled', finished = ?, error = 'cancelled by the admin' "
+                        "WHERE id = ? AND status IN ('queued', 'running')", (db.now(), job_id)).rowcount == 1
+
+
+def admin_list(conn: sqlite3.Connection, limit: int = 30) -> dict:
+    open_ = [_public(r) for r in conn.execute("SELECT * FROM jobs WHERE status IN ('queued', 'running') ORDER BY id")]
+    done = [_public(r) for r in conn.execute(
+        "SELECT * FROM jobs WHERE status NOT IN ('queued', 'running') ORDER BY id DESC LIMIT ?", (limit,))]
+    per_day = [dict(r) for r in conn.execute(
+        """SELECT substr(created, 1, 10) AS day, COUNT(*) AS jobs, SUM(status = 'done') AS done,
+                  SUM(status = 'failed') AS failed, SUM(status = 'cancelled') AS cancelled,
+                  COUNT(DISTINCT NULLIF(client, '')) AS clients
+           FROM jobs GROUP BY day ORDER BY day DESC LIMIT 14""")]
+    return {"open": open_, "done": done, "per_day": per_day}
 
 
 def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
@@ -73,12 +94,19 @@ def claim(conn: sqlite3.Connection) -> dict | None:
 def run_job(settings: Settings, job: dict) -> None:
     with db.connect(settings.db_path) as conn:
         def progress(text: str) -> None:
-            conn.execute("UPDATE jobs SET progress = ? WHERE id = ?", (text, job["id"]))
+            n = conn.execute("UPDATE jobs SET progress = ? WHERE id = ? AND status = 'running'",
+                             (text, job["id"])).rowcount
             conn.commit()
+            if not n:
+                raise Cancelled
 
         started = db.now()
         try:
             records = scanner.run(conn, job["domain"], settings, progress)
+            progress("saving")
+        except Cancelled:
+            log.info("scan %s cancelled", job["domain"])
+            return
         except Exception as exc:
             log.exception("scan %s failed", job["domain"])
             conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
@@ -111,14 +139,16 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     last_refresh = 0.0
     while True:
         with db.connect(settings.db_path) as conn:
+            live = admin.effective(settings, conn)   # the admin page's tuning applies without a restart
             if time.time() - last_refresh > 3600:
                 last_refresh = time.time()
                 forget_clients(conn)
-                if n := enqueue_due(conn, settings.refresh_days):
+                admin.prune(conn, live.analytics_days)
+                if n := enqueue_due(conn, live.refresh_days):
                     log.info("refresh: %d domains queued", n)
-            job = claim(conn)
+            job = None if live.scans_paused else claim(conn)
         if job:
-            run_job(settings, job)
+            run_job(live, job)
         elif once:
             return
         else:

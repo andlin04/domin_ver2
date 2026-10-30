@@ -4,23 +4,27 @@ Run: uvicorn --factory domin.web:create_app --port 8002 (behind nginx; X-Real-IP
 from __future__ import annotations
 
 import csv
+import hmac
 import io
 import ipaddress
+import logging
 import time
 from collections import defaultdict, deque
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi import Path as PathParam
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-from . import db, jobs, tools
+from . import admin, db, jobs, tools
 from .config import Settings
 from .validate import normalize_domain
 
@@ -31,6 +35,8 @@ CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
 MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
 PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
 QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
+COOKIE = "__Host-domin_admin"   # __Host-: Secure, path /, no Domain; the site must be served over HTTPS
+log = logging.getLogger("domin.web")
 
 
 class ScanIn(BaseModel):
@@ -65,14 +71,18 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return peer[:64]
         return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
 
+    def live() -> Settings:
+        with conn() as c:
+            return admin.effective(settings, c)
+
     def limit_lookups(request: Request) -> None:
         """In-process sliding window for the live lookups (outbound RDAP/DNS on each call)."""
-        now, who = time.monotonic(), client_ip(request)
+        now, who, per_minute = time.monotonic(), client_ip(request), live().lookups_per_minute
         q = lookups[who]
         while q and q[0] < now - 60:
             q.popleft()
-        if len(q) >= settings.lookups_per_minute:
-            raise HTTPException(429, f"At most {settings.lookups_per_minute} lookups per minute")
+        if len(q) >= per_minute:
+            raise HTTPException(429, f"At most {per_minute} lookups per minute")
         q.append(now)
         if len(lookups) > 10000:   # bound memory: drop clients with no recent calls
             for k in [k for k, v in lookups.items() if not v or v[-1] < now - 60]:
@@ -87,6 +97,31 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             raise HTTPException(404, f"{name} has not been scanned")
         return d
 
+    def visit_kind(request: Request, status: int) -> tuple[str, str] | None:
+        """(kind, domain) for the visit statistics; None = not counted (assets, polling, health, admin)."""
+        path = request.url.path
+        if request.method == "POST" and path == "/api/scan":
+            return ("scan" if status == 200 else "limited" if status == 429 else None), ""
+        if request.method != "GET" or status != 200:
+            return None
+        if settings.admin_path and path.startswith(settings.admin_path):
+            return None
+        parts = path.strip("/").split("/")
+        if path.startswith("/scans/") and path.endswith(".csv"):
+            return "download", ""
+        if path.startswith(("/api/rdap/", "/api/email/")):
+            return "tool", parts[-1]
+        if path.startswith(("/api/", "/static/", "/healthz")):
+            return None
+        return "page", parts[1] if parts[0] == "d" and len(parts) > 1 else ""
+
+    def record_visit(request: Request, kind: str, domain: str, scan_domain: str | None) -> None:
+        ref = urlsplit(request.headers.get("referer", "")).hostname or ""
+        with conn() as c:
+            admin.record(c, kind=kind, path=request.url.path, domain=scan_domain or domain, ip=client_ip(request),
+                         agent=request.headers.get("user-agent", "")[:300],
+                         ref="" if ref == request.url.hostname else ref)
+
     @app.middleware("http")
     async def headers(request: Request, call_next):
         resp = await call_next(request)
@@ -94,6 +129,12 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                              "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY"})
         if request.url.path.startswith("/static/"):
             resp.headers["Cache-Control"] = "no-cache"   # revalidate (ETag) so a deploy shows at once
+        kind = visit_kind(request, resp.status_code)
+        if kind and kind[0]:
+            try:   # statistics never break a page
+                await run_in_threadpool(record_visit, request, *kind, getattr(request.state, "domain", None))
+            except Exception:
+                log.exception("visit not recorded")
         return resp
 
     @app.exception_handler(HTTPException)
@@ -191,15 +232,17 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         name = normalize_domain(body.domain)
         if not name:
             raise HTTPException(422, "Not a valid domain name")
-        who = client_ip(request)
+        request.state.domain = name
         with conn() as c:
+            s = admin.effective(settings, c)
+            who = admin.client_key(c, client_ip(request))
             last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
                              (name,)).fetchone()[0]
-            if last and last[:10] == db.now()[:10]:
+            if s.once_per_day and last and last[:10] == db.now()[:10]:
                 raise HTTPException(429, f"{name} was already scanned today; the next scan can run tomorrow")
-            if jobs.scans_by_client(c, who) >= settings.scans_per_hour:
-                raise HTTPException(429, f"At most {settings.scans_per_hour} scans per hour")
-            if jobs.queued(c) >= settings.queue_max:
+            if jobs.scans_by_client(c, who) >= s.scans_per_hour:
+                raise HTTPException(429, f"At most {s.scans_per_hour} scans per hour")
+            if jobs.queued(c) >= s.queue_max:
                 raise HTTPException(503, "The scan queue is full; try again later")
             return jobs.enqueue(c, name, client=who)
 
@@ -231,12 +274,13 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return {"scan": s, "records": db.records(c, scan_id)}
 
     @app.get("/scans/{scan_id}.csv")
-    def scan_csv(scan_id: PathId):
+    def scan_csv(scan_id: PathId, request: Request):
         with conn() as c:
             s = db.scan(c, scan_id)
             if not s:
                 raise HTTPException(404, "No such scan")
             rows = db.records(c, scan_id)
+        request.state.domain = s["domain"]
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=list(db.RECORD_FIELDS))
         w.writeheader()
@@ -264,4 +308,111 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         limit_lookups(request)
         return tools.email_security(d)
 
+    if settings.admin_path:
+        add_admin(app, settings, conn, page, client_ip)
     return app
+
+
+NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
+           "gone": "That job had already finished."}
+
+
+def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
+    """The hidden admin page: one password (python -m domin admin-password), a session cookie, a CSRF token per
+    session on every form. Not linked from the site; robots and caches are told to stay away."""
+    base = settings.admin_path
+    private = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
+
+    async def form(request: Request) -> dict[str, str]:
+        body = await request.body()
+        if len(body) > 10_000:
+            raise HTTPException(413, "Form too large")
+        return {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace")).items()}
+
+    def signed_in(request: Request, c, data: dict[str, str] | None = None) -> dict | None:
+        """The session, or None; with form data, the form's CSRF token must match the session's."""
+        s = admin.session(c, request.cookies.get(COOKIE))
+        if s and data is not None and not hmac.compare_digest(data.get("csrf", ""), s["csrf"]):
+            raise HTTPException(403, "The form expired; reload the page and try again")
+        return s
+
+    def back(notice: str = "") -> RedirectResponse:
+        return RedirectResponse(f"{base}?ok={notice}" if notice else base, status_code=303, headers=private)
+
+    def dashboard(request: Request, c, s: dict, error: str = "", status: int = 200) -> HTMLResponse:
+        live = admin.effective(settings, c)
+        resp = page(request, "admin.html", status, base=base, csrf=s["csrf"], stats=admin.report(c),
+                    jobs=jobs.admin_list(c), tunable=[(k, *v, getattr(live, k)) for k, v in admin.TUNABLE.items()],
+                    notice=NOTICES.get(request.query_params.get("ok", ""), ""), error=error)
+        resp.headers.update(private)
+        return resp
+
+    @app.get(base, response_class=HTMLResponse, include_in_schema=False)
+    def admin_page(request: Request):
+        with conn() as c:
+            s = signed_in(request, c)
+            if s:
+                return dashboard(request, c, s)
+            has_password = admin.kv_get(c, "admin_password") is not None
+        resp = page(request, "login.html", base=base, has_password=has_password, error="")
+        resp.headers.update(private)
+        return resp
+
+    @app.post(base + "/login", include_in_schema=False)
+    async def admin_login(request: Request):
+        data = await form(request)
+        with conn() as c:
+            who = admin.client_key(c, client_ip(request))
+            if admin.login_blocked(c, who):
+                error, status = "Too many failed sign-ins; wait 15 minutes.", 429
+            elif admin.check_password(c, data.get("password", "")):
+                resp = back()
+                resp.set_cookie(COOKIE, admin.new_session(c), max_age=admin.SESSION_HOURS * 3600, path="/",
+                                secure=True, httponly=True, samesite="strict")
+                return resp
+            else:
+                admin.login_failed(c, who)
+                error, status = "Wrong password.", 401
+            has_password = admin.kv_get(c, "admin_password") is not None
+        resp = page(request, "login.html", status, base=base, has_password=has_password, error=error)
+        resp.headers.update(private)
+        return resp
+
+    @app.post(base + "/logout", include_in_schema=False)
+    async def admin_logout(request: Request):
+        data = await form(request)
+        with conn() as c:
+            if signed_in(request, c, data):
+                admin.end_session(c, request.cookies.get(COOKIE))
+        resp = back()
+        resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+        return resp
+
+    @app.post(base + "/tune", include_in_schema=False)
+    async def admin_tune(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s = signed_in(request, c, data)
+            if not s:
+                return back()
+            try:
+                admin.save_tuning(c, data)
+            except ValueError as exc:
+                return dashboard(request, c, s, error=str(exc), status=422)
+        return back("tuned")
+
+    @app.post(base + "/jobs/{job_id}/{action}", include_in_schema=False)
+    async def admin_job(request: Request, job_id: PathId, action: str):
+        data = await form(request)
+        with conn() as c:
+            if not signed_in(request, c, data):
+                return back()
+            if action == "cancel":
+                return back("cancelled" if jobs.cancel(c, job_id) else "gone")
+            if action == "retry":
+                job = jobs.get(c, job_id)
+                if not job:
+                    raise HTTPException(404, "No such job")
+                jobs.enqueue(c, job["domain"], client="admin")
+                return back("retried")
+        raise HTTPException(404, "Unknown action")

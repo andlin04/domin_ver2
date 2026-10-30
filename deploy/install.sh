@@ -57,6 +57,9 @@ if [ ! -f /etc/domin.env ]; then
       "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
+# Hidden admin page at a random path, kept across updates; `python -m domin admin-password` sets its password
+grep -q '^DOMIN_ADMIN_PATH=' /etc/domin.env || \
+  echo "DOMIN_ADMIN_PATH=/admin-$(python3 -c 'import secrets; print(secrets.token_hex(8))')" >> /etc/domin.env
 
 if [ -n "$HISTORY" ]; then
   if [ -f "$DATA/domin.db" ] && [ "$REPLACE" = 0 ]; then
@@ -69,6 +72,17 @@ if [ -n "$HISTORY" ]; then
     echo "history: $(sqlite3 "$DATA/domin.db" 'SELECT COUNT(*) FROM scans') scans loaded"
   fi
 fi
+
+# Visitor countries for the admin page: DB-IP "IP to Country Lite" (CC BY 4.0, monthly; re-run to refresh).
+# Only the country code of a visit is stored; skipped when the download fails.
+GEO=$(mktemp --suffix=.csv.gz)
+if curl -fsS -o "$GEO" "https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).csv.gz"; then
+  chmod 644 "$GEO"
+  ( set -a; . /etc/domin.env; cd "$APP/app"; runuser -u domin -- "$APP/venv/bin/python" -m domin geoip "$GEO" )
+else
+  echo "geoip: download failed, admin statistics show no countries"
+fi
+rm -f "$GEO"
 
 unit() {  # name, description, command
   cat > "/etc/systemd/system/$1.service" <<EOF
@@ -167,3 +181,5 @@ fi
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
 echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
   "HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/)"
+echo "admin page: https://$DOMAIN$(sed -n 's/^DOMIN_ADMIN_PATH=//p' /etc/domin.env) (HTTPS only; set its password:" \
+  "cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin admin-password)"

@@ -6,6 +6,7 @@ Domain inventory: host names, addresses and hosting providers per domain, and ho
 - **Domain page:** footprint over time, host names added/removed per scan, countries and providers, changes since
   the previous scan, all records (filter, sort, CSV), compare any two scans.
 - **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
+- **Admin page:** usage statistics without stored IP addresses, scan job control, live tuning (see below).
 - **Scans:** certificate transparency (crt.sh) plus common names, MX and NS; DNS A/AAAA; RDAP for ASN, prefix,
   network name and country. amass is used when installed. One scan per domain per day, 10 per hour per visitor.
 
@@ -32,6 +33,25 @@ bash deploy/install.sh --domain domin.example.com --email you@example.com --hist
 
 **Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (keeps the
 database and certificate). Options: see the top of [deploy/install.sh](deploy/install.sh).
+
+## Admin page
+
+Hidden, not linked, HTTPS only. The installer picks a random path (`DOMIN_ADMIN_PATH` in /etc/domin.env) and prints
+it. Set the password once:
+
+```bash
+cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin admin-password
+```
+
+- **Usage:** visitors, page views, visit length and pages in order, top pages, domains, CSV downloads, tools,
+  referrers and countries, scans started and refused.
+- **Privacy:** no IP addresses are stored. A visitor is a hash of address + browser with a salt that is replaced
+  every day; scan rate limits use a salted hash too. Bots are counted apart. Statistics are kept 180 days.
+- **Countries:** from [DB-IP](https://db-ip.com) IP to Country Lite (CC BY 4.0), downloaded by the installer;
+  re-run the installer monthly to refresh it.
+- **Jobs:** cancel queued scans, stop a running one, retry failed ones.
+- **Tuning** (applies at once, no restart): pause the worker, once-per-day limit, scans per hour, queue length,
+  lookups per minute, max host names per scan, scheduled re-scans, statistics retention.
 
 ## Run locally
 
