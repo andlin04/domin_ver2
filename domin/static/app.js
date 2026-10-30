@@ -121,12 +121,15 @@ function chartDefaults() {
   Chart.defaults.maintainAspectRatio = false;
   return true;
 }
-function hbar(id, rows, label, onClick) {
+function hbar(id, all, label, onClick) {
   const el = document.getElementById(id);
-  if (!el || !rows?.length) { if (el) el.parentElement.innerHTML = '<p class="muted">No data</p>'; return; }
+  const rows = (all || []).filter((r) => r.label !== "Other");   // a long tail folded into one bar dwarfs the top ones
+  if (!el || !rows.length) { if (el) el.parentElement.innerHTML = '<p class="muted">No data</p>'; return; }
+  const other = (all || []).find((r) => r.label === "Other");
+  if (other) el.closest(".card").querySelector("h2 small")?.append(` · ${other.ips.toLocaleString()} more in the rest`);
   new Chart(el, {
     type: "bar",
-    data: { labels: rows.map((r) => r.label), datasets: [{ label, data: rows.map((r) => r.ips), backgroundColor: css("--accent"), borderRadius: 6 }] },
+    data: { labels: rows.map((r) => r.label), datasets: [{ label, data: rows.map((r) => r.ips), backgroundColor: css("--accent"), borderRadius: 6, maxBarThickness: 28 }] },
     options: { indexAxis: "y", plugins: { legend: { display: false },
                tooltip: { callbacks: { afterLabel: (c) => rows[c.dataIndex].domains ? `${rows[c.dataIndex].domains} domains` : "" } } },
                scales: { x: { beginAtZero: true, grid: { display: false } }, y: { grid: { display: false } } }, onClick },
@@ -158,7 +161,7 @@ function domainCharts() {
   const d = pageData();
   const h = d.history;
   const series = [["hosts", "Host names", css("--accent")], ["resolved", "Resolving", css("--accent-2")],
-                  ["ips", "Addresses", "#f59e0b"], ["asns", "ASNs", "#8b5cf6"]];
+                  ["ips", "Addresses", "#f59e0b"], ["asns", "ASNs", "#ec4899"]];
   const current = h.findIndex((s) => s.id === d.current);
   new Chart($("#history"), {
     type: "line",

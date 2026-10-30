@@ -122,8 +122,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         q = f"SELECT scan_id, host FROM records WHERE scan_id IN ({','.join('?' * len(ids))})"
         for r in c.execute(q, ids):
             sets[r["scan_id"]].add(r["host"])
-        return [{"id": b["id"], "started": b["started"], "added": len(sets[b["id"]] - sets[a["id"]]),
-                 "removed": len(sets[a["id"]] - sets[b["id"]])} for a, b in zip(scans, scans[1:], strict=False)]
+        out = [{"id": b["id"], "started": b["started"], "added": len(sets[b["id"]] - sets[a["id"]]),
+                "removed": len(sets[a["id"]] - sets[b["id"]])} for a, b in zip(scans, scans[1:], strict=False)]
+        return out if any(r["added"] or r["removed"] for r in out) else []   # an empty chart says nothing
 
     @app.get("/d/{name}/compare", response_class=HTMLResponse)
     def compare(request: Request, name: str, a: int, b: int):

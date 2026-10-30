@@ -53,3 +53,13 @@ def test_web(settings):
         assert h.get("/tools").status_code == 200
         assert h.get(f"/scans/{hist[0]['id']}.csv").text.startswith("host,ip")
         assert h.post("/api/scan", json={"domain": "not a domain"}).status_code == 422
+
+
+def test_churn_chart_only_when_host_names_changed(settings):
+    with db.connect(settings.db_path) as c:
+        for day in ("2025-03-01", "2025-03-02"):
+            db.save_scan(c, "stable.se", f"{day}T00:00:00", "import", [{"host": "www.stable.se", "ip": "192.0.2.5",
+                         "asn": "", "prefix": "", "netname": "", "descr": "", "country": ""}])
+    with TestClient(create_app(settings)) as h:
+        assert 'id="churn"' not in h.get("/d/stable.se").text
+        assert 'id="churn"' in h.get("/d/example.se").text

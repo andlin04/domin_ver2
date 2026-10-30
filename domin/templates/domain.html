@@ -3,7 +3,7 @@
 {% block page %}domain{% endblock %}
 {% macro delta(cur, prev, key) -%}
   {%- if prev -%}{%- set d = cur[key] - prev[key] -%}
-    {%- if d > 0 %}<em class="up">+{{ d }}</em>{% elif d < 0 %}<em class="down">{{ d }}</em>{% else %}<em class="flat">±0</em>{% endif -%}
+    {%- if d > 0 %}<em class="up">+{{ d }}</em>{% elif d < 0 %}<em class="down">{{ d }}</em>{% else %}<em class="muted">±0</em>{% endif -%}
   {%- endif -%}
 {%- endmacro %}
 {% block content %}
