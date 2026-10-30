@@ -22,7 +22,7 @@ import dns.resolver
 import httpx
 import pycountry
 
-from . import db
+from . import db, tools
 from .config import Settings
 from .validate import is_under, normalize_domain
 
@@ -56,10 +56,9 @@ def resolve(host: str, resolver: dns.resolver.Resolver | None = None) -> list[st
 
 def from_crtsh(domain: str, client: httpx.Client) -> set[str]:
     try:
-        r = client.get("https://crt.sh/", params={"q": f"%.{domain}", "output": "json"}, timeout=90)
-        r.raise_for_status()
-        names = [n for e in r.json() for n in str(e.get("name_value", "")).splitlines()]
-    except (httpx.HTTPError, ValueError) as exc:
+        got = tools.get_json(client, "https://crt.sh/", timeout=90, params={"q": f"%.{domain}", "output": "json"})
+        names = [n for e in (got[1] if got else []) for n in str(e.get("name_value", "")).splitlines()]
+    except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # also JSON of an unexpected shape
         log.warning("crt.sh %s: %s", domain, exc)
         return set()
     # normalize_domain strips a leading www.; keep the www host itself as a candidate too
@@ -150,7 +149,7 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         enricher: Enricher | None = None) -> list[dict]:
     resolver = resolver or _resolver()
     own_client = client is None
-    client = client or httpx.Client(headers={"User-Agent": "domin/2 (domain inventory)"}, follow_redirects=True)
+    client = client or tools.http_client()
     try:
         progress("discovering host names")
         found = {domain} | from_crtsh(domain, client) | from_dns(domain, resolver) | from_amass(domain, settings.amass)

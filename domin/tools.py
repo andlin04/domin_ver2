@@ -1,22 +1,58 @@
 """Single-domain lookups: registration data (RDAP) and e-mail security records (MX, SPF, DMARC, MTA-STS, DNSSEC)."""
 from __future__ import annotations
 
+import ipaddress
+import json
 import re
+import socket
+import time
 
 import dns.exception
 import dns.resolver
 import httpx
 
 SPF_LOOKUPS = re.compile(r"^(?:[+\-~?]?)(include:|a\b|a:|mx\b|mx:|ptr|exists:|redirect=)", re.I)
+MAX_BODY = 64 * 1024 * 1024   # bytes; crt.sh answers for big domains are large, but not unbounded
+
+
+def public_only(request: httpx.Request) -> None:
+    """Request hook (also runs on each redirect): https to public addresses only, never internal or metadata ones."""
+    if request.url.scheme != "https":
+        raise httpx.RequestError(f"refused: {request.url.scheme} URL", request=request)
+    try:
+        infos = socket.getaddrinfo(request.url.host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return  # the connect fails the same way
+    if any(not ipaddress.ip_address(str(i[4][0]).split("%")[0]).is_global for i in infos):
+        raise httpx.RequestError(f"refused: {request.url.host} is not a public address", request=request)
+
+
+def http_client() -> httpx.Client:
+    return httpx.Client(headers={"User-Agent": "domin/2 (domain inventory)"}, follow_redirects=True, max_redirects=5,
+                        timeout=20, event_hooks={"request": [public_only]})
+
+
+def get_json(client: httpx.Client, url: str, timeout: float, **kw) -> tuple[str, object] | None:
+    """GET -> (final URL, parsed JSON), None on 404. Refuses bodies over MAX_BODY and transfers past the timeout."""
+    deadline = time.monotonic() + timeout
+    with client.stream("GET", url, timeout=timeout, **kw) as r:
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        body = bytearray()
+        for chunk in r.iter_bytes():
+            body += chunk
+            if len(body) > MAX_BODY or time.monotonic() > deadline:
+                raise httpx.RequestError("response too large or too slow", request=r.request)
+    return str(r.url), json.loads(body)
 
 
 def rdap(domain: str, client: httpx.Client) -> dict:
     """Registration data via rdap.org, which redirects to the registry's RDAP server (the successor of whois)."""
-    r = client.get(f"https://rdap.org/domain/{domain}", timeout=20)
-    if r.status_code == 404:
+    got = get_json(client, f"https://rdap.org/domain/{domain}", timeout=20)
+    if got is None:
         return {"found": False}
-    r.raise_for_status()
-    data = r.json()
+    source, data = got
     events = {e.get("eventAction"): e.get("eventDate", "")[:10] for e in data.get("events", [])}
     entities = []
     for ent in data.get("entities", []):
@@ -31,7 +67,7 @@ def rdap(domain: str, client: httpx.Client) -> dict:
             "expires": events.get("expiration", ""),
             "nameservers": sorted(n.get("ldhName", "").lower() for n in data.get("nameservers", [])),
             "dnssec": bool((data.get("secureDNS") or {}).get("delegationSigned")), "entities": entities,
-            "source": str(r.url)}
+            "source": source}
 
 
 def _txt(resolver: dns.resolver.Resolver, name: str) -> list[str]:

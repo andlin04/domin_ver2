@@ -14,6 +14,8 @@ class Settings:
     max_hosts: int             # cap on candidate host names per scan
     scans_per_hour: int        # per client IP, for POST /api/scan
     amass: str                 # path to amass, used for passive discovery when it exists
+    queue_max: int = 50        # POST /api/scan refuses new jobs while this many are queued (all clients)
+    lookups_per_minute: int = 30   # per client IP, for /api/rdap and /api/email
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -25,4 +27,6 @@ class Settings:
             max_hosts=int(env("DOMIN_MAX_HOSTS", "3000")),
             scans_per_hour=int(env("DOMIN_SCANS_PER_HOUR", "10")),
             amass=env("DOMIN_AMASS", "/usr/local/bin/amass"),
+            queue_max=int(env("DOMIN_QUEUE_MAX", "50")),
+            lookups_per_minute=int(env("DOMIN_LOOKUPS_PER_MINUTE", "30")),
         )

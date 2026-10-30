@@ -5,11 +5,16 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
+import time
+from collections import defaultdict, deque
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,10 +28,18 @@ HERE = Path(__file__).parent
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
+MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
+PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
+QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
 
 
 class ScanIn(BaseModel):
     domain: str
+
+
+def csv_safe(value):
+    """Spreadsheets run cells that start with = + - @ as formulas; RDAP text is third-party input."""
+    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
 
 
 def create_app(settings: Settings | None = None, http: httpx.Client | None = None) -> FastAPI:
@@ -35,16 +48,35 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     app = FastAPI(title="domin", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
-    client = http or httpx.Client(headers={"User-Agent": "domin/2 (domain inventory)"}, follow_redirects=True)
+    client = http or tools.http_client()
+    lookups: dict[str, deque[float]] = defaultdict(deque)
 
     def conn():
         return db.connect(settings.db_path)
 
     def client_ip(request: Request) -> str:
+        """Peer address (X-Real-IP when nginx on this host proxies); an IPv6 client counts as its /64."""
         peer = request.client.host if request.client else ""
         if peer in ("127.0.0.1", "::1"):
-            return request.headers.get("x-real-ip", peer)
-        return peer
+            peer = request.headers.get("x-real-ip", peer).strip()
+        try:
+            ip = ipaddress.ip_address(peer)
+        except ValueError:
+            return peer[:64]
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
+
+    def limit_lookups(request: Request) -> None:
+        """In-process sliding window for the live lookups (outbound RDAP/DNS on each call)."""
+        now, who = time.monotonic(), client_ip(request)
+        q = lookups[who]
+        while q and q[0] < now - 60:
+            q.popleft()
+        if len(q) >= settings.lookups_per_minute:
+            raise HTTPException(429, f"At most {settings.lookups_per_minute} lookups per minute")
+        q.append(now)
+        if len(lookups) > 10000:   # bound memory: drop clients with no recent calls
+            for k in [k for k, v in lookups.items() if not v or v[-1] < now - 60]:
+                del lookups[k]
 
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
         return templates.TemplateResponse(request, name, ctx, status_code=status)
@@ -91,7 +123,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent)
 
     @app.get("/d/{name}", response_class=HTMLResponse)
-    def domain_page(request: Request, name: str, scan: int | None = None):
+    def domain_page(request: Request, name: str, scan: QueryId | None = None):
         with conn() as c:
             d = domain_or_404(c, name)
             hist = db.history(c, name)
@@ -127,7 +159,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return out if any(r["added"] or r["removed"] for r in out) else []   # an empty chart says nothing
 
     @app.get("/d/{name}/compare", response_class=HTMLResponse)
-    def compare(request: Request, name: str, a: int, b: int):
+    def compare(request: Request, name: str, a: QueryId, b: QueryId):
         with conn() as c:
             d = domain_or_404(c, name)
             sa, sb = db.scan(c, a), db.scan(c, b)
@@ -153,6 +185,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     @app.post("/api/scan")
     def api_scan(body: ScanIn, request: Request):
+        # JSON only: a cross-site form or no-cors fetch can't send it without a CORS preflight (which fails)
+        if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+            raise HTTPException(415, "Send the request as application/json")
         name = normalize_domain(body.domain)
         if not name:
             raise HTTPException(422, "Not a valid domain name")
@@ -164,10 +199,12 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(429, f"{name} was already scanned today; the next scan can run tomorrow")
             if jobs.scans_by_client(c, who) >= settings.scans_per_hour:
                 raise HTTPException(429, f"At most {settings.scans_per_hour} scans per hour")
+            if jobs.queued(c) >= settings.queue_max:
+                raise HTTPException(503, "The scan queue is full; try again later")
             return jobs.enqueue(c, name, client=who)
 
     @app.get("/api/jobs/{job_id}")
-    def api_job(job_id: int):
+    def api_job(job_id: PathId):
         with conn() as c:
             job = jobs.get(c, job_id)
         if not job:
@@ -186,7 +223,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return db.history(c, name)
 
     @app.get("/api/scans/{scan_id}")
-    def api_scan_records(scan_id: int):
+    def api_scan_records(scan_id: PathId):
         with conn() as c:
             s = db.scan(c, scan_id)
             if not s:
@@ -194,7 +231,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return {"scan": s, "records": db.records(c, scan_id)}
 
     @app.get("/scans/{scan_id}.csv")
-    def scan_csv(scan_id: int):
+    def scan_csv(scan_id: PathId):
         with conn() as c:
             s = db.scan(c, scan_id)
             if not s:
@@ -203,26 +240,28 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=list(db.RECORD_FIELDS))
         w.writeheader()
-        w.writerows(rows)
+        w.writerows({k: csv_safe(v) for k, v in r.items()} for r in rows)
         fname = f"{s['domain']}_{s['started'][:10]}.csv"
         return Response(buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
     @app.get("/api/rdap/{name}")
-    def api_rdap(name: str):
+    def api_rdap(name: str, request: Request):
         d = normalize_domain(name)
         if not d:
             raise HTTPException(422, "Not a valid domain name")
+        limit_lookups(request)
         try:
             return tools.rdap(d, client)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:   # ValueError: a body that isn't JSON
             raise HTTPException(502, f"RDAP lookup failed: {type(exc).__name__}") from None
 
     @app.get("/api/email/{name}")
-    def api_email(name: str):
+    def api_email(name: str, request: Request):
         d = normalize_domain(name)
         if not d:
             raise HTTPException(422, "Not a valid domain name")
+        limit_lookups(request)
         return tools.email_security(d)
 
     return app

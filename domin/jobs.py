@@ -12,21 +12,39 @@ from .config import Settings
 log = logging.getLogger("domin.worker")
 
 
+def _public(row: sqlite3.Row) -> dict:
+    """A job as shown to anyone: without the requester's address."""
+    job = dict(row)
+    job.pop("client", None)
+    return job
+
+
 def enqueue(conn: sqlite3.Connection, domain: str, client: str = "") -> dict:
     """One open job per domain: asking again returns the job already queued or running."""
     row = conn.execute("SELECT * FROM jobs WHERE domain = ? AND status IN ('queued', 'running')", (domain,)).fetchone()
     if row:
-        return dict(row)
+        return _public(row)
     jid = conn.execute("INSERT INTO jobs (domain, status, created, client) VALUES (?, 'queued', ?, ?)",
                        (domain, db.now(), client)).lastrowid
-    return dict(conn.execute("SELECT * FROM jobs WHERE id = ?", (jid,)).fetchone())
+    return _public(conn.execute("SELECT * FROM jobs WHERE id = ?", (jid,)).fetchone())
+
+
+def queued(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'queued'").fetchone()[0]
+
+
+def forget_clients(conn: sqlite3.Connection, hours: int = 24) -> int:
+    """Privacy: requester addresses are kept only as long as the rate limit needs them."""
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    return conn.execute("UPDATE jobs SET client = '' WHERE client NOT IN ('', 'refresh') AND created < ?",
+                        (since,)).rowcount
 
 
 def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
         return None
-    job = dict(row)
+    job = _public(row)
     if job["status"] == "queued":
         job["ahead"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued', 'running') AND id < ?",
                                     (job_id,)).fetchone()[0]
@@ -34,7 +52,7 @@ def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
 
 
 def recent(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    return [dict(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))]
+    return [_public(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))]
 
 
 def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) -> int:
@@ -64,7 +82,7 @@ def run_job(settings: Settings, job: dict) -> None:
         except Exception as exc:
             log.exception("scan %s failed", job["domain"])
             conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
-                         (db.now(), f"{type(exc).__name__}: {exc}"[:500], job["id"]))
+                         (db.now(), f"internal error ({type(exc).__name__})", job["id"]))   # details: the log
             return
         sid = db.save_scan(conn, job["domain"], started, "scan", records, finished=db.now())
         conn.execute("UPDATE jobs SET status = 'done', finished = ?, scan_id = ?, progress = '' WHERE id = ?",
@@ -95,6 +113,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
         with db.connect(settings.db_path) as conn:
             if time.time() - last_refresh > 3600:
                 last_refresh = time.time()
+                forget_clients(conn)
                 if n := enqueue_due(conn, settings.refresh_days):
                     log.info("refresh: %d domains queued", n)
             job = claim(conn)
