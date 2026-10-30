@@ -36,6 +36,12 @@ def sign_in(h) -> str:
     return re.search(r'name="csrf" value="([^"]+)"', page.text).group(1)
 
 
+def test_asset_links_are_relative(settings):
+    # behind a proxy the app sees http and another Host: absolute links would be blocked as mixed content
+    page = client(settings).get(BASE, headers=UA).text
+    assert 'href="/static/app.css"' in page and 'src="/static/app.js"' in page and "http://" not in page
+
+
 def test_admin_page_is_off_without_a_path(tmp_path):
     s = replace(Settings.from_env(), db_path=tmp_path / "t.db")
     with TestClient(create_app(s)) as h:
