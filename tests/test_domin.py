@@ -209,7 +209,8 @@ def test_amass_runs_passive_then_active(monkeypatch):
     class Done:
         def __init__(self, args):
             calls.append(args)
-            self.stdout = "p.ex.se\n" if "-passive" in args else "p.ex.se\nq.ex.se\n"
+            with open(args[args.index("-o") + 1], "w") as f:
+                f.write("p.ex.se\n" if "-passive" in args else "p.ex.se\nq.ex.se\n")
 
     monkeypatch.setattr(scanner.shutil, "which", lambda exe: "/bin/amass")
     monkeypatch.setattr(scanner.subprocess, "run", lambda args, **kw: Done(args))

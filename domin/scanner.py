@@ -99,12 +99,18 @@ def from_amass(domain: str, amass: str) -> set[str]:
         # amass 3.23: -trf = trusted resolvers file (older versions: -resolvers)
         active = ["-active", "-trf", RESOLVERS, "-dns-qps", "100", "-max-dns-queries", "20000"]
         for mode in (["-passive"], active):
+            # names go to a file as they are found: a run cut off at the time limit keeps what it had
+            names = os.path.join(work, f"names{mode[0]}.txt")
             try:
-                out = subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-timeout", "15"],
-                                     capture_output=True, text=True, timeout=960).stdout
+                subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-o", names, "-timeout", "15"],
+                               capture_output=True, text=True, timeout=960)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                log.warning("amass %s %s: %s", mode[0], domain, exc)
-                continue
+                log.warning("amass %s %s: %s", mode[0], domain, str(exc)[:80])
+            try:
+                with open(names) as f:
+                    out = f.read()
+            except OSError:
+                out = ""
             new = amass_hosts(out, domain) - found
             log.info("amass %s %s: %d names", mode[0], domain, len(new))
             found |= new
