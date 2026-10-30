@@ -82,8 +82,16 @@ def now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+_keep: dict[str, sqlite3.Connection] = {}
+
+
 @contextmanager
 def connect(path: Path) -> Iterator[sqlite3.Connection]:
+    if str(path) not in _keep:   # idle connection for the process: closing the last one checkpoints the WAL and
+        keep = sqlite3.connect(path, check_same_thread=False)   # fsyncs (seconds per request on a slow-sync disk)
+        keep.execute("PRAGMA journal_mode=WAL")
+        keep.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()   # a read opens the WAL index (holds it)
+        _keep[str(path)] = keep
     conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

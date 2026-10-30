@@ -38,6 +38,12 @@ def test_normalize(raw, want):
     assert normalize_domain(raw) == want
 
 
+def test_wal_kept_between_connections(settings):
+    with db.connect(settings.db_path) as c:
+        c.execute("INSERT INTO domains (name, added) VALUES ('wal.example', '2026-10-30')")
+    assert settings.db_path.with_name(settings.db_path.name + "-wal").exists()   # no checkpoint on each close
+
+
 def test_diff():
     d = db.diff([{"host": "a", "ip": "1"}, {"host": "b", "ip": "2"}], [{"host": "b", "ip": "3"}, {"host": "c", "ip": ""}])
     assert d["hosts_added"] == ["c"] and d["hosts_removed"] == ["a"] and d["hosts_changed"] == ["b"]
