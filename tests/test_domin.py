@@ -220,6 +220,28 @@ def test_amass_runs_passive_then_active(monkeypatch):
         assert f.read().split()[0] == "1.1.1.1"
 
 
+def test_email_security_checks_common_dkim_selectors():
+    import dns.resolver
+
+    class Txt:
+        def __init__(self, s):
+            self.strings = [s.encode()]
+
+    zone = {"ex.se": [Txt("v=spf1 -all")], "_dmarc.ex.se": [Txt("v=DMARC1; p=reject; rua=mailto:d@ex.se")],
+            "selector1._domainkey.ex.se": [Txt("v=DKIM1; k=rsa; p=MIIB")]}
+
+    class Fake:
+        def resolve(self, name, rtype):
+            if rtype == "TXT" and name in zone:
+                return zone[name]
+            raise dns.resolver.NXDOMAIN
+
+    r = tools.email_security("ex.se", Fake())
+    assert r["dkim"]["status"] == "ok" and r["dkim"]["record"] == "selector1"
+    zone.pop("selector1._domainkey.ex.se")
+    assert tools.email_security("ex.se", Fake())["dkim"]["status"] == "warn"
+
+
 def test_names_resolve_over_the_old_resolver_set():
     r = scanner._resolver()
     assert len(r.nameservers) == 8 and r.rotate and r.lifetime == 15

@@ -205,8 +205,8 @@ function renderRdap(box, r) {
     <dt>Source</dt><dd class="muted mono">${esc(r.source)}</dd></dl>`;
 }
 function renderEmail(box, scoreEl, r) {
-  const names = { mx: "MX (mail servers)", spf: "SPF", dmarc: "DMARC", mta_sts: "MTA-STS", dnssec: "DNSSEC" };
-  scoreEl.textContent = `score ${r.score}/10`;
+  const names = { mx: "MX (mail servers)", spf: "SPF", dmarc: "DMARC", dkim: "DKIM", mta_sts: "MTA-STS", dnssec: "DNSSEC" };
+  scoreEl.textContent = `score ${r.score}/12`;
   box.innerHTML = '<div class="checks">' + Object.entries(names).map(([k, label]) => {
     const c = r[k];
     const detail = k === "mx" ? c.hosts.map(esc).join(", ") : esc(c.record);

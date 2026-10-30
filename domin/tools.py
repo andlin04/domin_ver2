@@ -77,6 +77,9 @@ def _txt(resolver: dns.resolver.Resolver, name: str) -> list[str]:
         return []
 
 
+DKIM_SELECTORS = ("default", "dkim", "mail", "selector1", "selector2", "google", "k1")
+
+
 def _tags(record: str) -> dict:
     return {k.strip().lower(): v.strip() for k, _, v in (p.partition("=") for p in record.split(";")) if k.strip()}
 
@@ -142,6 +145,13 @@ def email_security(domain: str, resolver: dns.resolver.Resolver | None = None) -
             notes.append("No aggregate reports (rua) requested")
     out["dmarc"] = {"status": status, "record": dmarc[0] if dmarc else "", "notes": notes}
 
+    # selectors can't be listed; try the old version's common ones
+    dkim = [s for s in DKIM_SELECTORS if any("v=dkim1" in t.lower() or "p=" in t.lower()
+                                              for t in _txt(resolver, f"{s}._domainkey.{domain}"))]
+    out["dkim"] = {"status": "ok" if dkim else "warn", "record": ", ".join(dkim),
+                   "notes": [f"Key found for selector {', '.join(dkim)}"] if dkim else
+                   [f"No key under the common selectors ({', '.join(DKIM_SELECTORS)}); others may exist"]}
+
     sts = [t for t in _txt(resolver, f"_mta-sts.{domain}") if t.lower().startswith("v=stsv1")]
     out["mta_sts"] = {"status": "ok" if sts else "warn", "record": sts[0] if sts else "",
                       "notes": [] if sts else ["No MTA-STS: TLS for incoming mail is not enforced"]}
@@ -153,5 +163,5 @@ def email_security(domain: str, resolver: dns.resolver.Resolver | None = None) -
     out["dnssec"] = {"status": "ok" if signed else "warn", "record": "",
                      "notes": ["Signed (DS record at the parent)"] if signed else ["Not signed"]}
     order = {"ok": 0, "warn": 1, "bad": 2}
-    out["score"] = sum(2 - order[out[k]["status"]] for k in ("mx", "spf", "dmarc", "mta_sts", "dnssec"))
+    out["score"] = sum(2 - order[out[k]["status"]] for k in ("mx", "spf", "dmarc", "dkim", "mta_sts", "dnssec"))
     return out
