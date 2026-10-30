@@ -10,14 +10,19 @@
 #                       the server has no database yet, unless --replace-history (the old one is kept as .bak)
 #   --no-worker         install the scan worker but don't start it (pages and tools only, no scans)
 #   --firewall          enable ufw with SSH (22), HTTP and HTTPS only
+#   --alias A           extra host name for the same site (e.g. www.example.com)
+#   --cloudflare        site is proxied by Cloudflare: take the client address from CF-Connecting-IP (Cloudflare's
+#                       published ranges only), so rate limits apply per visitor; HTTPS can then stay at Cloudflare
 #
 # Re-running updates the code and keeps the database, /etc/domin.env and the TLS certificate.
 set -euo pipefail
 
-DOMAIN= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0
+DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN=$2; shift ;;
+    --alias) ALIAS=$2; shift ;;
+    --cloudflare) CLOUDFLARE=1 ;;
     --email) EMAIL=$2; shift ;;
     --history) HISTORY=$2; shift ;;
     --replace-history) REPLACE=1 ;;
@@ -30,6 +35,7 @@ done
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 [ -n "$DOMAIN" ] || { echo "--domain is required"; exit 2; }
 [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "bad --domain"; exit 2; }
+[[ "$ALIAS" =~ ^[A-Za-z0-9.-]*$ ]] || { echo "bad --alias"; exit 2; }
 [ -z "$HISTORY" ] || [ -f "$HISTORY" ] || { echo "no such file: $HISTORY"; exit 2; }
 SRC=$(cd "$(dirname "$0")/.." && pwd)
 APP=/opt/domin DATA=/var/lib/domin
@@ -126,7 +132,7 @@ server {   # unknown Host headers: close the connection (the app has no host che
 server {
     listen 80;
     listen [::]:80;
-    server_name $DOMAIN;
+    server_name $DOMAIN $ALIAS;
     server_tokens off;
     client_max_body_size 4k;   # the only request body is a domain name in JSON
     large_client_header_buffers 4 8k;
@@ -152,6 +158,16 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_read_timeout 40s;
 limit_req_status 429;
 EOF
+if [ "$CLOUDFLARE" = 1 ]; then   # $remote_addr (rate limits, X-Real-IP) becomes the visitor, not Cloudflare's edge
+  CF=$(curl -fsS https://www.cloudflare.com/ips-v4; echo; curl -fsS https://www.cloudflare.com/ips-v6)
+  { echo "# Cloudflare ranges from cloudflare.com/ips-v4 and ips-v6 (install.sh --cloudflare; re-run to refresh)"
+    grep -E '^[0-9a-f:.]+/[0-9]+$' <<<"$CF" | sed 's/.*/set_real_ip_from &;/'
+    echo "real_ip_header CF-Connecting-IP;"; } > /etc/nginx/conf.d/domin-cloudflare.conf
+  [ "$(grep -c '^set_real_ip_from' /etc/nginx/conf.d/domin-cloudflare.conf)" -gt 5 ] || \
+    { echo "cloudflare: range download failed"; rm -f /etc/nginx/conf.d/domin-cloudflare.conf; exit 1; }
+else
+  rm -f /etc/nginx/conf.d/domin-cloudflare.conf
+fi
 ln -sf /etc/nginx/sites-available/domin /etc/nginx/sites-enabled/domin
 rm -f /etc/nginx/sites-enabled/default
 nginx -t -q
@@ -165,7 +181,7 @@ systemctl reload nginx
 
 if [ -n "$EMAIL" ]; then
   # certbot adds the 443 server, the HTTP -> HTTPS redirect and renewal (systemd timer)
-  certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --redirect --non-interactive -q
+  certbot --nginx -d "$DOMAIN" ${ALIAS:+-d "$ALIAS"} -m "$EMAIL" --agree-tos --redirect --non-interactive -q
   grep -q Strict-Transport-Security /etc/nginx/sites-available/domin || \
     sed -i '0,/listen 443 ssl;/s//listen 443 ssl;\n    add_header Strict-Transport-Security "max-age=31536000" always;/' \
       /etc/nginx/sites-available/domin

@@ -31,6 +31,9 @@ scp domin.db root@your-vps:/root/
 bash deploy/install.sh --domain domin.example.com --email you@example.com --history /root/domin.db
 ```
 
+**Behind Cloudflare** (proxied DNS, Cloudflare does HTTPS): leave out `--email`, add `--cloudflare` so rate limits
+see the visitor's address, e.g. `--domain example.com --alias www.example.com --cloudflare`.
+
 **Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (keeps the
 database and certificate). Options: see the top of [deploy/install.sh](deploy/install.sh).
 
