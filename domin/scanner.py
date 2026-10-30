@@ -96,7 +96,8 @@ def from_amass(domain: str, amass: str) -> set[str]:
         return set()
     found: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="amass-") as work:
-        active = ["-active", "-resolvers", RESOLVERS, "-dns-qps", "100", "-max-dns-queries", "20000"]
+        # amass 3.23: -trf = trusted resolvers file (older versions: -resolvers)
+        active = ["-active", "-trf", RESOLVERS, "-dns-qps", "100", "-max-dns-queries", "20000"]
         for mode in (["-passive"], active):
             try:
                 out = subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-timeout", "15"],
