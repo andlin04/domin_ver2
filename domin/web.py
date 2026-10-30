@@ -242,6 +242,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(429, f"{name} was already scanned today; the next scan can run tomorrow")
             if jobs.scans_by_client(c, who) >= s.scans_per_hour:
                 raise HTTPException(429, f"At most {s.scans_per_hour} scans per hour")
+            if jobs.scans_by_client(c, who, minutes=24 * 60) >= s.scans_per_day:
+                raise HTTPException(429, f"At most {s.scans_per_day} scans per day")
             if jobs.queued(c) >= s.queue_max:
                 raise HTTPException(503, "The scan queue is full; try again later")
             return jobs.enqueue(c, name, client=who)

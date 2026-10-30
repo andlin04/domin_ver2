@@ -14,7 +14,11 @@ class Settings:
     max_hosts: int             # cap on candidate host names per scan
     scans_per_hour: int        # per client IP, for POST /api/scan
     amass: str                 # path to amass, used for passive discovery when it exists
-    queue_max: int = 50        # POST /api/scan refuses new jobs while this many are queued (all clients)
+    queue_max: int = 50        # POST /api/scan refuses new jobs while this many visitor jobs are queued
+    scans_per_day: int = 200   # per client IP, for POST /api/scan
+    user_workers: int = 3      # parallel scans for visitors' jobs
+    refresh_workers: int = 2   # parallel scans for scheduled refreshes (never take visitors' jobs)
+    scan_timeout_hours: int = 3    # a longer scan fails at its next progress step
     lookups_per_minute: int = 30   # per client IP, for /api/rdap and /api/email
     once_per_day: bool = True      # POST /api/scan: each domain at most once per day
     scans_paused: bool = False     # the worker leaves queued jobs waiting
@@ -32,6 +36,10 @@ class Settings:
             scans_per_hour=int(env("DOMIN_SCANS_PER_HOUR", "10")),
             amass=env("DOMIN_AMASS", "/usr/local/bin/amass"),
             queue_max=int(env("DOMIN_QUEUE_MAX", "50")),
+            scans_per_day=int(env("DOMIN_SCANS_PER_DAY", "200")),
+            user_workers=int(env("DOMIN_USER_WORKERS", "3")),
+            refresh_workers=int(env("DOMIN_REFRESH_WORKERS", "2")),
+            scan_timeout_hours=int(env("DOMIN_SCAN_TIMEOUT_HOURS", "3")),
             lookups_per_minute=int(env("DOMIN_LOOKUPS_PER_MINUTE", "30")),
             analytics_days=int(env("DOMIN_ANALYTICS_DAYS", "180")),
             admin_path=env("DOMIN_ADMIN_PATH", "").rstrip("/"),

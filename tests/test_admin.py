@@ -60,7 +60,8 @@ def test_login_logout_and_lockout(settings):
 def test_forms_need_the_csrf_token(settings):
     with client(settings) as h:
         csrf = sign_in(h)
-        form = {k: str(v) for k, v in {"scans_per_hour": 5, "queue_max": 9, "lookups_per_minute": 3,
+        form = {k: str(v) for k, v in {"scans_per_hour": 5, "scans_per_day": 50, "queue_max": 9,
+                                        "scan_timeout_hours": 3, "lookups_per_minute": 3,
                                         "max_hosts": 100, "refresh_days": 0, "analytics_days": 30}.items()}
         assert h.post(BASE + "/tune", data={**form, "csrf": "forged"}).status_code == 403
         assert h.post(BASE + "/tune", data={**form, "csrf": csrf, "max_hosts": "5"}).status_code == 422

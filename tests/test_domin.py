@@ -161,3 +161,38 @@ def test_job_errors_and_client_addresses_are_not_kept(settings, monkeypatch):
     jobs.run_job(settings, job)
     with db.connect(settings.db_path) as c:
         assert jobs.get(c, job["id"])["error"] == "internal error (RuntimeError)"
+
+
+def test_refresh_queue_is_separate_and_oldest_first(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "older.se", "2024-01-01T00:00:00", "import", [ROW])
+        db.save_scan(c, "newer.se", "2024-06-01T00:00:00", "import", [ROW])
+        assert jobs.enqueue_due(c, 7) == 3   # example.se from the fixture (2025-03) too
+        assert [r[0] for r in c.execute("SELECT domain FROM jobs ORDER BY id")] == ["older.se", "newer.se", "example.se"]
+        assert jobs.queued(c) == 0   # refreshes don't fill the visitors' queue
+        user = jobs.enqueue(c, "user.se", client="h:a")
+        assert jobs.get(c, user["id"])["ahead"] == 0   # not behind the refresh backlog
+        taken = jobs.enqueue(c, "newer.se", client="h:b")   # a visitor takes over the queued refresh
+        assert jobs.queued(c) == 2 and jobs.get(c, taken["id"])["ahead"] == 0   # keeps its earlier place
+        assert [jobs.claim(c)["domain"], jobs.claim(c)["domain"]] == ["newer.se", "user.se"]
+        assert jobs.claim(c, refresh=True)["domain"] == "older.se"
+
+
+def test_scan_times_out(settings, monkeypatch):
+    def slow(conn, domain, s, progress, **kw):
+        progress("resolving")
+        raise AssertionError("the scan should have timed out")
+    monkeypatch.setattr(scanner, "run", slow)
+    monkeypatch.setattr(jobs.time, "monotonic", iter([0.0, 4 * 3600.0]).__next__)
+    with db.connect(settings.db_path) as c:
+        job = jobs.claim(c) if jobs.enqueue(c, "slow.se", client="h:a") else None
+    jobs.run_job(settings, job)
+    with db.connect(settings.db_path) as c:
+        assert jobs.get(c, job["id"])["error"] == "timed out after 3 h"
+
+
+def test_scans_per_day_limit(settings):
+    with TestClient(create_app(replace(settings, scans_per_hour=100, scans_per_day=1))) as h:
+        assert h.post("/api/scan", json={"domain": "d1.se"}).status_code == 200
+        r = h.post("/api/scan", json={"domain": "d2.se"})
+        assert r.status_code == 429 and "per day" in r.text

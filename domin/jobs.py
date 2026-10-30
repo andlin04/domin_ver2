@@ -1,8 +1,13 @@
-"""Scan queue in SQLite. The web app enqueues; one worker process (python -m domin worker) runs jobs in order."""
+"""Scan queue in SQLite. The web app enqueues; one worker process (python -m domin worker) runs jobs in order.
+
+Two queues in one table: scheduled refreshes (client 'refresh') and visitors' jobs (everything else). The worker
+runs user_workers threads on visitors' jobs and refresh_workers threads on refreshes, so a long refresh backlog
+never delays a visitor (the old version's 3 + 2 threads)."""
 from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -12,8 +17,19 @@ from .config import Settings
 log = logging.getLogger("domin.worker")
 
 
+REFRESH = "refresh"
+
+
 class Cancelled(Exception):
     """The admin cancelled the running job; the worker stops at its next progress step."""
+
+
+class TimedOut(Exception):
+    """The scan ran longer than scan_timeout_hours."""
+
+
+def _queue(refresh: bool) -> str:
+    return "client = 'refresh'" if refresh else "client != 'refresh'"
 
 
 def _public(row: sqlite3.Row) -> dict:
@@ -24,8 +40,12 @@ def _public(row: sqlite3.Row) -> dict:
 
 
 def enqueue(conn: sqlite3.Connection, domain: str, client: str = "") -> dict:
-    """One open job per domain: asking again returns the job already queued or running."""
+    """One open job per domain: asking again returns the job already queued or running. A visitor asking for a
+    domain with a queued refresh takes that job over, so it moves to the visitors' queue."""
     row = conn.execute("SELECT * FROM jobs WHERE domain = ? AND status IN ('queued', 'running')", (domain,)).fetchone()
+    if row and row["status"] == "queued" and row["client"] == REFRESH and client not in ("", REFRESH):
+        conn.execute("UPDATE jobs SET client = ?, created = ? WHERE id = ?", (client, db.now(), row["id"]))
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
     if row:
         return _public(row)
     jid = conn.execute("INSERT INTO jobs (domain, status, created, client) VALUES (?, 'queued', ?, ?)",
@@ -34,7 +54,8 @@ def enqueue(conn: sqlite3.Connection, domain: str, client: str = "") -> dict:
 
 
 def queued(conn: sqlite3.Connection) -> int:
-    return conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'queued'").fetchone()[0]
+    """Visitors' queued jobs (the refresh backlog doesn't fill the queue)."""
+    return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND {_queue(False)}").fetchone()[0]
 
 
 def forget_clients(conn: sqlite3.Connection, hours: int = 24) -> int:
@@ -67,8 +88,8 @@ def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
         return None
     job = _public(row)
     if job["status"] == "queued":
-        job["ahead"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued', 'running') AND id < ?",
-                                    (job_id,)).fetchone()[0]
+        job["ahead"] = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND id < ? AND "
+                                    f"{_queue(row['client'] == REFRESH)}", (job_id,)).fetchone()[0]
     return job
 
 
@@ -81,8 +102,9 @@ def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) ->
     return conn.execute("SELECT COUNT(*) FROM jobs WHERE client = ? AND created >= ?", (client, since)).fetchone()[0]
 
 
-def claim(conn: sqlite3.Connection) -> dict | None:
-    row = conn.execute("SELECT * FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+def claim(conn: sqlite3.Connection, refresh: bool = False) -> dict | None:
+    row = conn.execute(f"SELECT * FROM jobs WHERE status = 'queued' AND {_queue(refresh)} ORDER BY id LIMIT 1"
+                       ).fetchone()
     if not row:
         return None
     n = conn.execute("UPDATE jobs SET status = 'running', started = ? WHERE id = ? AND status = 'queued'",
@@ -92,6 +114,7 @@ def claim(conn: sqlite3.Connection) -> dict | None:
 
 
 def run_job(settings: Settings, job: dict) -> None:
+    deadline = time.monotonic() + settings.scan_timeout_hours * 3600
     with db.connect(settings.db_path) as conn:
         def progress(text: str) -> None:
             n = conn.execute("UPDATE jobs SET progress = ? WHERE id = ? AND status = 'running'",
@@ -99,6 +122,8 @@ def run_job(settings: Settings, job: dict) -> None:
             conn.commit()
             if not n:
                 raise Cancelled
+            if time.monotonic() > deadline:
+                raise TimedOut
 
         started = db.now()
         try:
@@ -106,6 +131,11 @@ def run_job(settings: Settings, job: dict) -> None:
             progress("saving")
         except Cancelled:
             log.info("scan %s cancelled", job["domain"])
+            return
+        except TimedOut:
+            log.warning("scan %s timed out", job["domain"])
+            conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
+                         (db.now(), f"timed out after {settings.scan_timeout_hours} h", job["id"]))
             return
         except Exception as exc:
             log.exception("scan %s failed", job["domain"])
@@ -119,37 +149,64 @@ def run_job(settings: Settings, job: dict) -> None:
 
 
 def enqueue_due(conn: sqlite3.Connection, days: int) -> int:
-    """Scheduled refresh: queue every domain whose newest scan is older than `days` (0 = off)."""
+    """Scheduled refresh: queue every domain whose newest scan is older than `days` (0 = off), oldest first."""
     if days <= 0:
         return 0
     cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
     due = [r["name"] for r in conn.execute(
-        "SELECT d.name FROM domains d JOIN scans s ON s.domain_id = d.id GROUP BY d.id HAVING MAX(s.started) < ?",
-        (cutoff,))]
+        "SELECT d.name FROM domains d JOIN scans s ON s.domain_id = d.id GROUP BY d.id HAVING MAX(s.started) < ? "
+        "ORDER BY MAX(s.started), d.name", (cutoff,))]
     for name in due:
-        enqueue(conn, name, client="refresh")
+        enqueue(conn, name, client=REFRESH)
     return len(due)
 
 
+def _next(settings: Settings, refresh: bool) -> tuple[Settings, dict | None]:
+    with db.connect(settings.db_path) as conn:
+        live = admin.effective(settings, conn)   # the admin page's tuning applies without a restart
+        return live, None if live.scans_paused else claim(conn, refresh)
+
+
+def _scan_loop(settings: Settings, refresh: bool, idle: float) -> None:
+    while True:
+        try:
+            live, job = _next(settings, refresh)
+            if job:
+                run_job(live, job)
+                continue
+        except Exception:   # a database hiccup must not end the thread
+            log.exception("worker thread error")
+        time.sleep(idle)
+
+
+def housekeeping(settings: Settings) -> None:
+    with db.connect(settings.db_path) as conn:
+        live = admin.effective(settings, conn)
+        forget_clients(conn)
+        admin.prune(conn, live.analytics_days)
+        if n := enqueue_due(conn, live.refresh_days):
+            log.info("refresh: %d domains queued", n)
+
+
 def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
+    """once: run housekeeping, then every queued job one at a time (visitors' first), and return."""
     db.init(settings.db_path)
     with db.connect(settings.db_path) as conn:  # a crash or restart leaves 'running' rows behind
         conn.execute("UPDATE jobs SET status = 'failed', error = 'worker restarted', finished = ? "
                      "WHERE status = 'running'", (db.now(),))
-    last_refresh = 0.0
+    housekeeping(settings)
+    if once:
+        for refresh in (False, True):
+            while (got := _next(settings, refresh))[1]:
+                run_job(*got)
+        return
+    for refresh, n in ((False, settings.user_workers), (True, settings.refresh_workers)):
+        for i in range(n):
+            threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,
+                             name=f"{'refresh' if refresh else 'user'}-{i}").start()
     while True:
-        with db.connect(settings.db_path) as conn:
-            live = admin.effective(settings, conn)   # the admin page's tuning applies without a restart
-            if time.time() - last_refresh > 3600:
-                last_refresh = time.time()
-                forget_clients(conn)
-                admin.prune(conn, live.analytics_days)
-                if n := enqueue_due(conn, live.refresh_days):
-                    log.info("refresh: %d domains queued", n)
-            job = None if live.scans_paused else claim(conn)
-        if job:
-            run_job(live, job)
-        elif once:
-            return
-        else:
-            time.sleep(idle)
+        time.sleep(3600)
+        try:
+            housekeeping(settings)
+        except Exception:
+            log.exception("housekeeping failed")
