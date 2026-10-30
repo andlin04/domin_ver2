@@ -1,8 +1,9 @@
 """One scan of a domain: find host names, resolve them, and look up who announces each address.
 
 Discovery: certificate transparency (crt.sh), common host names, the domain's MX/NS hosts, and amass (passive, then
-active) when installed. Brute-forced names are dropped when the zone has wildcard DNS. Address owner and country come
-from RDAP (ipwhois), cached per announced prefix and per address in the database.
+active) when installed. Names resolve over the old version's resolver set. Brute-forced names are dropped when the
+zone has wildcard DNS. Address owner comes from RDAP (ipwhois), cached per announced prefix and per address in the
+database; country from the DB-IP table when loaded.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import dns.resolver
 import httpx
 import pycountry
 
-from . import db, tools
+from . import admin, db, tools
 from .config import Settings
 from .validate import is_under, normalize_domain
 
@@ -36,11 +37,15 @@ admin crm erp hr my m mobile secure web web1 web2 www2 cloud office print citrix
 
 CACHE_DAYS = 30
 Progress = Callable[[str], None]
+RESOLVERS = os.path.join(os.path.dirname(__file__), "resolvers.txt")  # the old version's dns_list.txt
 
 
-def _resolver(timeout: float = 4.0) -> dns.resolver.Resolver:
-    r = dns.resolver.Resolver()
-    r.lifetime = timeout
+def _resolver(timeout: float = 5.0, lifetime: float = 15.0) -> dns.resolver.Resolver:
+    """The old version's resolver set, tried in turn until one answers (it gave dig 15 s)."""
+    r = dns.resolver.Resolver(configure=False)
+    with open(RESOLVERS) as f:
+        r.nameservers = f.read().split()
+    r.rotate, r.timeout, r.lifetime = True, timeout, lifetime
     return r
 
 
@@ -78,9 +83,6 @@ def from_dns(domain: str, resolver: dns.resolver.Resolver) -> set[str]:
         except (dns.exception.DNSException, OSError):
             pass
     return found
-
-
-RESOLVERS = os.path.join(os.path.dirname(__file__), "resolvers.txt")  # the old version's dns_list.txt
 
 
 def amass_hosts(out: str, domain: str) -> set[str]:
@@ -138,7 +140,10 @@ def _rdap(ip: str) -> dict:
 
 
 class Enricher:
-    """Owner info per address: database cache (30 days), then the scan's own prefix cache, then RDAP."""
+    """Owner info per address: database cache (30 days), then the scan's own prefix cache, then RDAP.
+
+    Country is where the address is located (DB-IP table, as the old version's geolocation) when that table is
+    loaded; else the registry country from RDAP."""
 
     def __init__(self, conn: sqlite3.Connection, lookup: Callable[[str], dict] = _rdap):
         self.conn, self.lookup = conn, lookup
@@ -146,6 +151,11 @@ class Enricher:
         self.cutoff = (datetime.now() - timedelta(days=CACHE_DAYS)).isoformat(timespec="seconds")
 
     def get(self, ip: str) -> dict:
+        info = self._owner(ip)
+        cc = admin.country(self.conn, ip) if info.get("netname") != "Private/reserved" else ""
+        return {**info, "country": country_name(cc)} if cc else info
+
+    def _owner(self, ip: str) -> dict:
         addr = ipaddress.ip_address(ip)
         if not addr.is_global:
             return {"asn": "", "prefix": "", "netname": "Private/reserved", "descr": "", "country": ""}

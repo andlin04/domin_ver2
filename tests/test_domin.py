@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from domin import db, importer, jobs, scanner, tools
+from domin import admin, db, importer, jobs, scanner, tools
 from domin.config import Settings
 from domin.validate import normalize_domain
 from domin.web import create_app
@@ -218,3 +218,23 @@ def test_amass_runs_passive_then_active(monkeypatch):
     assert ["-passive" in c for c in calls] == [True, False] and scanner.RESOLVERS in calls[1]
     with open(scanner.RESOLVERS) as f:
         assert f.read().split()[0] == "1.1.1.1"
+
+
+def test_names_resolve_over_the_old_resolver_set():
+    r = scanner._resolver()
+    assert len(r.nameservers) == 8 and r.rotate and r.lifetime == 15
+
+
+def test_country_is_address_location_when_the_table_is_loaded(settings, tmp_path):
+    # public addresses (reserved ones are never looked up); the lookup is faked, nothing is sent
+    rdap = {"asn": "64500", "prefix": "9.9.9.0/24", "netname": "NET-A", "descr": "", "country": "United States"}
+    with db.connect(settings.db_path) as c:
+        e = scanner.Enricher(c, lookup=lambda ip: dict(rdap))
+        assert e.get("9.9.9.1")["country"] == "United States"   # no table: registry country
+        geo = tmp_path / "geo.csv"
+        geo.write_text("9.9.9.0,9.9.9.127,SE\n")
+        admin.import_geo(c, geo)
+        e = scanner.Enricher(c, lookup=lambda ip: dict(rdap))
+        assert e.get("9.9.9.1")["country"] == "Sweden"
+        assert e.get("9.9.9.200")["country"] == "United States"   # outside the table's ranges
+        assert e.get("10.0.0.1")["netname"] == "Private/reserved"
