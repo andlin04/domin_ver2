@@ -196,3 +196,24 @@ def test_scans_per_day_limit(settings):
         assert h.post("/api/scan", json={"domain": "d1.se"}).status_code == 200
         r = h.post("/api/scan", json={"domain": "d2.se"})
         assert r.status_code == 429 and "per day" in r.text
+
+
+def test_amass_output_old_and_new_formats():
+    out = "a.ex.se\nB.EX.se.\nother.se\n\nc.ex.se (FQDN) --> a_record --> 192.0.2.1 (IPAddress)\n"
+    assert scanner.amass_hosts(out, "ex.se") == {"a.ex.se", "b.ex.se", "c.ex.se"}
+
+
+def test_amass_runs_passive_then_active(monkeypatch):
+    calls = []
+
+    class Done:
+        def __init__(self, args):
+            calls.append(args)
+            self.stdout = "p.ex.se\n" if "-passive" in args else "p.ex.se\nq.ex.se\n"
+
+    monkeypatch.setattr(scanner.shutil, "which", lambda exe: "/bin/amass")
+    monkeypatch.setattr(scanner.subprocess, "run", lambda args, **kw: Done(args))
+    assert scanner.from_amass("ex.se", "amass") == {"p.ex.se", "q.ex.se"}
+    assert ["-passive" in c for c in calls] == [True, False] and scanner.RESOLVERS in calls[1]
+    with open(scanner.RESOLVERS) as f:
+        assert f.read().split()[0] == "1.1.1.1"

@@ -90,6 +90,22 @@ else
 fi
 rm -f "$GEO"
 
+# amass for subdomain discovery (the old version's main source): v3.23.3 prints one host name per line.
+# Pinned with the release's checksum; extracted with Python (no unzip needed).
+AMASS_SHA=2b5afb8a567d9703dfb416099fb0452e2b4b4da5170f0b23cd3b812df2e9319c
+if [ "$(/usr/local/bin/amass -version 2>&1)" != "v3.23.3" ]; then
+  ZIP=$(mktemp --suffix=.zip)
+  if curl -fsSL -o "$ZIP" https://github.com/owasp-amass/amass/releases/download/v3.23.3/amass_Linux_amd64.zip &&
+     echo "$AMASS_SHA  $ZIP" | sha256sum -c --quiet; then
+    python3 -c 'import sys, zipfile; open(sys.argv[2], "wb").write(zipfile.ZipFile(sys.argv[1]).read("amass_Linux_amd64/amass"))' \
+      "$ZIP" /usr/local/bin/amass.new
+    install -m 755 /usr/local/bin/amass.new /usr/local/bin/amass && rm -f /usr/local/bin/amass.new
+  else
+    echo "amass: download or checksum failed, scans use crt.sh and DNS only"
+  fi
+  rm -f "$ZIP"
+fi
+
 unit() {  # name, description, command
   cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]

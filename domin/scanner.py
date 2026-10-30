@@ -1,8 +1,8 @@
 """One scan of a domain: find host names, resolve them, and look up who announces each address.
 
-Discovery: certificate transparency (crt.sh), common host names, the domain's MX/NS hosts, and amass (passive) when
-installed. Brute-forced names are dropped when the zone has wildcard DNS. Address owner and country come from RDAP
-(ipwhois), cached per announced prefix and per address in the database.
+Discovery: certificate transparency (crt.sh), common host names, the domain's MX/NS hosts, and amass (passive, then
+active) when installed. Brute-forced names are dropped when the zone has wildcard DNS. Address owner and country come
+from RDAP (ipwhois), cached per announced prefix and per address in the database.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -79,17 +80,34 @@ def from_dns(domain: str, resolver: dns.resolver.Resolver) -> set[str]:
     return found
 
 
+RESOLVERS = os.path.join(os.path.dirname(__file__), "resolvers.txt")  # the old version's dns_list.txt
+
+
+def amass_hosts(out: str, domain: str) -> set[str]:
+    """amass 3 prints one name per line; later versions 'name (FQDN) --> ...': take the first word."""
+    names = (line.split()[0].rstrip(".").lower() for line in out.splitlines() if line.strip())
+    return {h for h in names if normalize_domain(h) and is_under(h, domain)}
+
+
 def from_amass(domain: str, amass: str) -> set[str]:
+    """Passive, then active (resolvers.txt, 100 queries/s, at most 20000), 15 min each, as the old version did."""
     exe = shutil.which(amass) or (amass if os.path.exists(amass) else None)
     if not exe:
         return set()
-    try:
-        out = subprocess.run([exe, "enum", "-passive", "-d", domain, "-timeout", "10"], capture_output=True,
-                             text=True, timeout=900).stdout
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("amass %s: %s", domain, exc)
-        return set()
-    return {h for h in (x.strip().lower() for x in out.splitlines()) if normalize_domain(h) and is_under(h, domain)}
+    found: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix="amass-") as work:
+        active = ["-active", "-resolvers", RESOLVERS, "-dns-qps", "100", "-max-dns-queries", "20000"]
+        for mode in (["-passive"], active):
+            try:
+                out = subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-timeout", "15"],
+                                     capture_output=True, text=True, timeout=960).stdout
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                log.warning("amass %s %s: %s", mode[0], domain, exc)
+                continue
+            new = amass_hosts(out, domain) - found
+            log.info("amass %s %s: %d names", mode[0], domain, len(new))
+            found |= new
+    return found
 
 
 def wildcard_ips(domain: str, resolver: dns.resolver.Resolver) -> set[str]:
