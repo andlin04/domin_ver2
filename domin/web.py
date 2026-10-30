@@ -148,7 +148,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             return {"totals": db.totals(c), "per_day": db.scans_per_day(c),
                     "countries": db.top_latest(c, "country"), "netnames": db.top_latest(c, "netname"),
-                    "asns": db.top_latest(c, "asn")}
+                    "asns": db.top_latest(c, "asn"),
+                    "eu": db.eu_per_day(c)}
 
     def data_version(c) -> str:
         return str(c.execute("SELECT COALESCE(MAX(id), 0) FROM scans").fetchone()[0])

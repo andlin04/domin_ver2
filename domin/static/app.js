@@ -156,6 +156,20 @@ function overviewCharts() {
   });
   hbar("countries", d.countries, "Addresses");
   hbar("netnames", d.netnames, "Addresses");
+  euLine(d.eu?.map((r) => r.day), d.eu?.map((r) => r.pct));
+}
+
+function euLine(labels, values, onClick) {
+  const el = $("#eu");
+  if (!el || !values?.some((v) => v !== null)) { if (el) el.parentElement.innerHTML = '<p class="muted">No addresses with a country</p>'; return; }
+  new Chart(el, {
+    type: "line",
+    data: { labels, datasets: [{ label: "In the EU", data: values, borderColor: css("--accent"), backgroundColor: css("--accent"),
+            tension: .25, spanGaps: true, pointRadius: values.length > 60 ? 0 : 2.5 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `In the EU: ${c.raw} %` } } },
+               scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { min: 0, max: 100, ticks: { callback: (v) => `${v} %` } } },
+               onClick },
+  });
 }
 
 function domainCharts() {
@@ -185,6 +199,8 @@ function domainCharts() {
                  onClick: (_, els) => { if (els.length) location.href = `${location.pathname}?scan=${d.churn[els[0].index].id}`; } },
     });
   }
+  euLine(h.map((s) => s.started.slice(0, 10)), h.map((s) => s.eu_pct),
+         (_, els) => { if (els.length) location.href = `${location.pathname}?scan=${h[els[0].index].id}`; });
   doughnut("countries", d.countries);
   hbar("netnames", d.netnames, "Addresses");
 }

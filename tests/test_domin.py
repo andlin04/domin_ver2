@@ -242,6 +242,28 @@ def test_email_security_checks_common_dkim_selectors():
     assert tools.email_security("ex.se", Fake())["dkim"]["status"] == "warn"
 
 
+def test_eu_share_per_scan_and_per_day(settings):
+    recs = [{"host": "a.eu.se", "ip": "192.0.2.1", "country": "Sweden"},
+            {"host": "b.eu.se", "ip": "192.0.2.1", "country": "Sweden"},     # same address counts once
+            {"host": "c.eu.se", "ip": "192.0.2.2", "country": "Czech Republic"},
+            {"host": "d.eu.se", "ip": "192.0.2.3", "country": "United States"},
+            {"host": "e.eu.se", "ip": "192.0.2.4", "country": ""},            # unknown country: left out
+            {"host": "f.eu.se", "ip": ""}]
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "eu.se", "2025-05-01T10:00:00", "scan", recs)
+        assert [(h["eu"], h["eu_known"], h["eu_pct"]) for h in db.history(c, "eu.se")] == [(2, 3, 66.7)]
+        assert {r["day"]: r["pct"] for r in db.eu_per_day(c)}["2025-05-01"] == 66.7
+        # a database from before the columns existed is filled in once at start
+        c.execute("ALTER TABLE scans DROP COLUMN eu")
+        c.execute("ALTER TABLE scans DROP COLUMN eu_known")
+    db.init(settings.db_path)
+    with db.connect(settings.db_path) as c:
+        assert db.history(c, "eu.se")[0]["eu_pct"] == 66.7
+        assert db.history(c, "example.se")[-1]["eu_pct"] == 100.0
+    web = TestClient(create_app(settings))
+    assert "66.7 %" in web.get("/d/eu.se").text and 'id="eu"' in web.get("/").text
+
+
 def test_names_resolve_over_the_old_resolver_set():
     r = scanner._resolver()
     assert len(r.nameservers) == 8 and r.rotate and r.lifetime == 15

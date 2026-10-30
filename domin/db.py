@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS scans (
     ips INTEGER NOT NULL DEFAULT 0,
     asns INTEGER NOT NULL DEFAULT 0,
     countries INTEGER NOT NULL DEFAULT 0,
-    error TEXT
+    error TEXT,
+    eu INTEGER NOT NULL DEFAULT 0,        -- addresses in an EU country
+    eu_known INTEGER NOT NULL DEFAULT 0   -- addresses with a known country
 );
 CREATE INDEX IF NOT EXISTS scans_domain ON scans(domain_id, started);
 CREATE TABLE IF NOT EXISTS records (
@@ -108,6 +110,16 @@ def init(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        conn.execute("BEGIN IMMEDIATE")   # web and worker start together: one of them adds the columns
+        if "eu" not in {r["name"] for r in conn.execute("PRAGMA table_info(scans)")}:
+            conn.execute("ALTER TABLE scans ADD COLUMN eu INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE scans ADD COLUMN eu_known INTEGER NOT NULL DEFAULT 0")
+            conn.execute(f"""
+                UPDATE scans SET eu = c.eu, eu_known = c.known FROM (
+                    SELECT scan_id, SUM({_EU_SQL}) AS eu, COUNT(*) AS known FROM (
+                        SELECT DISTINCT scan_id, ip, country FROM records WHERE ip != '' AND country != '')
+                    GROUP BY scan_id) c
+                WHERE scans.id = c.scan_id""", EU_NAMES)
 
 
 def domain_id(conn: sqlite3.Connection, name: str, added: str | None = None) -> int:
@@ -127,11 +139,13 @@ def save_scan(conn: sqlite3.Connection, domain: str, started: str, source: str, 
     ips = {r[1] for r in rows if r[1]}
     asns = {r[2] for r in rows if r[2]}
     countries = {r[6] for r in rows if r[6]}
+    located = {(r[1], r[6]) for r in rows if r[1] and r[6]}
+    eu = sum(1 for _, c in located if c in EU_NAMES)
     sid = conn.execute(
-        "INSERT INTO scans (domain_id, started, finished, source, status, hosts, resolved, ips, asns, countries, error)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO scans (domain_id, started, finished, source, status, hosts, resolved, ips, asns, countries, error,"
+        " eu, eu_known) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (did, started, finished or started, source, status, len(hosts), len(resolved), len(ips), len(asns),
-         len(countries), error)).lastrowid
+         len(countries), error, eu, len(located))).lastrowid
     conn.executemany(f"INSERT INTO records (scan_id, {', '.join(RECORD_FIELDS)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                      [(sid, *r) for r in rows])
     return sid
@@ -190,9 +204,10 @@ def domain(conn: sqlite3.Connection, name: str) -> dict | None:
 
 
 def history(conn: sqlite3.Connection, name: str) -> list[dict]:
-    sql = """SELECT s.id, s.started, s.source, s.status, s.hosts, s.resolved, s.ips, s.asns, s.countries, s.error
+    sql = """SELECT s.id, s.started, s.source, s.status, s.hosts, s.resolved, s.ips, s.asns, s.countries, s.error,
+                    s.eu, s.eu_known
              FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ? ORDER BY s.started"""
-    return [dict(r) for r in conn.execute(sql, (name,))]
+    return [{**dict(r), "eu_pct": eu_pct(r["eu"], r["eu_known"])} for r in conn.execute(sql, (name,))]
 
 
 def scan(conn: sqlite3.Connection, scan_id: int) -> dict | None:
@@ -218,6 +233,31 @@ def breakdown(rows: list[dict], field: str, limit: int = 10) -> list[dict]:
     if rest:
         out.append({"label": "Other", "ips": rest})
     return out
+
+
+# EU member states: records store full names (pycountry), legacy imports the old version's names
+EU_CODES = "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split()
+
+
+def _eu_names() -> list[str]:
+    import pycountry
+    names = {pycountry.countries.get(alpha_2=c).name for c in EU_CODES}   # e.g. Czechia
+    return sorted(names | {"Czech Republic", "Netherlands"} | set(EU_CODES))
+
+
+EU_NAMES = _eu_names()
+_EU_SQL = f"country IN ({','.join('?' * len(EU_NAMES))})"
+
+
+def eu_pct(eu: int, known: int) -> float | None:
+    return round(100 * eu / known, 1) if known else None
+
+
+def eu_per_day(conn: sqlite3.Connection) -> list[dict]:
+    """Share of addresses in the EU across all scans per day, as the old version's EU changes report."""
+    sql = """SELECT substr(started, 1, 10) AS day, SUM(eu) AS eu, SUM(eu_known) AS known FROM scans
+             WHERE status = 'done' GROUP BY day HAVING known > 0 ORDER BY day"""
+    return [{"day": r["day"], "pct": eu_pct(r["eu"], r["known"])} for r in conn.execute(sql)]
 
 
 def diff(old: list[dict], new: list[dict]) -> dict:
