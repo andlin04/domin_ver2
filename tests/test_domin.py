@@ -55,6 +55,16 @@ def test_web(settings):
         assert h.post("/api/scan", json={"domain": "not a domain"}).status_code == 422
 
 
+def test_scan_now_at_most_once_per_day_per_domain(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "today.se", db.now(), "scan", [{"host": "today.se", "ip": "192.0.2.5", "asn": "", "prefix": "",
+                     "netname": "", "descr": "", "country": ""}])
+    with TestClient(create_app(settings)) as h:
+        r = h.post("/api/scan", json={"domain": "today.se"})
+        assert r.status_code == 429 and "already scanned today" in r.json()["error"]
+        assert h.post("/api/scan", json={"domain": "example.se"}).status_code == 200  # last scan 2025-03-15
+
+
 def test_churn_chart_only_when_host_names_changed(settings):
     with db.connect(settings.db_path) as c:
         for day in ("2025-03-01", "2025-03-02"):

@@ -158,6 +158,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             raise HTTPException(422, "Not a valid domain name")
         who = client_ip(request)
         with conn() as c:
+            last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
+                             (name,)).fetchone()[0]
+            if last and last[:10] == db.now()[:10]:
+                raise HTTPException(429, f"{name} was already scanned today; the next scan can run tomorrow")
             if jobs.scans_by_client(c, who) >= settings.scans_per_hour:
                 raise HTTPException(429, f"At most {settings.scans_per_hour} scans per hour")
             return jobs.enqueue(c, name, client=who)
