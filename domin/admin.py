@@ -1,4 +1,4 @@
-"""Admin side: password login at a hidden path, runtime tuning, job control and privacy-safe visitor analytics.
+"""Admin side: login at /admin (allowlisted addresses), runtime tuning, job control, privacy-safe analytics.
 
 Nothing here stores a full IP address: visitors are a daily-salted hash of address + user agent (the salt is
 replaced every day, so yesterday's ids can't be linked to today's or turned back into an address), scan clients a

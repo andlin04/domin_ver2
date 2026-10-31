@@ -35,6 +35,7 @@ CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
 MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
 PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
 QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
+ADMIN = "/admin"   # shown and served only to DOMIN_ADMIN_IPS
 COOKIE = "__Host-domin_admin"   # __Host-: Secure, path /, no Domain; the site must be served over HTTPS
 log = logging.getLogger("domin.web")
 
@@ -60,16 +61,31 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     def conn():
         return db.connect(settings.db_path)
 
-    def client_ip(request: Request) -> str:
-        """Peer address (X-Real-IP when nginx on this host proxies); an IPv6 client counts as its /64."""
+    admin_nets = [ipaddress.ip_network(x, strict=False) for x in settings.admin_ips]
+
+    def peer_ip(request: Request) -> str:
+        """The visitor's address: X-Real-IP only when nginx on this host proxies (nginx sets it from $remote_addr,
+        which with --cloudflare is CF-Connecting-IP from Cloudflare's ranges only); other headers are never read."""
         peer = request.client.host if request.client else ""
         if peer in ("127.0.0.1", "::1"):
             peer = request.headers.get("x-real-ip", peer).strip()
+        return peer
+
+    def client_ip(request: Request) -> str:
+        """Peer address for rate limits and statistics; an IPv6 client counts as its /64."""
+        peer = peer_ip(request)
         try:
             ip = ipaddress.ip_address(peer)
         except ValueError:
             return peer[:64]
         return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
+
+    def admin_allowed(request: Request) -> bool:
+        try:
+            ip = ipaddress.ip_address(peer_ip(request))
+        except ValueError:
+            return False
+        return any(ip in n for n in admin_nets)
 
     def live() -> Settings:
         with conn() as c:
@@ -89,7 +105,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 del lookups[k]
 
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
-        return templates.TemplateResponse(request, name, ctx, status_code=status)
+        return templates.TemplateResponse(request, name, {"show_admin": admin_allowed(request), **ctx},
+                                          status_code=status)
 
     def domain_or_404(c, name: str) -> dict:
         d = db.domain(c, name)
@@ -104,7 +121,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return ("scan" if status == 200 else "limited" if status == 429 else None), ""
         if request.method != "GET" or status != 200:
             return None
-        if settings.admin_path and path.startswith(settings.admin_path):
+        if path == ADMIN or path.startswith(ADMIN + "/"):
             return None
         parts = path.strip("/").split("/")
         if path.startswith("/scans/") and path.endswith(".csv"):
@@ -124,7 +141,11 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     @app.middleware("http")
     async def headers(request: Request, call_next):
-        resp = await call_next(request)
+        path = request.url.path
+        if (path == ADMIN or path.startswith(ADMIN + "/")) and not admin_allowed(request):
+            resp = JSONResponse({"detail": "Not Found"}, status_code=404)   # same answer as a path that doesn't exist
+        else:
+            resp = await call_next(request)
         resp.headers.update({"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
                              "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY"})
         if request.url.path.startswith("/static/"):
@@ -311,8 +332,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         limit_lookups(request)
         return tools.email_security(d)
 
-    if settings.admin_path:
-        add_admin(app, settings, conn, page, client_ip)
+    add_admin(app, settings, conn, page, client_ip)
     return app
 
 
@@ -321,9 +341,9 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
 
 
 def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
-    """The hidden admin page: one password (python -m domin admin-password), a session cookie, a CSRF token per
-    session on every form. Not linked from the site; robots and caches are told to stay away."""
-    base = settings.admin_path
+    """The admin page at /admin, for DOMIN_ADMIN_IPS only (anyone else gets the same 404 as an unknown path): one
+    password (python -m domin admin-password), a session cookie, a CSRF token per session on every form."""
+    base = ADMIN
     private = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 
     async def form(request: Request) -> dict[str, str]:

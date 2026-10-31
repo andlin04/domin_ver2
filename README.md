@@ -39,8 +39,11 @@ database and certificate). Options: see the top of [deploy/install.sh](deploy/in
 
 ## Admin page
 
-Hidden, not linked, HTTPS only. The installer picks a random path (`DOMIN_ADMIN_PATH` in /etc/domin.env) and prints
-it. Set the password once:
+At `/admin`, HTTPS only, for the client addresses in `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or
+CIDRs; the installer adds the owner's address once; `systemctl restart domin` after editing). Those clients see an
+Admin link in the header; for everyone else there is no link and every /admin path answers 404. The client address
+is nginx's `$remote_addr` passed as X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from Cloudflare's
+ranges); other forwarding headers from visitors are ignored. Set the password once:
 
 ```bash
 cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin admin-password
@@ -69,4 +72,4 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 Settings (environment): `DOMIN_DB`, `DOMIN_REFRESH_DAYS` (re-scan domains older than N days, 0 = off),
 `DOMIN_SCAN_WORKERS`, `DOMIN_MAX_HOSTS`, `DOMIN_SCANS_PER_HOUR`, `DOMIN_SCANS_PER_DAY` (200),
 `DOMIN_USER_WORKERS` (3 parallel visitor scans), `DOMIN_REFRESH_WORKERS` (2 parallel refreshes, a separate queue),
-`DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`.
+`DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin).

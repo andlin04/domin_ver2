@@ -63,9 +63,9 @@ if [ ! -f /etc/domin.env ]; then
       "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
-# Hidden admin page at a random path, kept across updates; `python -m domin admin-password` sets its password
-grep -q '^DOMIN_ADMIN_PATH=' /etc/domin.env || \
-  echo "DOMIN_ADMIN_PATH=/admin-$(python3 -c 'import secrets; print(secrets.token_hex(8))')" >> /etc/domin.env
+# Admin page at /admin, served and linked only for these client addresses (comma-separated IPs/CIDRs; edit, then
+# systemctl restart domin); everyone else gets 404. `python -m domin admin-password` sets its password.
+grep -q '^DOMIN_ADMIN_IPS=' /etc/domin.env || echo "DOMIN_ADMIN_IPS=203.0.113.10" >> /etc/domin.env
 
 if [ -n "$HISTORY" ]; then
   if [ -f "$DATA/domin.db" ] && [ "$REPLACE" = 0 ]; then
@@ -213,5 +213,5 @@ fi
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
 echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
   "HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/)"
-echo "admin page: https://$DOMAIN$(sed -n 's/^DOMIN_ADMIN_PATH=//p' /etc/domin.env) (HTTPS only; set its password:" \
+echo "admin page: https://$DOMAIN/admin for DOMIN_ADMIN_IPS in /etc/domin.env (HTTPS only; set its password:" \
   "cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin admin-password)"

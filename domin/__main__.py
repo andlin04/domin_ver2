@@ -54,8 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         with db.connect(settings.db_path) as conn:
             admin.set_password(conn, pw)
-        print("admin password set; open sessions were signed out" +
-              ("" if settings.admin_path else " (DOMIN_ADMIN_PATH is not set: the admin page is off)"))
+        print("admin password set; open sessions were signed out")
     elif args.cmd == "geoip":
         with db.connect(settings.db_path) as conn:
             print(f"{admin.import_geo(conn, args.file)} address ranges loaded")

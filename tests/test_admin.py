@@ -9,14 +9,14 @@ from domin import admin, db, jobs, scanner
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
-BASE = "/admin-test1234"
+BASE = "/admin"
 PW = "correct horse battery"
 UA = {"user-agent": "Mozilla/5.0 (Windows NT 10.0) Firefox/130.0"}
 
 
 @pytest.fixture
 def settings(tmp_path):
-    s = replace(Settings.from_env(), db_path=tmp_path / "t.db", admin_path=BASE)
+    s = replace(Settings.from_env(), db_path=tmp_path / "t.db", admin_ips=("127.0.0.1", "192.0.2.0/24"))
     db.init(s.db_path)
     with db.connect(s.db_path) as c:
         admin.set_password(c, PW)
@@ -42,10 +42,26 @@ def test_asset_links_are_relative(settings):
     assert 'href="/static/app.css"' in page and 'src="/static/app.js"' in page and "http://" not in page
 
 
-def test_admin_page_is_off_without_a_path(tmp_path):
-    s = replace(Settings.from_env(), db_path=tmp_path / "t.db")
-    with TestClient(create_app(s)) as h:
-        assert h.get("/admin").status_code == 404
+def test_admin_only_for_allowlisted_addresses(settings):
+    with client(settings, ip="198.51.100.7") as h:   # not on the list: no link, and /admin* looks like it doesn't exist
+        unknown = h.get("/no-such-page")
+        for path in (BASE, BASE + "/", BASE + "/jobs/1/cancel"):
+            r = h.get(path)
+            assert (r.status_code, r.text) == (unknown.status_code, unknown.text) == (404, unknown.text)
+        assert h.post(BASE + "/login", data={"password": PW}).status_code == 404
+        assert 'href="/admin"' not in h.get("/").text
+    with client(settings, ip="192.0.2.50") as h:
+        assert 'href="/admin"' in h.get("/").text and h.get(BASE).status_code == 200
+
+
+def test_admin_allowlist_cannot_be_spoofed_with_headers(settings):
+    spoof = {"x-real-ip": "192.0.2.50", "x-forwarded-for": "192.0.2.50", "cf-connecting-ip": "192.0.2.50"}
+    with client(settings, ip="198.51.100.7") as h:   # direct peer: forwarding headers are ignored
+        assert h.get(BASE, headers=spoof).status_code == 404
+    # through nginx (peer 127.0.0.1): only X-Real-IP counts, and nginx always sets it from $remote_addr
+    with client(settings) as h:
+        assert h.get(BASE, headers={**spoof, "x-real-ip": "198.51.100.7"}).status_code == 404
+        assert h.get(BASE, headers={"x-real-ip": "192.0.2.50"}).status_code == 200
 
 
 def test_login_logout_and_lockout(settings):

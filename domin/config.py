@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+ADMIN_IPS = "203.0.113.10"   # default DOMIN_ADMIN_IPS: an example address
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -23,7 +25,7 @@ class Settings:
     once_per_day: bool = True      # POST /api/scan: each domain at most once per day
     scans_paused: bool = False     # the worker leaves queued jobs waiting
     analytics_days: int = 180      # visit statistics older than this are deleted
-    admin_path: str = ""           # hidden admin page, e.g. /admin-5f3a9c0e1b2d; empty = no admin page
+    admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; everyone else gets 404
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -42,5 +44,5 @@ class Settings:
             scan_timeout_hours=int(env("DOMIN_SCAN_TIMEOUT_HOURS", "3")),
             lookups_per_minute=int(env("DOMIN_LOOKUPS_PER_MINUTE", "30")),
             analytics_days=int(env("DOMIN_ANALYTICS_DAYS", "180")),
-            admin_path=env("DOMIN_ADMIN_PATH", "").rstrip("/"),
+            admin_ips=tuple(x.strip() for x in env("DOMIN_ADMIN_IPS", ADMIN_IPS).split(",") if x.strip()),
         )
