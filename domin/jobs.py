@@ -162,6 +162,30 @@ def enqueue_due(conn: sqlite3.Connection, days: int) -> int:
     return len(due)
 
 
+RETRIES_PER_DAY = 2
+
+
+def sweep_stuck(conn: sqlite3.Connection, timeout_hours: int) -> int:
+    """Jobs still 'running' half an hour past the scan timeout lost their thread (a database error while marking
+    them failed): fail them, so retry_failed picks them up and they stop counting as open."""
+    cutoff = (datetime.now() - timedelta(hours=timeout_hours, minutes=30)).isoformat(timespec="seconds")
+    return conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = 'stuck: no result past the scan "
+                        "timeout' WHERE status = 'running' AND started < ?", (db.now(), cutoff)).rowcount
+
+
+def retry_failed(conn: sqlite3.Connection) -> int:
+    """A domain whose newest job failed goes back on the refresh queue, at once while it failed at most
+    RETRIES_PER_DAY times in 24 h, else once its failures are a day old (the next day). Cancelled jobs stay."""
+    since = (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")
+    due = [r["domain"] for r in conn.execute(
+        """SELECT l.domain FROM (SELECT domain, status, MAX(id) FROM jobs GROUP BY domain) l WHERE l.status = 'failed'
+           AND (SELECT COUNT(*) FROM jobs f WHERE f.domain = l.domain AND f.status = 'failed' AND f.finished >= ?)
+               <= ? ORDER BY l.domain""", (since, RETRIES_PER_DAY))]
+    for name in due:
+        enqueue(conn, name, client=REFRESH)
+    return len(due)
+
+
 def _next(settings: Settings, refresh: bool) -> tuple[Settings, dict | None]:
     with db.connect(settings.db_path) as conn:
         live = admin.effective(settings, conn)   # the admin page's tuning applies without a restart
@@ -185,6 +209,10 @@ def housekeeping(settings: Settings) -> None:
         live = admin.effective(settings, conn)
         forget_clients(conn)
         admin.prune(conn, live.analytics_days)
+        if n := sweep_stuck(conn, live.scan_timeout_hours):
+            log.warning("%d stuck jobs failed", n)
+        if n := retry_failed(conn):
+            log.info("retry: %d failed domains queued", n)
         if n := enqueue_due(conn, live.refresh_days):
             log.info("refresh: %d domains queued", n)
 
@@ -206,7 +234,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
             threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,
                              name=f"{'refresh' if refresh else 'user'}-{i}").start()
     while True:
-        time.sleep(3600)
+        time.sleep(3600)   # hourly: a failed job waits at most an hour for its retry
         try:
             housekeeping(settings)
         except Exception:

@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
@@ -161,6 +162,26 @@ def test_job_errors_and_client_addresses_are_not_kept(settings, monkeypatch):
     jobs.run_job(settings, job)
     with db.connect(settings.db_path) as c:
         assert jobs.get(c, job["id"])["error"] == "internal error (RuntimeError)"
+
+
+def test_stuck_and_failed_jobs_are_retried_then_wait_a_day(settings):
+    old = (datetime.now() - timedelta(hours=5)).isoformat(timespec="seconds")
+    day_ago = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
+    with db.connect(settings.db_path) as c:
+        add = "INSERT INTO jobs (domain, status, created, started, finished, client) VALUES (?, ?, ?, ?, ?, '')"
+        c.execute(add, ("stuck.se", "running", old, old, None))
+        c.execute(add, ("fresh.se", "running", db.now(), db.now(), None))     # still within the timeout
+        c.execute(add, ("cancel.se", "cancelled", old, old, old))
+        for _ in range(3):
+            c.execute(add, ("flaky.se", "failed", old, old, old))            # 3 failures today: wait
+            c.execute(add, ("yesterday.se", "failed", day_ago, day_ago, day_ago))
+        c.execute(add, ("ok.se", "failed", old, old, old))
+        c.execute(add, ("ok.se", "done", old, old, old))                     # newest job done: nothing to retry
+        assert jobs.sweep_stuck(c, 3) == 1
+        assert jobs.retry_failed(c) == 2   # stuck.se + yesterday.se
+        queued = {r["domain"] for r in c.execute("SELECT domain FROM jobs WHERE status = 'queued'")}
+        assert queued == {"stuck.se", "yesterday.se"}
+        assert jobs.retry_failed(c) == 0   # queued now: not twice
 
 
 def test_refresh_queue_is_separate_and_oldest_first(settings):
