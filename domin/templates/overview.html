@@ -72,7 +72,7 @@
       <tbody>
       {% for d in domains %}
         <tr data-href="/d/{{ d.name }}">
-          <td><a href="/d/{{ d.name }}">{{ d.name }}</a></td>
+          <td class="host"><a href="/d/{{ d.name }}">{{ d.name }}</a></td>
           <td>{{ (d.last_scan or '')[:10] }}</td>
           <td class="num">{{ d.hosts or 0 }}</td><td class="num">{{ d.resolved or 0 }}</td>
           <td class="num">{{ d.ips or 0 }}</td><td class="num">{{ d.asns or 0 }}</td>

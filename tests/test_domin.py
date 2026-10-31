@@ -65,6 +65,17 @@ def test_web(settings):
         assert h.post("/api/scan", json={"domain": "not a domain"}).status_code == 422
 
 
+def test_tables_wrap_long_text_and_show_hidden_columns(settings):
+    with TestClient(create_app(settings)) as h:
+        page = h.get(f"/d/example.se?scan={h.get('/api/domains/example.se/history').json()[0]['id']}").text
+        assert '<td class="host">www.example.se</td>' in page
+        assert '<div class="lines2" title="Alpha">Alpha</div>' in page   # description wraps, 2 lines at most
+        assert '<td class="host"><a href="/d/example.se">' in h.get("/").text
+        css, js = h.get("/static/app.css").text, h.get("/static/app.js").text
+        assert ".table-wrap td:first-child" in css and ".table-scroll.more-right::after" in css   # sticky column, fade
+        assert "more-right" in js and "More columns" in js
+
+
 def test_scan_now_at_most_once_per_day_per_domain(settings):
     with db.connect(settings.db_path) as c:
         db.save_scan(c, "today.se", db.now(), "scan", [{"host": "today.se", "ip": "192.0.2.5", "asn": "", "prefix": "",

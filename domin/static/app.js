@@ -53,6 +53,26 @@ $$("[data-filter]").forEach((input) => {
     }
   });
 });
+// sideways overflow: a fade and a "More columns" button while columns are hidden to the right
+$$(".table-wrap").forEach((wrap) => {
+  const box = document.createElement("div");
+  box.className = "table-scroll";
+  wrap.before(box);
+  box.append(wrap);
+  const hint = document.createElement("button");
+  hint.type = "button";
+  hint.className = "scroll-hint";
+  hint.textContent = "More columns →";
+  hint.addEventListener("click", () => wrap.scrollBy({ left: wrap.clientWidth * 0.7, behavior: "smooth" }));
+  box.after(hint);
+  const update = () => {
+    box.classList.toggle("more-right", wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 2);
+    wrap.classList.toggle("scrolled-x", wrap.scrollLeft > 0);
+  };
+  wrap.addEventListener("scroll", update, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(update).observe(wrap);
+  update();
+});
 document.addEventListener("click", (ev) => {
   const tr = ev.target.closest("tr[data-href]");
   if (tr && !ev.target.closest("a")) location.href = tr.dataset.href;
