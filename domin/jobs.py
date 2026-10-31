@@ -139,6 +139,7 @@ def run_job(settings: Settings, job: dict) -> None:
             return
         except Exception as exc:
             log.exception("scan %s failed", job["domain"])
+            conn.rollback()   # drop this scan's half-done write, so marking the job failed can get the lock
             conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
                          (db.now(), f"internal error ({type(exc).__name__})", job["id"]))   # details: the log
             return

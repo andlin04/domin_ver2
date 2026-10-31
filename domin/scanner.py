@@ -172,6 +172,7 @@ class Enricher:
             return {"asn": "", "prefix": "", "netname": "", "descr": "", "country": ""}
         self.conn.execute("INSERT OR REPLACE INTO ip_cache VALUES (?, ?, ?, ?, ?, ?, ?)",
                           (ip, info["asn"], info["prefix"], info["netname"], info["descr"], info["country"], db.now()))
+        self.conn.commit()   # an open write would hold the lock through the next slow lookups: other scans fail
         try:
             self.prefixes.append((ipaddress.ip_network(info["prefix"], strict=False), info))
         except ValueError:

@@ -282,3 +282,11 @@ def test_country_is_address_location_when_the_table_is_loaded(settings, tmp_path
         assert e.get("9.9.9.1")["country"] == "Sweden"
         assert e.get("9.9.9.200")["country"] == "United States"   # outside the table's ranges
         assert e.get("10.0.0.1")["netname"] == "Private/reserved"
+
+
+def test_owner_lookup_does_not_hold_the_write_lock(settings):
+    # the cache write stayed open through 25 slow lookups; other scans hit 'database is locked'
+    rdap = {"asn": "64500", "prefix": "9.9.9.0/24", "netname": "NET-A", "descr": "", "country": "United States"}
+    with db.connect(settings.db_path) as c:
+        scanner.Enricher(c, lookup=lambda ip: dict(rdap)).get("9.9.9.1")
+        assert not c.in_transaction
