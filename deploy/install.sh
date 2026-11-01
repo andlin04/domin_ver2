@@ -155,6 +155,7 @@ server {
     client_body_timeout 10s;
     client_header_timeout 10s;
     limit_conn domin_conn 20;
+    include /etc/nginx/domin-site.d/*.conf;   # extra locations on this host (e.g. /3dtools/)
     location / {
         limit_req zone=domin_pages burst=40 nodelay;
         include /etc/nginx/domin-proxy.conf;
