@@ -17,6 +17,7 @@
   {{ drill.drill_form(q, field, scope, fields) }}
 </section>
 
+<div class="active-filters" id="active-filters" hidden></div>
 <section class="kpis">
   <div class="kpi"><span>Host names</span><b data-k="hosts">{{ "{:,}".format(stats.hosts) }}</b></div>
   <div class="kpi"><span>Addresses</span><b data-k="ips">{{ "{:,}".format(stats.ips) }}</b></div>

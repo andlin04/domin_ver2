@@ -163,13 +163,43 @@
     }
   }
 
+  // the filters in force, at the top of the page: × removes one, "Clear all" every one (figures, charts, table)
+  const LABELS = { domain: "Domain", host: "Host", ip: "Address", asn: "ASN", prefix: "Prefix", netname: "Network",
+    descr: "Description", eu: "EU", country: "Country" };
+  function renderActive(st) {
+    const bar = $("#active-filters");
+    if (!bar) return;
+    const chip = (label, value, clear) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.title = "Remove this filter";
+      b.textContent = `${label}: ${value} ×`;
+      b.addEventListener("click", () => { clear(); apply(); });
+      return b;
+    };
+    const parts = [];
+    if (st.q) parts.push(chip(st.field ? `Search in ${LABELS[st.field]}` : "Search", st.q, () => { form.q.value = ""; }));
+    for (const [k, v] of Object.entries(st.cols)) {
+      parts.push(chip(LABELS[k] || k, v, () => { const i = $(`[name="f_${k}"]`); if (i) i.value = ""; }));
+    }
+    if (parts.length) {
+      const all = document.createElement("button");
+      all.type = "button"; all.className = "btn small"; all.textContent = "Clear all filters";
+      all.addEventListener("click", () => { form.q.value = ""; colBoxes().forEach((i) => { i.value = ""; }); apply(); });
+      parts.push(all);
+    }
+    if (parts.length) { const s = document.createElement("span"); s.className = "muted"; s.textContent = "Filtered by"; parts.unshift(s); }
+    bar.replaceChildren(...parts);
+    bar.hidden = !parts.length;
+  }
+
   function syncUrl() {
     const st = state();
     const p = params(st);
     const csv = $("#csv");
     if (csv) { csv.href = "/search.csv?" + p; csv.hidden = !view.length; }
     const clear = $("#clear-cols");
-    if (clear) clear.hidden = !Object.keys(st.cols).length;
+    if (clear) clear.hidden = true;   // the filter bar at the top does it for the whole page
+    renderActive(st);
     const open = $("#drill-open");
     if (open) open.href = "/all?" + p;
     if (full) {
