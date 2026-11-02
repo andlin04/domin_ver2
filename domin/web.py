@@ -250,12 +250,19 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             return db.search_summary(c, q, field, history, dict(cols))
 
+    @lru_cache(maxsize=16)
+    def history_page(hour: str, offset: int) -> tuple[list[dict], int]:
+        with conn() as c:
+            return db.search(c, history=True, limit=SEARCH_PAGE, offset=offset)
+
     def warm_history() -> None:
-        """The unfiltered whole-history figures take ~15 s over 1.5M records: they are keyed by the hour (not by the
-        latest scan) and computed here at start and early each hour, so no visitor waits for them."""
+        """The unfiltered whole history (1.5M records, 800k host and address pairs) takes ~15 s for the figures and
+        ~5 s per page: both are keyed by the hour (not by the latest scan), and the figures and first page are
+        computed here at start and early each hour, so the default view never waits."""
         while True:
             try:
                 summary(db.now()[:13], "", "", True, ())
+                history_page(db.now()[:13], 0)
             except Exception:
                 log.exception("history figures not computed")
             time.sleep(3600 - time.time() % 3600 + 5)
@@ -267,11 +274,14 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     def all_domains(request: Request, q: str = "", field: str = "", scope: str = "latest",
                     page_no: Annotated[int, Query(alias="page", ge=1, le=100_000)] = 1):
         args = search_args(request, q, field, scope)
-        with conn() as c:
-            rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=(page_no - 1) * SEARCH_PAGE)
-            version = data_version(c)
+        offset = (page_no - 1) * SEARCH_PAGE
         unfiltered_history = args["history"] and not args["q"] and not args["columns"]
+        with conn() as c:
+            version = data_version(c)
+            if not unfiltered_history:
+                rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset)
         if unfiltered_history:
+            rows, total = history_page(db.now()[:13], offset)
             stats = summary(db.now()[:13], "", "", True, ())
         else:
             stats = summary(version, args["q"], args["field"], args["history"], tuple(sorted(args["columns"].items())))
