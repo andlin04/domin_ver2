@@ -228,12 +228,10 @@ def _like(text: str) -> str:
     return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
-           limit: int = 100, offset: int = 0, columns: dict[str, str] | None = None) -> tuple[list[dict], int]:
-    """Records across every domain whose field (any field when empty) contains q, case-insensitive, and each
-    column in columns (domain or a SEARCH_FIELDS name -> text) contains its text too; the latest scan per domain,
-    or with history every finished scan folded to one row per domain, host and address with first and last seen.
-    Returns (page of rows, total matches)."""
+def _matching(q: str, field: str, history: bool, columns: dict[str, str] | None) -> tuple[str, list]:
+    """FROM ... WHERE ... for the records of a search: r = record, s = its scan, d = its domain. q matches field (any
+    field when empty), each column in columns (domain or a SEARCH_FIELDS name -> text) must match its text too;
+    the latest scan per domain, or with history every finished scan."""
     fields = (field,) if field in SEARCH_FIELDS else SEARCH_FIELDS
     where = "(" + " OR ".join(f"r.{f} LIKE ? ESCAPE '\\'" for f in fields) + ")" if q else "1"
     args = [_like(q)] * len(fields) if q else []
@@ -241,19 +239,44 @@ def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool
         if text and (col in SEARCH_FIELDS or col == "domain"):
             where += f" AND {'d.name' if col == 'domain' else 'r.' + col} LIKE ? ESCAPE '\\'"
             args.append(_like(text))
+    scans = "scans s" if history else f"({LATEST}) s"
+    done = "s.status = 'done' AND " if history else ""
+    return (f"FROM records r JOIN {scans} ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id"
+            f" WHERE {done}({where})"), args
+
+
+def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
+           limit: int = 100, offset: int = 0, columns: dict[str, str] | None = None) -> tuple[list[dict], int]:
+    """A page of the records that match (see _matching); with history folded to one row per domain, host and
+    address with first and last seen. Returns (page of rows, total matches)."""
+    frm, args = _matching(q, field, history, columns)
     cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
     if history:
         sql = f"""SELECT d.name AS domain, {cols}, MIN(s.started) AS first_seen, MAX(s.started) AS last_seen,
-                         COUNT(*) AS seen, COUNT(*) OVER () AS total
-                  FROM records r JOIN scans s ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id
-                  WHERE s.status = 'done' AND ({where})
+                         COUNT(*) AS seen, COUNT(*) OVER () AS total {frm}
                   GROUP BY s.domain_id, r.host, r.ip ORDER BY r.host, r.ip LIMIT ? OFFSET ?"""
     else:
-        sql = f"""SELECT d.name AS domain, {cols}, l.started AS last_seen, COUNT(*) OVER () AS total
-                  FROM records r JOIN ({LATEST}) l ON l.id = r.scan_id JOIN domains d ON d.id = l.domain_id
-                  WHERE {where} ORDER BY r.host, r.ip LIMIT ? OFFSET ?"""
+        sql = f"""SELECT d.name AS domain, {cols}, s.started AS last_seen, COUNT(*) OVER () AS total {frm}
+                  ORDER BY r.host, r.ip LIMIT ? OFFSET ?"""
     rows = [dict(r) for r in conn.execute(sql, (*args, limit, offset))]
     return rows, rows[0]["total"] if rows else 0
+
+
+def search_summary(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
+                   columns: dict[str, str] | None = None, top: int = 10) -> dict:
+    """Counts and the top countries / networks / ASNs (distinct addresses) of the records that match."""
+    frm, args = _matching(q, field, history, columns)
+    row = conn.execute(f"""SELECT COUNT(DISTINCT r.host) AS hosts, COUNT(DISTINCT NULLIF(r.ip, '')) AS ips,
+        COUNT(DISTINCT s.domain_id) AS domains, COUNT(DISTINCT NULLIF(r.asn, '')) AS asns,
+        COUNT(DISTINCT NULLIF(r.country, '')) AS countries {frm}""", args).fetchone()
+    located = conn.execute(f"SELECT COUNT(*) AS known, SUM({_EU_SQL}) AS eu FROM (SELECT DISTINCT r.ip, r.country {frm}"
+                           " AND r.ip != '' AND r.country != '')", [*EU_NAMES, *args]).fetchone()
+    out = {**dict(row), "eu_pct": eu_pct(located["eu"] or 0, located["known"])}
+    for f in ("country", "netname", "asn"):
+        out[f] = [dict(r) for r in conn.execute(
+            f"SELECT r.{f} AS label, COUNT(DISTINCT r.ip) AS ips {frm} AND r.ip != '' AND r.{f} != ''"
+            f" GROUP BY r.{f} ORDER BY ips DESC LIMIT ?", (*args, top))]
+    return out
 
 
 def breakdown(rows: list[dict], field: str, limit: int = 10) -> list[dict]:

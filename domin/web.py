@@ -244,14 +244,22 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return {"q": q.strip()[:200], "field": field if field in db.SEARCH_FIELDS else "",
                 "history": scope == "all", "columns": {k: v for k, v in cols.items() if v}}
 
-    @app.get("/search", response_class=HTMLResponse)
-    def search_page(request: Request, q: str = "", field: str = "", scope: str = "latest",
+    @lru_cache(maxsize=64)
+    def summary(version: str, q: str, field: str, history: bool, cols: tuple) -> dict:
+        with conn() as c:
+            return db.search_summary(c, q, field, history, dict(cols))
+
+    @app.get("/all", response_class=HTMLResponse)
+    @app.get("/search", response_class=HTMLResponse, include_in_schema=False)   # the page's first address
+    def all_domains(request: Request, q: str = "", field: str = "", scope: str = "latest",
                     page_no: Annotated[int, Query(alias="page", ge=1, le=100_000)] = 1):
         args = search_args(request, q, field, scope)
         with conn() as c:
             rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=(page_no - 1) * SEARCH_PAGE)
+            version = data_version(c)
+        stats = summary(version, args["q"], args["field"], args["history"], tuple(sorted(args["columns"].items())))
         pages = max(1, -(-total // SEARCH_PAGE))
-        return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages,
+        return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages, stats=stats,
                     q=args["q"], field=args["field"], scope="all" if args["history"] else "latest",
                     cols=args["columns"], fields=SEARCH_LABELS)
 

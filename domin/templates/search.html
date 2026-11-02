@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Search · domin{% endblock %}
-{% block page %}search{% endblock %}
+{% block title %}All domains · domin{% endblock %}
+{% block page %}all{% endblock %}
 {% block content %}
 {% set history = scope == 'all' %}
 {% set params = {'q': q, 'field': field, 'scope': scope} %}
@@ -9,10 +9,12 @@
   {%- if col %}<input class="colf" name="f_{{ col }}" form="search-form" value="{{ cols.get(col, '') }}" placeholder="Filter" autocomplete="off" aria-label="Filter {{ label }}">{% endif %}</th>{% endmacro %}
 <section class="hero">
   <div>
-    <h1>Search the inventory</h1>
-    <p class="muted">Every host name of every scanned domain. Matches any part of the text, upper or lower case.</p>
+    <p class="crumbs"><a href="/">Overview</a> /</p>
+    <h1>All domains</h1>
+    <p class="muted">Every host name of every scanned domain{{ ', whole history' if history else ', latest scan per domain' }}.
+      The search and the column filters narrow the figures, charts and table together.</p>
   </div>
-  <form class="scan-form" id="search-form" action="/search" method="get">
+  <form class="scan-form" id="search-form" action="/all" method="get">
     <input name="q" value="{{ q }}" placeholder="mail, 192.0.2., AMAZON, Sweden…" autocomplete="off" aria-label="Search for">
     <select name="field" aria-label="Field">
       <option value="">All fields</option>
@@ -26,10 +28,34 @@
   </form>
 </section>
 
+<section class="kpis">
+  <div class="kpi"><span>Host names</span><b>{{ "{:,}".format(stats.hosts) }}</b></div>
+  <div class="kpi"><span>Addresses</span><b>{{ "{:,}".format(stats.ips) }}</b></div>
+  <div class="kpi"><span>Domains</span><b>{{ "{:,}".format(stats.domains) }}</b></div>
+  <div class="kpi"><span>ASNs</span><b>{{ "{:,}".format(stats.asns) }}</b></div>
+  <div class="kpi"><span>Countries</span><b>{{ "{:,}".format(stats.countries) }}</b></div>
+  <div class="kpi"><span>In the EU <i>addresses</i></span><b>{{ '—' if stats.eu_pct is none else stats.eu_pct ~ ' %' }}</b></div>
+</section>
+
+<section class="grid g3">
+  <div class="card">
+    <h2>Countries <small>distinct addresses · click a bar to filter</small></h2>
+    <div class="chart h320"><canvas id="countries" data-col="country"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Providers <small>network name</small></h2>
+    <div class="chart h320"><canvas id="netnames" data-col="netname"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>ASNs <small>distinct addresses</small></h2>
+    <div class="chart h320"><canvas id="asns" data-col="asn"></canvas></div>
+  </div>
+</section>
+
 <section class="card">
   <div class="card-head">
-    <h2>Results <small>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
-    <span>{% if cols %}<a class="btn small" href="/search?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}">Clear column filters</a>{% endif %}
+    <h2>Records <small>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
+    <span>{% if cols %}<a class="btn small" href="/all?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}">Clear column filters</a>{% endif %}
     {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}</span>
   </div>
   <p class="muted small-note">Type in the box under a column heading and press Enter; every filter narrows the result further.</p>
@@ -55,10 +81,11 @@
   </div>
   {% if pages > 1 %}
   <nav class="pager">
-    {% if page_no > 1 %}<a class="btn small" href="/search?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}
+    {% if page_no > 1 %}<a class="btn small" href="/all?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}
     <span class="muted">Page {{ page_no }} of {{ "{:,}".format(pages) }}</span>
-    {% if page_no < pages %}<a class="btn small" href="/search?{{ dict(params, page=page_no + 1)|urlencode }}">Next →</a>{% endif %}
+    {% if page_no < pages %}<a class="btn small" href="/all?{{ dict(params, page=page_no + 1)|urlencode }}">Next →</a>{% endif %}
   </nav>
   {% endif %}
 </section>
+<script type="application/json" id="page-data">{{ {'countries': stats.country, 'netnames': stats.netname, 'asns': stats.asn}|tojson }}</script>
 {% endblock %}

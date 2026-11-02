@@ -5,8 +5,10 @@ Domain inventory: host names, addresses and hosting providers per domain, and ho
 - **Overview:** totals, scans per day, hosting countries and providers across all domains, filterable domain table.
 - **Domain page:** footprint over time, host names added/removed per scan, countries and providers, changes since
   the previous scan, all records (filter, sort, CSV), compare any two scans.
-- **Search:** every host name of every domain in one place: search host, address, ASN, prefix, network,
-  description or country, in the latest scans or the whole history (first and last seen), CSV download.
+- **All domains:** the domain page's analysis for every domain at once: host names, addresses, domains, ASNs,
+  countries and EU share, charts of countries, providers and ASNs (click a bar to filter), and every record. Search
+  host, address, ASN, prefix, network, description or country, in the latest scans or the whole history (first
+  and last seen); the search and the column filters narrow the figures, charts and table together. CSV download.
 - **Tables:** sort by any column; a filter box under each column heading, and the filters add up (search page:
   across every match, not just the page shown).
 - **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.

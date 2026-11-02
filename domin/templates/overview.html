@@ -59,7 +59,8 @@
 <section class="card">
   <div class="card-head">
     <h2>Domains <small>{{ domains|length }}</small></h2>
-    <input class="filter" placeholder="Filter…" data-filter="#domains" aria-label="Filter domains">
+    <span><a class="btn small" href="/all">All domains: every record, column filters →</a>
+    <input class="filter" placeholder="Filter…" data-filter="#domains" aria-label="Filter domains"></span>
   </div>
   <div class="table-wrap">
     <table id="domains" class="sortable" data-colfilters>

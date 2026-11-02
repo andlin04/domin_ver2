@@ -84,14 +84,23 @@ def test_search_across_domains(settings):
         assert db.search(c, columns={"domain": "example.se", "ip": "198.51"})[1] == 1
         assert db.search(c, columns={"domain": "other"})[1] == 0
         assert db.search(c, columns={"nope": "x"})[1] == 2   # unknown columns are ignored
+        # figures and charts of the all-domains view follow the same filters
+        s = db.search_summary(c)
+        assert (s["hosts"], s["ips"], s["domains"], s["asns"], s["countries"], s["eu_pct"]) == (2, 2, 1, 2, 2, 100.0)
+        s = db.search_summary(c, history=True, columns={"country": "swe"})
+        assert (s["hosts"], s["ips"]) == (3, 3) and s["country"] == [{"label": "Sweden", "ips": 3}]
+        assert s["netname"] == [{"label": "NET-A", "ips": 3}]
+        assert db.search_summary(c, "nothing-like-this")["eu_pct"] is None
     with TestClient(create_app(settings)) as h:
-        r = h.get("/search", params={"q": "old", "scope": "all"})
+        r = h.get("/all", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
-        assert '<a href="/search" class="active">Search</a>' in r.text
-        assert "old.example.se" not in h.get("/search", params={"q": "old"}).text
-        r = h.get("/search", params={"q": "nothing-like-this"})
+        assert '<a href="/all" class="active">All domains</a>' in r.text and 'id="page-data"' in r.text
+        assert "old.example.se" in h.get("/search", params={"q": "old", "scope": "all"}).text   # first address
+        assert "old.example.se" not in h.get("/all", params={"q": "old"}).text
+        r = h.get("/all", params={"q": "nothing-like-this"})
         assert "No matches." in r.text and 'name="f_host" form="search-form"' in r.text   # filters stay editable
-        r = h.get("/search", params={"scope": "all", "f_country": "Sweden", "f_host": "www"})
+        assert 'href="/all"' in h.get("/").text   # from the overview's domain list
+        r = h.get("/all", params={"scope": "all", "f_country": "Sweden", "f_host": "www"})
         assert r.text.count('<td class="host">') == 1 and 'value="Sweden"' in r.text and "Clear column filters" in r.text
         assert "f_country=Sweden" in r.text   # CSV and page links keep the filters
         assert "data-colfilters" in h.get("/").text and "applyFilters" in h.get("/static/app.js").text
