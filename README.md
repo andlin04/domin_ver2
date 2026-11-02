@@ -43,6 +43,10 @@ bash deploy/install.sh --domain domin.example.com --email you@example.com --hist
 
 **Behind Cloudflare** (proxied DNS, Cloudflare does HTTPS): leave out `--email`, add `--cloudflare` so rate limits
 see the visitor's address, e.g. `--domain example.com --alias www.example.com --cloudflare`.
+To encrypt Cloudflare → server too, create an Origin CA certificate in Cloudflare, save it as `origin.crt` and its
+key as `origin.key` (mode 600) in a root-only directory and add `--origin-cert <dir>`: nginx then serves HTTPS on 443
+and only accepts Cloudflare's client certificate. In Cloudflare, turn on Authenticated Origin Pulls first, then set
+SSL mode to Full (strict); once traffic arrives on 443, close port 80 in the firewall.
 
 **Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (keeps the
 database and certificate). Options: see the top of [deploy/install.sh](deploy/install.sh).

@@ -13,16 +13,21 @@
 #   --alias A           extra host name for the same site (e.g. www.example.com)
 #   --cloudflare        site is proxied by Cloudflare: take the client address from CF-Connecting-IP (Cloudflare's
 #                       published ranges only), so rate limits apply per visitor; HTTPS can then stay at Cloudflare
+#   --origin-cert DIR   with --cloudflare: HTTPS on 443 with a Cloudflare Origin CA certificate (DIR/origin.crt and
+#                       DIR/origin.key) that only accepts Cloudflare's client certificate (Authenticated Origin
+#                       Pulls); for SSL mode Full (strict). Port 80 keeps serving; close it in the firewall once
+#                       Cloudflare connects on 443.
 #
 # Re-running updates the code and keeps the database, /etc/domin.env and the TLS certificate.
 set -euo pipefail
 
-DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0
+DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN=
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN=$2; shift ;;
     --alias) ALIAS=$2; shift ;;
     --cloudflare) CLOUDFLARE=1 ;;
+    --origin-cert) ORIGIN=$2; shift ;;
     --email) EMAIL=$2; shift ;;
     --history) HISTORY=$2; shift ;;
     --replace-history) REPLACE=1 ;;
@@ -37,6 +42,10 @@ done
 [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "bad --domain"; exit 2; }
 [[ "$ALIAS" =~ ^[A-Za-z0-9.-]*$ ]] || { echo "bad --alias"; exit 2; }
 [ -z "$HISTORY" ] || [ -f "$HISTORY" ] || { echo "no such file: $HISTORY"; exit 2; }
+if [ -n "$ORIGIN" ]; then
+  [ "$CLOUDFLARE" = 1 ] && [ -z "$EMAIL" ] || { echo "--origin-cert needs --cloudflare and no --email"; exit 2; }
+  [ -f "$ORIGIN/origin.crt" ] && [ -f "$ORIGIN/origin.key" ] || { echo "need $ORIGIN/origin.crt and origin.key"; exit 2; }
+fi
 SRC=$(cd "$(dirname "$0")/.." && pwd)
 APP=/opt/domin DATA=/var/lib/domin
 
@@ -149,21 +158,48 @@ server {
     listen 80;
     listen [::]:80;
     server_name $DOMAIN $ALIAS;
-    server_tokens off;
-    client_max_body_size 4k;   # the only request body is a domain name in JSON
-    large_client_header_buffers 4 8k;
-    client_body_timeout 10s;
-    client_header_timeout 10s;
-    limit_conn domin_conn 20;
-    include /etc/nginx/domin-site.d/*.conf;   # extra locations on this host (e.g. /3dtools/)
-    location / {
-        limit_req zone=domin_pages burst=40 nodelay;
-        include /etc/nginx/domin-proxy.conf;
-    }
-    location /api/ {
-        limit_req zone=domin_api burst=10 nodelay;
-        include /etc/nginx/domin-proxy.conf;
-    }
+    include /etc/nginx/domin-site.conf;
+}
+EOF
+if [ -n "$ORIGIN" ]; then
+  # Cloudflare's client certificate for Authenticated Origin Pulls (public CA, same for every zone)
+  AOP="$ORIGIN/cloudflare-aop-ca.pem"
+  [ -s "$AOP" ] || curl -fsS -o "$AOP" https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
+  openssl x509 -in "$AOP" -noout -subject | grep -q "Origin Pull" || { echo "bad $AOP"; rm -f "$AOP"; exit 1; }
+  cat >> /etc/nginx/sites-available/domin <<EOF
+server {   # unknown names (SNI): refuse the TLS handshake
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    ssl_reject_handshake on;
+}
+server {   # Cloudflare -> origin, SSL mode Full (strict); only Cloudflare's client certificate gets in
+    listen 443 ssl http2;   # 'http2 on' needs nginx 1.25; Ubuntu 24.04 has 1.24
+    listen [::]:443 ssl http2;
+    server_name $DOMAIN $ALIAS;
+    ssl_certificate $ORIGIN/origin.crt;
+    ssl_certificate_key $ORIGIN/origin.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_client_certificate $AOP;
+    ssl_verify_client on;
+    include /etc/nginx/domin-site.conf;
+}
+EOF
+fi
+cat > /etc/nginx/domin-site.conf <<'EOF'
+server_tokens off;
+client_max_body_size 4k;   # the only request body is a domain name in JSON
+large_client_header_buffers 4 8k;
+client_body_timeout 10s;
+client_header_timeout 10s;
+limit_conn domin_conn 20;
+include /etc/nginx/domin-site.d/*.conf;   # extra locations on this host (e.g. /3dtools/)
+location / {
+    limit_req zone=domin_pages burst=40 nodelay;
+    include /etc/nginx/domin-proxy.conf;
+}
+location /api/ {
+    limit_req zone=domin_api burst=10 nodelay;
+    include /etc/nginx/domin-proxy.conf;
 }
 EOF
 cat > /etc/nginx/domin-proxy.conf <<'EOF'
