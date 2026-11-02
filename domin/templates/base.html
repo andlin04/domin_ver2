@@ -16,7 +16,8 @@
     </a>
     <nav>
       <a href="/" class="{{ 'active' if self.page() == 'overview' }}">Overview</a>
-      <a href="/tools" class="{{ 'active' if self.page() == 'tools' }}">Tools</a>
+      <a href="/search" class="{{ 'active' if self.page() == 'search' }}">Search</a>
+      <a href="/tools"class="{{ 'active' if self.page() == 'tools' }}">Tools</a>
       {% if show_admin %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Admin</a>{% endif %}
     </nav>
     <form class="jump" action="/d/" data-jump>

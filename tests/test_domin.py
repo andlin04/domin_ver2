@@ -65,6 +65,29 @@ def test_web(settings):
         assert h.post("/api/scan", json={"domain": "not a domain"}).status_code == 422
 
 
+def test_search_across_domains(settings):
+    with db.connect(settings.db_path) as c:
+        rows, total = db.search(c, "EXAMPLE")
+        assert total == 2 and {r["host"] for r in rows} == {"www.example.se", "new.example.se"}   # latest scan only
+        assert db.search(c, "old")[1] == 0
+        rows, total = db.search(c, "old", history=True)
+        assert total == 1 and rows[0]["first_seen"][:10] == rows[0]["last_seen"][:10] == "2025-03-01"
+        assert db.search(c, history=True)[1] == 4   # every host and address pair ever seen
+        assert db.search(c, "net-b", field="netname")[1] == 1 and db.search(c, "net-b", field="host")[1] == 0
+        assert db.search(c, "%")[1] == 0 and db.search(c, "_")[1] == 0   # wildcards are plain text
+        rows, total = db.search(c, "example", limit=1, offset=1)
+        assert total == 2 and len(rows) == 1
+    with TestClient(create_app(settings)) as h:
+        r = h.get("/search", params={"q": "old", "scope": "all"})
+        assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
+        assert '<a href="/search" class="active">Search</a>' in r.text
+        assert "old.example.se" not in h.get("/search", params={"q": "old"}).text
+        assert "No matches." in h.get("/search", params={"q": "nothing-like-this"}).text
+        assert h.get("/search", params={"page": 0}).status_code == 422
+        body = h.get("/search.csv", params={"q": "example", "field": "nope"}).text
+        assert body.startswith("domain,host,ip") and len(body.strip().splitlines()) == 3
+
+
 def test_tables_wrap_long_text_and_show_hidden_columns(settings):
     with TestClient(create_app(settings)) as h:
         page = h.get(f"/d/example.se?scan={h.get('/api/domains/example.se/history').json()[0]['id']}").text

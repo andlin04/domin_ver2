@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Search · domin{% endblock %}
+{% block page %}search{% endblock %}
+{% block content %}
+{% set history = scope == 'all' %}
+{% set params = {'q': q, 'field': field, 'scope': scope} %}
+<section class="hero">
+  <div>
+    <h1>Search the inventory</h1>
+    <p class="muted">Every host name of every scanned domain. Matches any part of the text, upper or lower case.</p>
+  </div>
+  <form class="scan-form" action="/search" method="get">
+    <input name="q" value="{{ q }}" placeholder="mail, 192.0.2., AMAZON, Sweden…" autocomplete="off" aria-label="Search for">
+    <select name="field" aria-label="Field">
+      <option value="">All fields</option>
+      {% for key, label in fields.items() %}<option value="{{ key }}" {{ 'selected' if field == key }}>{{ label }}</option>{% endfor %}
+    </select>
+    <select name="scope" aria-label="Scans">
+      <option value="latest">Latest scan per domain</option>
+      <option value="all" {{ 'selected' if history }}>All scans (history)</option>
+    </select>
+    <button class="btn primary" type="submit">Search</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Results <small>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
+    {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}
+  </div>
+  {% if not rows %}
+    <p class="muted">{{ 'No matches.' if q or page_no > 1 else 'The inventory is empty.' }}</p>
+  {% else %}
+  <div class="table-wrap">
+    <table id="results" class="sortable">
+      <thead><tr><th data-sort="text">Host</th><th data-sort="text">Domain</th><th data-sort="ip">Address</th>
+        <th data-sort="num" class="num">ASN</th><th data-sort="text">Prefix</th><th data-sort="text">Network</th>
+        <th data-sort="text">Description</th><th data-sort="text">Country</th>
+        {% if history %}<th data-sort="text">First seen</th>{% endif %}<th data-sort="text">Last seen</th>
+        {% if history %}<th data-sort="num" class="num">Scans</th>{% endif %}</tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td class="host">{{ r.host }}</td><td><a href="/d/{{ r.domain }}">{{ r.domain }}</a></td>
+          <td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td><td class="mono">{{ r.prefix }}</td>
+          <td class="text net">{{ r.netname }}</td>
+          <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td><td>{{ r.country }}</td>
+          {% if history %}<td>{{ r.first_seen[:10] }}</td>{% endif %}<td>{{ r.last_seen[:10] }}</td>
+          {% if history %}<td class="num">{{ r.seen }}</td>{% endif %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page_no > 1 %}<a class="btn small" href="/search?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}
+    <span class="muted">Page {{ page_no }} of {{ "{:,}".format(pages) }}</span>
+    {% if page_no < pages %}<a class="btn small" href="/search?{{ dict(params, page=page_no + 1)|urlencode }}">Next →</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

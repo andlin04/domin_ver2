@@ -33,6 +33,10 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' 
        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
 MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
+SEARCH_PAGE = 100   # search results per page
+SEARCH_CSV_MAX = 100_000   # rows in a search download
+SEARCH_LABELS = {"host": "Host name", "ip": "Address", "asn": "ASN", "prefix": "Prefix", "netname": "Network",
+                 "descr": "Description", "country": "Country"}
 PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
 QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
 ADMIN = "/admin"   # shown and served only to DOMIN_ADMIN_IPS
@@ -124,7 +128,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         if path == ADMIN or path.startswith(ADMIN + "/"):
             return None
         parts = path.strip("/").split("/")
-        if path.startswith("/scans/") and path.endswith(".csv"):
+        if path == "/search.csv" or path.startswith("/scans/") and path.endswith(".csv"):
             return "download", ""
         if path.startswith(("/api/rdap/", "/api/email/")):
             return "tool", parts[-1]
@@ -233,6 +237,35 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             change = db.diff(db.records(c, sa["id"]), db.records(c, sb["id"]))
             scans = [h for h in db.history(c, name) if h["status"] == "done"]
         return page(request, "compare.html", domain=d, a=sa, b=sb, change=change, scans=scans)
+
+    def search_args(q: str, field: str, scope: str) -> dict:
+        return {"q": q.strip()[:200], "field": field if field in db.SEARCH_FIELDS else "",
+                "history": scope == "all"}
+
+    @app.get("/search", response_class=HTMLResponse)
+    def search_page(request: Request, q: str = "", field: str = "", scope: str = "latest",
+                    page_no: Annotated[int, Query(alias="page", ge=1, le=100_000)] = 1):
+        args = search_args(q, field, scope)
+        with conn() as c:
+            rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=(page_no - 1) * SEARCH_PAGE)
+        pages = max(1, -(-total // SEARCH_PAGE))
+        return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages,
+                    q=args["q"], field=args["field"], scope="all" if args["history"] else "latest",
+                    fields=SEARCH_LABELS)
+
+    @app.get("/search.csv")
+    def search_csv(q: str = "", field: str = "", scope: str = "latest"):
+        args = search_args(q, field, scope)
+        with conn() as c:
+            rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX)
+        names = ["domain", *db.RECORD_FIELDS, *(["first_seen", "last_seen", "seen"] if args["history"]
+                                                 else ["last_seen"])]
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=names, extrasaction="ignore")
+        w.writeheader()
+        w.writerows({k: csv_safe(v) for k, v in r.items()} for r in rows)
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="domin_search_{db.now()[:10]}.csv"'})
 
     @app.get("/tools", response_class=HTMLResponse)
     def tools_page(request: Request, domain: str = ""):

@@ -221,6 +221,33 @@ def records(conn: sqlite3.Connection, scan_id: int) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, (scan_id,))]
 
 
+SEARCH_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
+
+
+def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
+           limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
+    """Records across every domain whose field (any field when empty) contains q, case-insensitive; the latest
+    scan per domain, or with history every finished scan folded to one row per domain, host and address with
+    first and last seen. Returns (page of rows, total matches)."""
+    fields = (field,) if field in SEARCH_FIELDS else SEARCH_FIELDS
+    like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    where = " OR ".join(f"r.{f} LIKE ? ESCAPE '\\'" for f in fields) if q else "1"
+    args = [like] * len(fields) if q else []
+    cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
+    if history:
+        sql = f"""SELECT d.name AS domain, {cols}, MIN(s.started) AS first_seen, MAX(s.started) AS last_seen,
+                         COUNT(*) AS seen, COUNT(*) OVER () AS total
+                  FROM records r JOIN scans s ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id
+                  WHERE s.status = 'done' AND ({where})
+                  GROUP BY s.domain_id, r.host, r.ip ORDER BY r.host, r.ip LIMIT ? OFFSET ?"""
+    else:
+        sql = f"""SELECT d.name AS domain, {cols}, l.started AS last_seen, COUNT(*) OVER () AS total
+                  FROM records r JOIN ({LATEST}) l ON l.id = r.scan_id JOIN domains d ON d.id = l.domain_id
+                  WHERE {where} ORDER BY r.host, r.ip LIMIT ? OFFSET ?"""
+    rows = [dict(r) for r in conn.execute(sql, (*args, limit, offset))]
+    return rows, rows[0]["total"] if rows else 0
+
+
 def breakdown(rows: list[dict], field: str, limit: int = 10) -> list[dict]:
     """Distinct addresses per value of field; the tail is folded into 'Other'."""
     groups: dict[str, set[str]] = {}

@@ -131,6 +131,7 @@ td.net { max-width: 14rem; }
 tr[data-href] { cursor: pointer; }
 td.clip { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .filter { width: 260px; }
+.pager { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: .75rem; }
 .more { display: block; margin: .75rem auto 0; }
 
 .changes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
