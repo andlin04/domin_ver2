@@ -134,7 +134,8 @@ def test_search_across_domains(settings):
         r = h.get("/all", params={"scope": "all", "f_country": "Sweden", "f_host": "www"})
         assert r.text.count('<td class="host">') == 1 and 'value="Sweden"' in r.text and "Clear column filters" in r.text
         assert "f_country=Sweden" in r.text   # CSV and page links keep the filters
-        assert "data-colfilters" in h.get("/").text and "applyFilters" in h.get("/static/app.js").text
+        assert "data-colfilters" not in h.get("/").text   # overview domain list: the Filter box only
+        assert "applyFilters" in h.get("/static/app.js").text
         assert h.get("/search", params={"page": 0}).status_code == 422
         body = h.get("/search.csv", params={"q": "example", "field": "nope"}).text
         assert body.startswith("domain,host,ip") and len(body.strip().splitlines()) == 3
