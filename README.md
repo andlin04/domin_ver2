@@ -7,6 +7,8 @@ Domain inventory: host names, addresses and hosting providers per domain, and ho
   the previous scan, all records (filter, sort, CSV), compare any two scans.
 - **Search:** every host name of every domain in one place: search host, address, ASN, prefix, network,
   description or country, in the latest scans or the whole history (first and last seen), CSV download.
+- **Tables:** sort by any column; a filter box under each column heading, and the filters add up (search page:
+  across every match, not just the page shown).
 - **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
 - **Admin page:** usage statistics without stored IP addresses, scan job control, live tuning (see below).
 - **Scans:** certificate transparency (crt.sh) plus common names, MX and NS; DNS A/AAAA; RDAP for ASN, prefix,

@@ -224,15 +224,23 @@ def records(conn: sqlite3.Connection, scan_id: int) -> list[dict]:
 SEARCH_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
 
 
+def _like(text: str) -> str:
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
-           limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
-    """Records across every domain whose field (any field when empty) contains q, case-insensitive; the latest
-    scan per domain, or with history every finished scan folded to one row per domain, host and address with
-    first and last seen. Returns (page of rows, total matches)."""
+           limit: int = 100, offset: int = 0, columns: dict[str, str] | None = None) -> tuple[list[dict], int]:
+    """Records across every domain whose field (any field when empty) contains q, case-insensitive, and each
+    column in columns (domain or a SEARCH_FIELDS name -> text) contains its text too; the latest scan per domain,
+    or with history every finished scan folded to one row per domain, host and address with first and last seen.
+    Returns (page of rows, total matches)."""
     fields = (field,) if field in SEARCH_FIELDS else SEARCH_FIELDS
-    like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    where = " OR ".join(f"r.{f} LIKE ? ESCAPE '\\'" for f in fields) if q else "1"
-    args = [like] * len(fields) if q else []
+    where = "(" + " OR ".join(f"r.{f} LIKE ? ESCAPE '\\'" for f in fields) + ")" if q else "1"
+    args = [_like(q)] * len(fields) if q else []
+    for col, text in (columns or {}).items():
+        if text and (col in SEARCH_FIELDS or col == "domain"):
+            where += f" AND {'d.name' if col == 'domain' else 'r.' + col} LIKE ? ESCAPE '\\'"
+            args.append(_like(text))
     cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
     if history:
         sql = f"""SELECT d.name AS domain, {cols}, MIN(s.started) AS first_seen, MAX(s.started) AS last_seen,

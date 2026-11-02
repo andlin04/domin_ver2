@@ -131,6 +131,10 @@ td.net { max-width: 14rem; }
 tr[data-href] { cursor: pointer; }
 td.clip { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .filter { width: 260px; }
+/* a filter box under each column heading (search page: server side; other tables: app.js) */
+th .colf { display: block; width: 100%; min-width: 5rem; margin-top: .3rem; padding: .2rem .4rem; font-size: .8rem; font-weight: 400; cursor: text; }
+th.num .colf { text-align: right; }
+.small-note { font-size: .8rem; margin: -.4rem 0 .6rem; }
 .pager { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: .75rem; }
 .more { display: block; margin: .75rem auto 0; }
 

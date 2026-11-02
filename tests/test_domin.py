@@ -77,12 +77,24 @@ def test_search_across_domains(settings):
         assert db.search(c, "%")[1] == 0 and db.search(c, "_")[1] == 0   # wildcards are plain text
         rows, total = db.search(c, "example", limit=1, offset=1)
         assert total == 2 and len(rows) == 1
+        # column filters narrow each other and the search
+        assert db.search(c, history=True, columns={"country": "swe"})[1] == 3
+        assert db.search(c, history=True, columns={"country": "swe", "host": "www"})[1] == 1
+        assert db.search(c, "new", history=True, columns={"country": "swe"})[1] == 1
+        assert db.search(c, columns={"domain": "example.se", "ip": "198.51"})[1] == 1
+        assert db.search(c, columns={"domain": "other"})[1] == 0
+        assert db.search(c, columns={"nope": "x"})[1] == 2   # unknown columns are ignored
     with TestClient(create_app(settings)) as h:
         r = h.get("/search", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
         assert '<a href="/search" class="active">Search</a>' in r.text
         assert "old.example.se" not in h.get("/search", params={"q": "old"}).text
-        assert "No matches." in h.get("/search", params={"q": "nothing-like-this"}).text
+        r = h.get("/search", params={"q": "nothing-like-this"})
+        assert "No matches." in r.text and 'name="f_host" form="search-form"' in r.text   # filters stay editable
+        r = h.get("/search", params={"scope": "all", "f_country": "Sweden", "f_host": "www"})
+        assert r.text.count('<td class="host">') == 1 and 'value="Sweden"' in r.text and "Clear column filters" in r.text
+        assert "f_country=Sweden" in r.text   # CSV and page links keep the filters
+        assert "data-colfilters" in h.get("/").text and "applyFilters" in h.get("/static/app.js").text
         assert h.get("/search", params={"page": 0}).status_code == 422
         body = h.get("/search.csv", params={"q": "example", "field": "nope"}).text
         assert body.startswith("domain,host,ip") and len(body.strip().splitlines()) == 3

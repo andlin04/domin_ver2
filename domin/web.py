@@ -238,24 +238,26 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             scans = [h for h in db.history(c, name) if h["status"] == "done"]
         return page(request, "compare.html", domain=d, a=sa, b=sb, change=change, scans=scans)
 
-    def search_args(q: str, field: str, scope: str) -> dict:
+    def search_args(request: Request, q: str, field: str, scope: str) -> dict:
+        """The search, plus the column filters f_<column> (each one narrows the result further)."""
+        cols = {k: request.query_params.get("f_" + k, "").strip()[:200] for k in ("domain", *db.SEARCH_FIELDS)}
         return {"q": q.strip()[:200], "field": field if field in db.SEARCH_FIELDS else "",
-                "history": scope == "all"}
+                "history": scope == "all", "columns": {k: v for k, v in cols.items() if v}}
 
     @app.get("/search", response_class=HTMLResponse)
     def search_page(request: Request, q: str = "", field: str = "", scope: str = "latest",
                     page_no: Annotated[int, Query(alias="page", ge=1, le=100_000)] = 1):
-        args = search_args(q, field, scope)
+        args = search_args(request, q, field, scope)
         with conn() as c:
             rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=(page_no - 1) * SEARCH_PAGE)
         pages = max(1, -(-total // SEARCH_PAGE))
         return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages,
                     q=args["q"], field=args["field"], scope="all" if args["history"] else "latest",
-                    fields=SEARCH_LABELS)
+                    cols=args["columns"], fields=SEARCH_LABELS)
 
     @app.get("/search.csv")
-    def search_csv(q: str = "", field: str = "", scope: str = "latest"):
-        args = search_args(q, field, scope)
+    def search_csv(request: Request, q: str = "", field: str = "", scope: str = "latest"):
+        args = search_args(request, q, field, scope)
         with conn() as c:
             rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX)
         names = ["domain", *db.RECORD_FIELDS, *(["first_seen", "last_seen", "seen"] if args["history"]

@@ -43,15 +43,32 @@ $$("table.sortable").forEach((table) => {
     body.append(...rows);
   }));
 });
-$$("[data-filter]").forEach((input) => {
-  const table = $(input.dataset.filter);
-  input.addEventListener("input", () => {
-    const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-    for (const tr of table.tBodies[0].rows) {
-      const text = tr.textContent.toLowerCase();
-      tr.hidden = !words.every((w) => text.includes(w));
-    }
+document.addEventListener("click", (ev) => { if (ev.target.closest("th .colf")) ev.stopPropagation(); }, true);
+// the Filter box (all words, anywhere in the row) and a box per column (text in that column) add up
+function applyFilters(table) {
+  const words = ($(`[data-filter="#${table.id}"]`)?.value || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const cols = $$("thead th", table).map((th) => ($(".colf", th)?.value || "").trim().toLowerCase());
+  for (const tr of table.tBodies[0].rows) {
+    const text = tr.textContent.toLowerCase();
+    tr.hidden = !words.every((w) => text.includes(w))
+      || !cols.every((c, i) => !c || (tr.cells[i]?.textContent || "").toLowerCase().includes(c));
+  }
+}
+$$("table[data-colfilters]").forEach((table) => {
+  $$("thead th", table).forEach((th) => {
+    const input = document.createElement("input");
+    input.className = "colf";
+    input.placeholder = "Filter";
+    input.autocomplete = "off";
+    input.setAttribute("aria-label", `Filter ${th.textContent.trim()}`);
+    input.addEventListener("input", () => applyFilters(table));
+    th.append(input);
   });
+});
+$$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// search page: empty boxes stay out of the address
+$("#search-form")?.addEventListener("formdata", (ev) => {
+  for (const [k, v] of [...ev.formData]) if (!v && k !== "q") ev.formData.delete(k);
 });
 // sideways overflow: a fade and a "More columns" button while columns are hidden to the right
 $$(".table-wrap").forEach((wrap) => {

@@ -4,12 +4,15 @@
 {% block content %}
 {% set history = scope == 'all' %}
 {% set params = {'q': q, 'field': field, 'scope': scope} %}
+{% for k, v in cols.items() %}{% set _ = params.update({'f_' ~ k: v}) %}{% endfor %}
+{% macro th(label, col='', sort='text', cls='') %}<th data-sort="{{ sort }}"{% if cls %} class="{{ cls }}"{% endif %}>{{ label }}
+  {%- if col %}<input class="colf" name="f_{{ col }}" form="search-form" value="{{ cols.get(col, '') }}" placeholder="Filter" autocomplete="off" aria-label="Filter {{ label }}">{% endif %}</th>{% endmacro %}
 <section class="hero">
   <div>
     <h1>Search the inventory</h1>
     <p class="muted">Every host name of every scanned domain. Matches any part of the text, upper or lower case.</p>
   </div>
-  <form class="scan-form" action="/search" method="get">
+  <form class="scan-form" id="search-form" action="/search" method="get">
     <input name="q" value="{{ q }}" placeholder="mail, 192.0.2., AMAZON, Sweden…" autocomplete="off" aria-label="Search for">
     <select name="field" aria-label="Field">
       <option value="">All fields</option>
@@ -26,19 +29,19 @@
 <section class="card">
   <div class="card-head">
     <h2>Results <small>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
-    {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}
+    <span>{% if cols %}<a class="btn small" href="/search?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}">Clear column filters</a>{% endif %}
+    {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}</span>
   </div>
-  {% if not rows %}
-    <p class="muted">{{ 'No matches.' if q or page_no > 1 else 'The inventory is empty.' }}</p>
-  {% else %}
+  <p class="muted small-note">Type in the box under a column heading and press Enter; every filter narrows the result further.</p>
   <div class="table-wrap">
     <table id="results" class="sortable">
-      <thead><tr><th data-sort="text">Host</th><th data-sort="text">Domain</th><th data-sort="ip">Address</th>
-        <th data-sort="num" class="num">ASN</th><th data-sort="text">Prefix</th><th data-sort="text">Network</th>
-        <th data-sort="text">Description</th><th data-sort="text">Country</th>
-        {% if history %}<th data-sort="text">First seen</th>{% endif %}<th data-sort="text">Last seen</th>
-        {% if history %}<th data-sort="num" class="num">Scans</th>{% endif %}</tr></thead>
+      <thead><tr>{{ th('Host', 'host') }}{{ th('Domain', 'domain') }}{{ th('Address', 'ip', 'ip') }}
+        {{ th('ASN', 'asn', 'num', 'num') }}{{ th('Prefix', 'prefix') }}{{ th('Network', 'netname') }}
+        {{ th('Description', 'descr') }}{{ th('Country', 'country') }}
+        {% if history %}{{ th('First seen') }}{% endif %}{{ th('Last seen') }}
+        {% if history %}{{ th('Scans', '', 'num', 'num') }}{% endif %}</tr></thead>
       <tbody>
+      {% if not rows %}<tr><td class="muted" colspan="11">No matches.</td></tr>{% endif %}
       {% for r in rows %}
         <tr><td class="host">{{ r.host }}</td><td><a href="/d/{{ r.domain }}">{{ r.domain }}</a></td>
           <td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td><td class="mono">{{ r.prefix }}</td>
@@ -50,7 +53,6 @@
       </tbody>
     </table>
   </div>
-  {% endif %}
   {% if pages > 1 %}
   <nav class="pager">
     {% if page_no > 1 %}<a class="btn small" href="/search?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}
