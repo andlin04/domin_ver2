@@ -100,6 +100,9 @@ def test_search_across_domains(settings):
         r = h.get("/all", params={"q": "nothing-like-this"})
         assert "No matches." in r.text and 'name="f_host" form="search-form"' in r.text   # filters stay editable
         assert 'href="/all"' in h.get("/").text   # from the overview's domain list
+        r = h.get("/all", params={"scope": "all"})   # unfiltered history: hourly figures, all 4 pairs
+        assert "updated once an hour" in r.text and "4 host and address pairs" in r.text
+        assert "updated once an hour" not in h.get("/all", params={"scope": "all", "f_host": "www"}).text
         r = h.get("/all", params={"scope": "all", "f_country": "Sweden", "f_host": "www"})
         assert r.text.count('<td class="host">') == 1 and 'value="Sweden"' in r.text and "Clear column filters" in r.text
         assert "f_country=Sweden" in r.text   # CSV and page links keep the filters

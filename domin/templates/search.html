@@ -12,7 +12,8 @@
     <p class="crumbs"><a href="/">Overview</a> /</p>
     <h1>All domains</h1>
     <p class="muted">Every host name of every scanned domain{{ ', whole history' if history else ', latest scan per domain' }}.
-      The search and the column filters narrow the figures, charts and table together.</p>
+      The search and the column filters narrow the figures, charts and table together.
+      {%- if hourly %} Figures and charts for the whole history are updated once an hour.{% endif %}</p>
   </div>
   <form class="scan-form" id="search-form" action="/all" method="get">
     <input name="q" value="{{ q }}" placeholder="mail, 192.0.2., AMAZON, Sweden…" autocomplete="off" aria-label="Search for">

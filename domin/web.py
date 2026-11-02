@@ -8,6 +8,7 @@ import hmac
 import io
 import ipaddress
 import logging
+import threading
 import time
 from collections import defaultdict, deque
 from functools import lru_cache
@@ -249,6 +250,18 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             return db.search_summary(c, q, field, history, dict(cols))
 
+    def warm_history() -> None:
+        """The unfiltered whole-history figures take ~15 s over 1.5M records: they are keyed by the hour (not by the
+        latest scan) and computed here at start and early each hour, so no visitor waits for them."""
+        while True:
+            try:
+                summary(db.now()[:13], "", "", True, ())
+            except Exception:
+                log.exception("history figures not computed")
+            time.sleep(3600 - time.time() % 3600 + 5)
+
+    threading.Thread(target=warm_history, daemon=True, name="warm-history").start()
+
     @app.get("/all", response_class=HTMLResponse)
     @app.get("/search", response_class=HTMLResponse, include_in_schema=False)   # the page's first address
     def all_domains(request: Request, q: str = "", field: str = "", scope: str = "latest",
@@ -257,9 +270,14 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=(page_no - 1) * SEARCH_PAGE)
             version = data_version(c)
-        stats = summary(version, args["q"], args["field"], args["history"], tuple(sorted(args["columns"].items())))
+        unfiltered_history = args["history"] and not args["q"] and not args["columns"]
+        if unfiltered_history:
+            stats = summary(db.now()[:13], "", "", True, ())
+        else:
+            stats = summary(version, args["q"], args["field"], args["history"], tuple(sorted(args["columns"].items())))
         pages = max(1, -(-total // SEARCH_PAGE))
         return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages, stats=stats,
+                    hourly=unfiltered_history,
                     q=args["q"], field=args["field"], scope="all" if args["history"] else "latest",
                     cols=args["columns"], fields=SEARCH_LABELS)
 
