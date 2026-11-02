@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_drill.html" as drill %}
 {% block page %}overview{% endblock %}
 {% block content %}
 {% set t = data.totals %}
@@ -56,11 +57,24 @@
 </section>
 {% endif %}
 
-<section class="card">
+<section class="card" data-tabs>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" class="tab active" data-tab="domains">Domains <small>{{ domains|length }}</small></button>
+    <button type="button" role="tab" class="tab" data-tab="drill">Drilldown (All)</button>
+  </div>
+  <div data-panel="drill" hidden>
+    <div class="card-head">
+      {{ drill.drill_form('', '', 'latest', fields) }}
+      <a class="btn small" href="/all">Open the full drilldown: figures and charts →</a>
+    </div>
+    <p class="muted small-note">The first {{ drill_rows|length }} records of the latest scans. A search or a column filter opens
+      the full drilldown, where the figures, charts and every matching record follow it.</p>
+    {{ drill.records_table(drill_rows, {}, false) }}
+  </div>
+  <div data-panel="domains">
   <div class="card-head">
-    <h2>Domains <small>{{ domains|length }}</small></h2>
-    <span><a class="btn small" href="/all">All domains: every record, column filters →</a>
-    <input class="filter" placeholder="Filter…" data-filter="#domains" aria-label="Filter domains"></span>
+    <span></span>
+    <input class="filter" placeholder="Filter…" data-filter="#domains" aria-label="Filter domains">
   </div>
   <div class="table-wrap">
     <table id="domains" class="sortable" data-colfilters>
@@ -82,6 +96,7 @@
       {% endfor %}
       </tbody>
     </table>
+  </div>
   </div>
 </section>
 <datalist id="domain-list">{% for d in domains %}<option value="{{ d.name }}">{% endfor %}</datalist>

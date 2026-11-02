@@ -1,32 +1,20 @@
 {% extends "base.html" %}
-{% block title %}All domains · domin{% endblock %}
+{% import "_drill.html" as drill %}
+{% block title %}Drilldown (All) · domin{% endblock %}
 {% block page %}all{% endblock %}
 {% block content %}
 {% set history = scope == 'all' %}
 {% set params = {'q': q, 'field': field, 'scope': scope} %}
 {% for k, v in cols.items() %}{% set _ = params.update({'f_' ~ k: v}) %}{% endfor %}
-{% macro th(label, col='', sort='text', cls='') %}<th data-sort="{{ sort }}"{% if cls %} class="{{ cls }}"{% endif %}>{{ label }}
-  {%- if col %}<input class="colf" name="f_{{ col }}" form="search-form" value="{{ cols.get(col, '') }}" placeholder="Filter" autocomplete="off" aria-label="Filter {{ label }}">{% endif %}</th>{% endmacro %}
 <section class="hero">
   <div>
     <p class="crumbs"><a href="/">Overview</a> /</p>
-    <h1>All domains</h1>
+    <h1>Drilldown (All)</h1>
     <p class="muted">Every host name of every scanned domain{{ ', whole history' if history else ', latest scan per domain' }}.
       The search and the column filters narrow the figures, charts and table together.
       {%- if hourly %} Figures and charts for the whole history are updated once an hour.{% endif %}</p>
   </div>
-  <form class="scan-form" id="search-form" action="/all" method="get">
-    <input name="q" value="{{ q }}" placeholder="mail, 192.0.2., AMAZON, Sweden…" autocomplete="off" aria-label="Search for">
-    <select name="field" aria-label="Field">
-      <option value="">All fields</option>
-      {% for key, label in fields.items() %}<option value="{{ key }}" {{ 'selected' if field == key }}>{{ label }}</option>{% endfor %}
-    </select>
-    <select name="scope" aria-label="Scans">
-      <option value="latest">Latest scan per domain</option>
-      <option value="all" {{ 'selected' if history }}>All scans (history)</option>
-    </select>
-    <button class="btn primary" type="submit">Search</button>
-  </form>
+  {{ drill.drill_form(q, field, scope, fields) }}
 </section>
 
 <section class="kpis">
@@ -59,27 +47,7 @@
     <span>{% if cols %}<a class="btn small" href="/all?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}">Clear column filters</a>{% endif %}
     {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}</span>
   </div>
-  <p class="muted small-note">Type in the box under a column heading and press Enter; every filter narrows the result further.</p>
-  <div class="table-wrap">
-    <table id="results" class="sortable">
-      <thead><tr>{{ th('Host', 'host') }}{{ th('Domain', 'domain') }}{{ th('Address', 'ip', 'ip') }}
-        {{ th('ASN', 'asn', 'num', 'num') }}{{ th('Prefix', 'prefix') }}{{ th('Network', 'netname') }}
-        {{ th('Description', 'descr') }}{{ th('Country', 'country') }}
-        {% if history %}{{ th('First seen') }}{% endif %}{{ th('Last seen') }}
-        {% if history %}{{ th('Scans', '', 'num', 'num') }}{% endif %}</tr></thead>
-      <tbody>
-      {% if not rows %}<tr><td class="muted" colspan="11">No matches.</td></tr>{% endif %}
-      {% for r in rows %}
-        <tr><td class="host">{{ r.host }}</td><td><a href="/d/{{ r.domain }}">{{ r.domain }}</a></td>
-          <td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td><td class="mono">{{ r.prefix }}</td>
-          <td class="text net">{{ r.netname }}</td>
-          <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td><td>{{ r.country }}</td>
-          {% if history %}<td>{{ r.first_seen[:10] }}</td>{% endif %}<td>{{ r.last_seen[:10] }}</td>
-          {% if history %}<td class="num">{{ r.seen }}</td>{% endif %}</tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {{ drill.records_table(rows, cols, history) }}
   {% if pages > 1 %}
   <nav class="pager">
     {% if page_no > 1 %}<a class="btn small" href="/all?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}

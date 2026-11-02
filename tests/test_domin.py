@@ -94,12 +94,14 @@ def test_search_across_domains(settings):
     with TestClient(create_app(settings)) as h:
         r = h.get("/all", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
-        assert '<a href="/all" class="active">All domains</a>' in r.text and 'id="page-data"' in r.text
+        assert '<a href="/all" class="active">Drilldown (All)</a>' in r.text and 'id="page-data"' in r.text
         assert "old.example.se" in h.get("/search", params={"q": "old", "scope": "all"}).text   # first address
         assert "old.example.se" not in h.get("/all", params={"q": "old"}).text
         r = h.get("/all", params={"q": "nothing-like-this"})
         assert "No matches." in r.text and 'name="f_host" form="search-form"' in r.text   # filters stay editable
-        assert 'href="/all"' in h.get("/").text   # from the overview's domain list
+        ov = h.get("/").text   # the overview's Drilldown (All) tab: filter form and first records
+        assert 'data-tab="drill"' in ov and 'action="/all"' in ov and 'name="f_host" form="search-form"' in ov
+        assert ov.count('<table id="results"') == 1 and 'data-panel="drill" hidden' in ov
         r = h.get("/all", params={"scope": "all"})   # unfiltered history: hourly figures, all 4 pairs
         assert "updated once an hour" in r.text and "4 host and address pairs" in r.text
         assert "updated once an hour" not in h.get("/all", params={"scope": "all", "f_host": "www"}).text

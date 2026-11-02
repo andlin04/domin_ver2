@@ -70,6 +70,18 @@ $$("[data-filter]").forEach((input) => input.addEventListener("input", () => app
 $("#search-form")?.addEventListener("formdata", (ev) => {
   for (const [k, v] of [...ev.formData]) if (!v && k !== "q") ev.formData.delete(k);
 });
+// tabbed cards: one panel shown; the choice is kept in the address (#drill)
+$$("[data-tabs]").forEach((card) => {
+  const show = (name) => {
+    $$("[data-tab]", card).forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    $$("[data-panel]", card).forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  };
+  $$("[data-tab]", card).forEach((b) => b.addEventListener("click", () => {
+    show(b.dataset.tab);
+    history.replaceState(null, "", b.dataset.tab === "drill" ? "#drill" : location.pathname);
+  }));
+  if (location.hash === "#drill") show("drill");
+});
 // sideways overflow: a fade and a "More columns" button while columns are hidden to the right
 $$(".table-wrap").forEach((wrap) => {
   const box = document.createElement("div");

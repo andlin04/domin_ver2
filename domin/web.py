@@ -188,7 +188,14 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             version = data_version(c)
             domains = db.domains_overview(c)
             recent = jobs.recent(c, 8)
-        return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent)
+        return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent,
+                    drill_rows=drill_preview(version), fields=SEARCH_LABELS)
+
+    @lru_cache(maxsize=2)
+    def drill_preview(version: str) -> list[dict]:
+        """The first records for the overview's Drilldown tab (latest scans, no filter)."""
+        with conn() as c:
+            return db.search(c, limit=SEARCH_PAGE)[0]
 
     @app.get("/d/{name}", response_class=HTMLResponse)
     def domain_page(request: Request, name: str, scan: QueryId | None = None):

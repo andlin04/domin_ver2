@@ -77,6 +77,11 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.1rem 1.2rem; min-width: 0; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: .75rem; flex-wrap: wrap; }
 .card-head h2 { margin: 0; }
+.tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: .75rem; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit;
+  font-weight: 600; font-size: 1rem; padding: .45rem .8rem; cursor: pointer; margin-bottom: -1px; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab small { color: var(--muted); font-weight: 400; }
 .toolbar { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; padding: .75rem 1rem; }
 .toolbar label, .compare label { display: flex; gap: .5rem; align-items: center; color: var(--muted); font-size: .9rem; }
 .compare { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
