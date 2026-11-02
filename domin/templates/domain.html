@@ -102,13 +102,13 @@
     <table id="records" class="sortable" data-colfilters>
       <thead><tr><th data-sort="text">Host</th><th data-sort="ip">Address</th><th data-sort="num" class="num">ASN</th>
         <th data-sort="text">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
-        <th data-sort="text">Country</th></tr></thead>
+        <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th></tr></thead>
       <tbody>
-      {% for r in rows %}
+      {% for r in rows %}{% set eu = eu_status(r.country) %}
         <tr><td class="host">{{ r.host }}</td><td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td>
           <td class="mono">{{ r.prefix }}</td><td class="text net">{{ r.netname }}</td>
           <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td>
-          <td>{{ r.country }}</td></tr>
+          <td class="{{ 'eu' if eu == 'EU' else 'non-eu' if eu }}">{{ eu }}</td><td>{{ r.country }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

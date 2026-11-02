@@ -21,12 +21,18 @@
   };
   const val = (k, r) => { const c = data.cols[k]; return c.d ? c.d[c.i[r]] : c.v[r]; };
   const lower = (v) => String(v ?? "").toLowerCase();
-  // a test per column; a column of repeated values tests each distinct value once
-  const test = (k, text) => {
+  // a test per column; a column of repeated values tests each distinct value once. "!text" = rows without it;
+  // EU matches from the start, so "eu" isn't "Non-EU" (the server fallback does the same)
+  const test = (k, text, plain = false) => {
+    const neg = !plain && text.startsWith("!");
+    const t = neg ? text.slice(1) : text;
+    if (!t) return () => true;
+    const has = k === "eu" ? (v) => v.startsWith(t) !== neg : (v) => v.includes(t) !== neg;
     const c = data.cols[k];
-    if (c.d) { const ok = c.d.map((v) => lower(v).includes(text)); return (r) => ok[c.i[r]]; }
+    if (!c) { console.warn("drilldown: no column", k); return () => true; }
+    if (c.d) { const ok = c.d.map((v) => has(lower(v))); return (r) => ok[c.i[r]]; }
     const low = c.low || (c.low = c.v.map(lower));
-    return (r) => low[r].includes(text);
+    return (r) => has(low[r]);
   };
 
   const colBoxes = () => $$('.colf[form="search-form"]');
@@ -45,7 +51,7 @@
   function filter(st) {
     const tests = Object.entries(st.cols).map(([k, v]) => test(k, v.toLowerCase()));
     if (st.q) {
-      const any = (st.field ? [st.field] : SEARCH).map((k) => test(k, st.q.toLowerCase()));
+      const any = (st.field ? [st.field] : SEARCH).map((k) => test(k, st.q.toLowerCase(), true));   // search: plain text
       tests.push((r) => any.some((t) => t(r)));
     }
     const out = [];
@@ -111,13 +117,14 @@
       div.title = div.textContent = val("descr", r);
       const descr = td("text", ""); descr.append(div);
       tr.append(td("host", val("host", r)), dom, td("mono", val("ip", r) || "—"), td("num", val("asn", r)),
-        td("mono", val("prefix", r)), td("text net", val("netname", r)), descr, td("", val("country", r)));
+        td("mono", val("prefix", r)), td("text net", val("netname", r)), descr,
+        td(val("eu", r) === "EU" ? "eu" : val("eu", r) ? "non-eu" : "", val("eu", r)), td("", val("country", r)));
       if (data.history) tr.append(td("", val("first_seen", r)));
       tr.append(td("", val("last_seen", r)));
       if (data.history) tr.append(td("num", val("seen", r)));
       frag.append(tr);
     }
-    if (!view.length) { const tr = document.createElement("tr"); const c = td("muted", "No matches."); c.colSpan = 11; tr.append(c); frag.append(tr); }
+    if (!view.length) { const tr = document.createElement("tr"); const c = td("muted", "No matches."); c.colSpan = 12; tr.append(c); frag.append(tr); }
     $("#results", box).tBodies[0].replaceChildren(frag);
   }
 
@@ -145,7 +152,7 @@
     const f = figures();
     for (const el of $$("[data-k]")) {
       const v = f[el.dataset.k];
-      el.textContent = el.dataset.k === "eu_pct" ? (v === null ? "—" : `${v} %`) : fmt(v);
+      el.textContent = el.dataset.k === "eu_pct" ? (v === null ? "—" : `${v.toFixed(1)} %`) : fmt(v);
     }
     for (const id of ["countries", "netnames", "asns"]) {
       const chart = window.Chart && Chart.getChart(document.getElementById(id));
@@ -198,7 +205,11 @@
         pageNo = parseInt(new URLSearchParams(location.search).get("page"), 10) || 1;
         apply(false);
       })
-      .catch(() => say("Press Enter to apply (the records could not be loaded into your browser)."));
+      .catch((err) => {
+        console.error("drilldown data:", err);
+        data = null;   // back to the server way
+        say("Press Enter to apply (the records could not be loaded into your browser).");
+      });
     return loading;
   }
 
@@ -226,7 +237,7 @@
     const th = ev.target.closest("th[data-sort]");
     if (!data || !th) return;
     ev.stopPropagation();
-    const keys = ["host", "domain", "ip", "asn", "prefix", "netname", "descr", "country",
+    const keys = ["host", "domain", "ip", "asn", "prefix", "netname", "descr", "eu", "country",
       ...(data.history ? ["first_seen", "last_seen", "seen"] : ["last_seen"])];
     const k = keys[[...th.parentElement.children].indexOf(th)];
     sortDir = sortKey === k ? -sortDir : 1;

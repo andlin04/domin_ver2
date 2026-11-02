@@ -37,6 +37,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' 
 CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
 MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
 SEARCH_PAGE = 100   # search results per page
+DRILL_FORMAT = 2   # layout of /data/drill.json; raise it when the columns change (2: EU column)
 SEARCH_CSV_MAX = 100_000   # rows in a search download
 SEARCH_LABELS = {"host": "Host name", "ip": "Address", "asn": "ASN", "prefix": "Prefix", "netname": "Network",
                  "descr": "Description", "country": "Country"}
@@ -62,6 +63,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     app = FastAPI(title="domin", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
+    templates.env.globals["eu_status"] = db.eu_status
     client = http or tools.http_client()
     lookups: dict[str, deque[float]] = defaultdict(deque)
 
@@ -251,7 +253,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     def search_args(request: Request, q: str, field: str, scope: str) -> dict:
         """The search, plus the column filters f_<column> (each one narrows the result further)."""
-        cols = {k: request.query_params.get("f_" + k, "").strip()[:200] for k in ("domain", *db.SEARCH_FIELDS)}
+        cols = {k: request.query_params.get("f_" + k, "").strip()[:200] for k in ("domain", "eu", *db.SEARCH_FIELDS)}
         return {"q": q.strip()[:200], "field": field if field in db.SEARCH_FIELDS else "",
                 "history": scope == "all", "columns": {k: v for k, v in cols.items() if v}}
 
@@ -272,7 +274,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     drill_locks = {False: threading.Lock(), True: threading.Lock()}
 
     def drill_key(c, history: bool) -> str:
-        return db.now()[:13] if history else data_version(c)
+        """Changes with the data (latest scan, or the hour) and with DRILL_FORMAT, so browsers never reuse a
+        cached copy in an older layout."""
+        return f"{DRILL_FORMAT}-{db.now()[:13] if history else data_version(c)}"
 
     def drill_data(key: str, history: bool) -> bytes:
         with drill_locks[history]:   # one build at a time; the others wait for it
@@ -303,9 +307,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 summary(db.now()[:13], "", "", True, ())
                 history_page(db.now()[:13], 0)
                 with conn() as c:
-                    latest = data_version(c)
-                drill_data(latest, False)
-                drill_data(db.now()[:13], True)
+                    keys = drill_key(c, False), drill_key(c, True)
+                drill_data(keys[0], False)
+                drill_data(keys[1], True)
             except Exception:
                 log.exception("history figures not computed")
             time.sleep(3600 - time.time() % 3600 + 5)
@@ -340,7 +344,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         args = search_args(request, q, field, scope)
         with conn() as c:
             rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX)
-        names = ["domain", *db.RECORD_FIELDS, *(["first_seen", "last_seen", "seen"] if args["history"]
+        names = ["domain", *db.RECORD_FIELDS, "eu", *(["first_seen", "last_seen", "seen"] if args["history"]
                                                  else ["last_seen"])]
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=names, extrasaction="ignore")

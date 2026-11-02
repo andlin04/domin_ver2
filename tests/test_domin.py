@@ -84,6 +84,15 @@ def test_search_across_domains(settings):
         assert db.search(c, columns={"domain": "example.se", "ip": "198.51"})[1] == 1
         assert db.search(c, columns={"domain": "other"})[1] == 0
         assert db.search(c, columns={"nope": "x"})[1] == 2   # unknown columns are ignored
+        # "!text" excludes; the EU column matches from the start ("eu" is not "Non-EU")
+        assert db.search(c, history=True, columns={"country": "!swe"})[1] == 1
+        assert db.search(c, history=True, columns={"host": "!www", "country": "swe"})[1] == 2
+        assert db.search(c, history=True, columns={"eu": "eu"})[1] == 4   # Sweden and Finland
+        assert db.search(c, history=True, columns={"eu": "!eu"})[1] == 0
+        assert db.search(c, history=True, columns={"eu": "non"})[1] == 0
+        rows = db.search(c, history=True)[0]
+        assert [r["eu"] for r in rows] == [db.eu_status(r["country"]) for r in rows] and "EU" in {r["eu"] for r in rows}
+        assert db.eu_status("Sweden") == "EU" and db.eu_status("Norway") == "Non-EU" and db.eu_status("") == ""
         # figures and charts of the all-domains view follow the same filters
         s = db.search_summary(c)
         assert (s["hosts"], s["ips"], s["domains"], s["asns"], s["countries"], s["eu_pct"]) == (2, 2, 1, 2, 2, 100.0)
@@ -97,7 +106,8 @@ def test_search_across_domains(settings):
         assert d["columns"]["domain"] == ["example.se"] * 2   # too few repeats for distinct values + indexes
         assert set(d["columns"]["host"]) == {"www.example.se", "new.example.se"}
         d = db.drill_columns(c, history=True)
-        assert d["rows"] == 4 and {"first_seen", "seen"} <= set(d["columns"])
+        assert d["rows"] == 4 and {"first_seen", "seen", "eu"} <= set(d["columns"])
+        assert list(d["columns"]).index("eu") == list(d["columns"]).index("country") - 1
         assert d["columns"]["domain"] == {"d": ["example.se"], "i": [0, 0, 0, 0]}
     with TestClient(create_app(settings)) as h:
         r = h.get("/data/drill.json", params={"scope": "latest", "v": "nope"})

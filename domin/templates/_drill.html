@@ -17,22 +17,24 @@
 {% macro records_table(rows, cols, history) %}
 {% macro th(label, col='', sort='text', cls='') %}<th data-sort="{{ sort }}"{% if cls %} class="{{ cls }}"{% endif %}>{{ label }}
   {%- if col %}<input class="colf" name="f_{{ col }}" form="search-form" value="{{ cols.get(col, '') }}" placeholder="Filter" autocomplete="off" aria-label="Filter {{ label }}">{% endif %}</th>{% endmacro %}
-  <p class="muted small-note">Type in the box under a column heading; every filter narrows the result further.
+  <p class="muted small-note">Type in the box under a column heading; every filter narrows the result further,
+    and a leading ! excludes (!amazon).
     <span data-drill-status>Press Enter to apply.</span></p>
   <div class="table-wrap">
     <table id="results" class="sortable">
       <thead><tr>{{ th('Host', 'host') }}{{ th('Domain', 'domain') }}{{ th('Address', 'ip', 'ip') }}
         {{ th('ASN', 'asn', 'num', 'num') }}{{ th('Prefix', 'prefix') }}{{ th('Network', 'netname') }}
-        {{ th('Description', 'descr') }}{{ th('Country', 'country') }}
+        {{ th('Description', 'descr') }}{{ th('EU', 'eu') }}{{ th('Country', 'country') }}
         {% if history %}{{ th('First seen') }}{% endif %}{{ th('Last seen') }}
         {% if history %}{{ th('Scans', '', 'num', 'num') }}{% endif %}</tr></thead>
       <tbody>
-      {% if not rows %}<tr><td class="muted" colspan="11">No matches.</td></tr>{% endif %}
+      {% if not rows %}<tr><td class="muted" colspan="12">No matches.</td></tr>{% endif %}
       {% for r in rows %}
         <tr><td class="host">{{ r.host }}</td><td><a href="/d/{{ r.domain }}">{{ r.domain }}</a></td>
           <td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td><td class="mono">{{ r.prefix }}</td>
           <td class="text net">{{ r.netname }}</td>
-          <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td><td>{{ r.country }}</td>
+          <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td>
+          <td class="{{ 'eu' if r.eu == 'EU' else 'non-eu' if r.eu }}">{{ r.eu }}</td><td>{{ r.country }}</td>
           {% if history %}<td>{{ r.first_seen[:10] }}</td>{% endif %}<td>{{ r.last_seen[:10] }}</td>
           {% if history %}<td class="num">{{ r.seen }}</td>{% endif %}</tr>
       {% endfor %}

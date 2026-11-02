@@ -48,10 +48,13 @@ document.addEventListener("click", (ev) => { if (ev.target.closest("th .colf")) 
 function applyFilters(table) {
   const words = ($(`[data-filter="#${table.id}"]`)?.value || "").toLowerCase().split(/\s+/).filter(Boolean);
   const cols = $$("thead th", table).map((th) => ($(".colf", th)?.value || "").trim().toLowerCase());
+  const start = $$("thead th", table).map((th) => th.dataset.match === "start");   // EU: "eu" isn't "Non-EU"
+  const cell = (tr, i) => (tr.cells[i]?.textContent || "").trim().toLowerCase();
+  const has = (v, t, i) => (start[i] ? v.startsWith(t) : v.includes(t));
+  const ok = (c, v, i) => c[0] === "!" ? !c.slice(1) || !has(v, c.slice(1), i) : has(v, c, i);   // "!text": without it
   for (const tr of table.tBodies[0].rows) {
     const text = tr.textContent.toLowerCase();
-    tr.hidden = !words.every((w) => text.includes(w))
-      || !cols.every((c, i) => !c || (tr.cells[i]?.textContent || "").toLowerCase().includes(c));
+    tr.hidden = !words.every((w) => text.includes(w)) || !cols.every((c, i) => !c || ok(c, cell(tr, i), i));
   }
 }
 $$("table[data-colfilters]").forEach((table) => {

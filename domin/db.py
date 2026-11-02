@@ -236,9 +236,13 @@ def _matching(q: str, field: str, history: bool, columns: dict[str, str] | None)
     where = "(" + " OR ".join(f"r.{f} LIKE ? ESCAPE '\\'" for f in fields) + ")" if q else "1"
     args = [_like(q)] * len(fields) if q else []
     for col, text in (columns or {}).items():
-        if text and (col in SEARCH_FIELDS or col == "domain"):
-            where += f" AND {'d.name' if col == 'domain' else 'r.' + col} LIKE ? ESCAPE '\\'"
-            args.append(_like(text))
+        negate = text.startswith("!")   # "!text": rows without it, as in the old version
+        text = text[1:] if negate else text
+        if not text or col not in (*SEARCH_FIELDS, "domain", "eu"):
+            continue
+        expr = {"domain": "d.name", "eu": EU_EXPR}.get(col, f"COALESCE(r.{col}, '')")
+        where += f" AND {expr} {'NOT ' if negate else ''}LIKE ? ESCAPE '\\'"
+        args.append(_like(text)[1:] if col == "eu" else _like(text))   # EU: from the start, so "eu" isn't "Non-EU"
     scans = "scans s" if history else f"({LATEST}) s"
     done = "s.status = 'done' AND " if history else ""
     return (f"FROM records r JOIN {scans} ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id"
@@ -250,7 +254,7 @@ def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool
     """A page of the records that match (see _matching); with history folded to one row per domain, host and
     address with first and last seen. Returns (page of rows, total matches)."""
     frm, args = _matching(q, field, history, columns)
-    cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
+    cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS) + f", {EU_EXPR} AS eu"
     if history:
         sql = f"""SELECT d.name AS domain, {cols}, MIN(s.started) AS first_seen, MAX(s.started) AS last_seen,
                          COUNT(*) AS seen, COUNT(*) OVER () AS total {frm}
@@ -296,6 +300,9 @@ def drill_columns(conn: sqlite3.Connection, history: bool = False) -> dict:
     for row in conn.execute(sql, args):
         for col, v in zip(columns, row, strict=True):
             col.append("" if v is None else v)
+    i = keys.index("country")
+    keys.insert(i, "eu")
+    columns.insert(i, [eu_status(c) for c in columns[i]])
     out: dict = {}
     for k, vals in zip(keys, columns, strict=True):
         uniq = list(dict.fromkeys(vals))
@@ -333,6 +340,14 @@ def _eu_names() -> list[str]:
 
 EU_NAMES = _eu_names()
 _EU_SQL = f"country IN ({','.join('?' * len(EU_NAMES))})"
+_EU_SET = frozenset(EU_NAMES)
+# the old version's "EU Status" column: EU / Non-EU, empty when the country is unknown
+EU_EXPR = ("CASE WHEN COALESCE(r.country, '') = '' THEN '' WHEN r.country IN ("
+           + ",".join("'" + n.replace("'", "''") + "'" for n in EU_NAMES) + ") THEN 'EU' ELSE 'Non-EU' END")
+
+
+def eu_status(country: str | None) -> str:
+    return "" if not country else "EU" if country in _EU_SET else "Non-EU"
 
 
 def eu_pct(eu: int, known: int) -> float | None:

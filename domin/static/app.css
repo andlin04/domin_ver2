@@ -82,6 +82,8 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
   font-weight: 600; font-size: 1rem; padding: .45rem .8rem; cursor: pointer; margin-bottom: -1px; }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 .tab small { color: var(--muted); font-weight: 400; }
+td.eu { color: var(--up); font-weight: 600; }
+td.non-eu { color: var(--flat); font-weight: 600; }
 .toolbar { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; padding: .75rem 1rem; }
 .toolbar label, .compare label { display: flex; gap: .5rem; align-items: center; color: var(--muted); font-size: .9rem; }
 .compare { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
