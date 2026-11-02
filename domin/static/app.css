@@ -35,17 +35,27 @@ h2 small, h3 small { color: var(--muted); font-weight: 400; margin-left: .35rem;
 .bad-text { color: var(--down); }
 
 .topbar {
-  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1rem; padding: .6rem 1.25rem;
+  position: sticky; top: 0; z-index: 10;
   background: color-mix(in srgb, var(--surface) 85%, transparent); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
+/* Same width and edges as the page content, so the bar lines up with it on wide screens. */
+.topbar-in { max-width: 1280px; margin: 0 auto; padding: 0 1.25rem; display: flex; align-items: center; gap: 1.25rem; min-height: 3.5rem; }
 .brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; color: var(--text); font-size: 1.05rem; }
+.brand:hover { text-decoration: none; }
 .brand svg, .icon-btn svg { width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 2; }
-.topbar nav { display: flex; gap: .25rem; }
-.topbar nav a { color: var(--muted); padding: .35rem .7rem; border-radius: 8px; font-weight: 500; }
-.topbar nav a.active, .topbar nav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
-.jump { margin-left: auto; }
-.jump input { width: 220px; }
+.topbar nav { display: flex; gap: .25rem; align-self: stretch; padding-left: 1.25rem; border-left: 1px solid var(--border); }
+.topbar nav a { display: flex; align-items: center; color: var(--muted); padding: 0 .75rem; font-weight: 500; border-bottom: 2px solid transparent; }
+.topbar nav a:hover { color: var(--text); text-decoration: none; }
+.topbar nav a.active { color: var(--text); border-bottom-color: var(--accent); }
+.jump { margin-left: auto; position: relative; display: flex; align-items: center; }
+.jump svg { position: absolute; left: .7rem; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; pointer-events: none; }
+.jump input { width: 300px; padding-left: 2.1rem; padding-right: 2rem; }
+.jump kbd {
+  position: absolute; right: .55rem; font: inherit; font-size: .75rem; color: var(--muted); line-height: 1;
+  border: 1px solid var(--border); border-radius: 5px; padding: .15rem .35rem; pointer-events: none;
+}
+.jump input:focus + kbd { display: none; }
 .icon-btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: .3rem; cursor: pointer; display: flex; }
 
 .wrap { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; display: grid; gap: 1.25rem; }
@@ -194,6 +204,10 @@ td.path { white-space: normal; min-width: 320px; }
 @media (max-width: 860px) {
   .g2 { grid-template-columns: 1fr; }
   .jump { display: none; }
+  .topbar-in { gap: .5rem; padding: 0 .75rem; }
+  .topbar nav { gap: 0; padding-left: .25rem; font-size: .9rem; }
+  .topbar nav a { padding: 0 .45rem; white-space: nowrap; }
+  .icon-btn { margin-left: auto; }
   .scan-form input, .filter { width: 100%; }
   .scan-form { width: 100%; }
   .hero { align-items: stretch; }

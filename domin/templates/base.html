@@ -9,7 +9,7 @@
   <script src="{{ url_for('static', path='theme.js').path }}"></script>
 </head>
 <body data-page="{% block page %}{% endblock %}">
-  <header class="topbar">
+  <header class="topbar"><div class="topbar-in">
     <a class="brand" href="/">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
       domin
@@ -20,13 +20,15 @@
       <a href="/tools" class="{{ 'active' if self.page() == 'tools' }}">Tools</a>
       {% if show_admin %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Admin</a>{% endif %}
     </nav>
-    <form class="jump" action="/d/" data-jump>
+    <form class="jump" action="/d/" data-jump role="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
       <input name="q" placeholder="Go to domain…" autocomplete="off" list="domain-list" aria-label="Go to domain">
+      <kbd title="Press / to search">/</kbd>
     </form>
     <button class="icon-btn" id="theme" title="Toggle light / dark" aria-label="Toggle theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
     </button>
-  </header>
+  </div></header>
   <main class="wrap">
     {% block content %}{% endblock %}
   </main>

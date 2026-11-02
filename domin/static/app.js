@@ -19,10 +19,31 @@ $("#theme")?.addEventListener("click", () => {
 });
 
 // --- go to domain --------------------------------------------------------------------------------------------------
-$("[data-jump]")?.addEventListener("submit", (ev) => {
+const jump = $("[data-jump]");
+const goDomain = (v) => { v = v.trim().toLowerCase(); if (v) location.href = "/d/" + encodeURIComponent(v); };
+jump?.addEventListener("submit", (ev) => { ev.preventDefault(); goDomain(jump.q.value); });
+// Picking a suggestion goes straight away (Chromium: insertReplacementText, Firefox: no inputType); typing does not.
+jump?.q.addEventListener("input", (ev) => {
+  if (ev.inputType && ev.inputType !== "insertReplacementText") return;
+  const list = $("#domain-list");
+  if (list && [...list.options].some((o) => o.value === jump.q.value)) goDomain(jump.q.value);
+});
+// Pages without the overview's list load the names on first focus.
+jump?.q.addEventListener("focus", () => {
+  if ($("#domain-list")) return;
+  const list = document.createElement("datalist");
+  list.id = "domain-list";
+  document.body.append(list);
+  fetch("/api/domains").then((r) => r.json()).then((rows) => {
+    list.append(...rows.map((d) => Object.assign(document.createElement("option"), { value: d.name })));
+  }).catch((e) => console.error("domain list", e));
+}, { once: true });
+// "/" focuses the box from anywhere except a text field.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "/" || !jump || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.target.closest("input, textarea, select, [contenteditable]")) return;
   ev.preventDefault();
-  const v = ev.target.q.value.trim().toLowerCase();
-  if (v) location.href = "/d/" + encodeURIComponent(v);
+  jump.q.focus();
 });
 
 // --- tables: sort, filter, row links -------------------------------------------------------------------------------
