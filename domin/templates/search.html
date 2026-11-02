@@ -18,12 +18,12 @@
 </section>
 
 <section class="kpis">
-  <div class="kpi"><span>Host names</span><b>{{ "{:,}".format(stats.hosts) }}</b></div>
-  <div class="kpi"><span>Addresses</span><b>{{ "{:,}".format(stats.ips) }}</b></div>
-  <div class="kpi"><span>Domains</span><b>{{ "{:,}".format(stats.domains) }}</b></div>
-  <div class="kpi"><span>ASNs</span><b>{{ "{:,}".format(stats.asns) }}</b></div>
-  <div class="kpi"><span>Countries</span><b>{{ "{:,}".format(stats.countries) }}</b></div>
-  <div class="kpi"><span>In the EU <i>addresses</i></span><b>{{ '—' if stats.eu_pct is none else stats.eu_pct ~ ' %' }}</b></div>
+  <div class="kpi"><span>Host names</span><b data-k="hosts">{{ "{:,}".format(stats.hosts) }}</b></div>
+  <div class="kpi"><span>Addresses</span><b data-k="ips">{{ "{:,}".format(stats.ips) }}</b></div>
+  <div class="kpi"><span>Domains</span><b data-k="domains">{{ "{:,}".format(stats.domains) }}</b></div>
+  <div class="kpi"><span>ASNs</span><b data-k="asns">{{ "{:,}".format(stats.asns) }}</b></div>
+  <div class="kpi"><span>Countries</span><b data-k="countries">{{ "{:,}".format(stats.countries) }}</b></div>
+  <div class="kpi"><span>In the EU <i>addresses</i></span><b data-k="eu_pct">{{ '—' if stats.eu_pct is none else stats.eu_pct ~ ' %' }}</b></div>
 </section>
 
 <section class="grid g3">
@@ -41,20 +41,20 @@
   </div>
 </section>
 
-<section class="card">
+<section class="card" data-drill="{{ drill_src }}" data-scope="{{ scope }}" data-full>
   <div class="card-head">
-    <h2>Records <small>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
-    <span>{% if cols %}<a class="btn small" href="/all?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}">Clear column filters</a>{% endif %}
-    {% if total %}<a class="btn small" href="/search.csv?{{ params|urlencode }}">Download CSV</a>{% endif %}</span>
+    <h2>Records <small data-total>{{ "{:,}".format(total) }}{{ ' host and address pairs' if history else ' records' }}</small></h2>
+    <span><a class="btn small" id="clear-cols" href="/all?{{ {'q': q, 'field': field, 'scope': scope}|urlencode }}" {{ 'hidden' if not cols }}>Clear column filters</a>
+    <a class="btn small" id="csv" href="/search.csv?{{ params|urlencode }}" {{ 'hidden' if not total }}>Download CSV</a></span>
   </div>
   {{ drill.records_table(rows, cols, history) }}
+  <nav class="pager" id="pager">
   {% if pages > 1 %}
-  <nav class="pager">
     {% if page_no > 1 %}<a class="btn small" href="/all?{{ dict(params, page=page_no - 1)|urlencode }}">← Previous</a>{% endif %}
     <span class="muted">Page {{ page_no }} of {{ "{:,}".format(pages) }}</span>
     {% if page_no < pages %}<a class="btn small" href="/all?{{ dict(params, page=page_no + 1)|urlencode }}">Next →</a>{% endif %}
-  </nav>
   {% endif %}
+  </nav>
 </section>
 <script type="application/json" id="page-data">{{ {'countries': stats.country, 'netnames': stats.netname, 'asns': stats.asn}|tojson }}</script>
 {% endblock %}

@@ -4,9 +4,11 @@ Run: uvicorn --factory domin.web:create_app --port 8002 (behind nginx; X-Real-IP
 from __future__ import annotations
 
 import csv
+import gzip
 import hmac
 import io
 import ipaddress
+import json
 import logging
 import threading
 import time
@@ -133,7 +135,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return "download", ""
         if path.startswith(("/api/rdap/", "/api/email/")):
             return "tool", parts[-1]
-        if path.startswith(("/api/", "/static/", "/healthz")):
+        if path.startswith(("/api/", "/static/", "/healthz", "/data/")):
             return None
         return "page", parts[1] if parts[0] == "d" and len(parts) > 1 else ""
 
@@ -188,8 +190,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             version = data_version(c)
             domains = db.domains_overview(c)
             recent = jobs.recent(c, 8)
+            src = drill_src(c, False)
         return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent,
-                    drill_rows=drill_preview(version), fields=SEARCH_LABELS)
+                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src)
 
     @lru_cache(maxsize=2)
     def drill_preview(version: str) -> list[dict]:
@@ -262,14 +265,47 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             return db.search(c, history=True, limit=SEARCH_PAGE, offset=offset)
 
+    # The Drilldown filters in the browser: it fetches the whole dataset once (gzip'd JSON, cached by the browser
+    # until the next scan, or the next hour for the history), so typing in a filter costs the server nothing.
+    # The server-side search above stays as the fallback (no JavaScript, data not loaded) and for the CSV.
+    drill_cache: dict[bool, tuple[str, bytes]] = {}
+    drill_locks = {False: threading.Lock(), True: threading.Lock()}
+
+    def drill_key(c, history: bool) -> str:
+        return db.now()[:13] if history else data_version(c)
+
+    def drill_data(key: str, history: bool) -> bytes:
+        with drill_locks[history]:   # one build at a time; the others wait for it
+            if drill_cache.get(history, ("",))[0] != key:
+                with conn() as c:
+                    data = db.drill_columns(c, history)
+                drill_cache[history] = key, gzip.compress(json.dumps(data, separators=(",", ":")).encode(), 6)
+            return drill_cache[history][1]
+
+    def drill_src(c, history: bool) -> str:
+        return f"/data/drill.json?scope={'all' if history else 'latest'}&v={drill_key(c, history)}"
+
+    @app.get("/data/drill.json")
+    def drill_json(scope: str = "latest", v: str = ""):
+        history = scope == "all"
+        with conn() as c:
+            key = drill_key(c, history)
+        cache = "public, max-age=31536000, immutable" if v == key else "no-cache"
+        return Response(drill_data(key, history), media_type="application/json",
+                        headers={"Content-Encoding": "gzip", "Cache-Control": cache})
+
     def warm_history() -> None:
         """The unfiltered whole history (1.5M records, 800k host and address pairs) takes ~15 s for the figures and
-        ~5 s per page: both are keyed by the hour (not by the latest scan), and the figures and first page are
-        computed here at start and early each hour, so the default view never waits."""
+        ~5 s per page: both are keyed by the hour (not by the latest scan), and the figures, first page and the
+        browser's datasets are computed here at start and early each hour, so the default view never waits."""
         while True:
             try:
                 summary(db.now()[:13], "", "", True, ())
                 history_page(db.now()[:13], 0)
+                with conn() as c:
+                    latest = data_version(c)
+                drill_data(latest, False)
+                drill_data(db.now()[:13], True)
             except Exception:
                 log.exception("history figures not computed")
             time.sleep(3600 - time.time() % 3600 + 5)
@@ -285,6 +321,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         unfiltered_history = args["history"] and not args["q"] and not args["columns"]
         with conn() as c:
             version = data_version(c)
+            src = drill_src(c, args["history"])
             if not unfiltered_history:
                 rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset)
         if unfiltered_history:
@@ -296,7 +333,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages, stats=stats,
                     hourly=unfiltered_history,
                     q=args["q"], field=args["field"], scope="all" if args["history"] else "latest",
-                    cols=args["columns"], fields=SEARCH_LABELS)
+                    cols=args["columns"], fields=SEARCH_LABELS, drill_src=src)
 
     @app.get("/search.csv")
     def search_csv(request: Request, q: str = "", field: str = "", scope: str = "latest"):

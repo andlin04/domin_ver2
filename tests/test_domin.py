@@ -91,7 +91,23 @@ def test_search_across_domains(settings):
         assert (s["hosts"], s["ips"]) == (3, 3) and s["country"] == [{"label": "Sweden", "ips": 3}]
         assert s["netname"] == [{"label": "NET-A", "ips": 3}]
         assert db.search_summary(c, "nothing-like-this")["eu_pct"] is None
+        # the browser's dataset: the same rows as the search, column by column
+        d = db.drill_columns(c)
+        assert d["rows"] == 2 and "Sweden" in d["eu"]
+        assert d["columns"]["domain"] == ["example.se"] * 2   # too few repeats for distinct values + indexes
+        assert set(d["columns"]["host"]) == {"www.example.se", "new.example.se"}
+        d = db.drill_columns(c, history=True)
+        assert d["rows"] == 4 and {"first_seen", "seen"} <= set(d["columns"])
+        assert d["columns"]["domain"] == {"d": ["example.se"], "i": [0, 0, 0, 0]}
     with TestClient(create_app(settings)) as h:
+        r = h.get("/data/drill.json", params={"scope": "latest", "v": "nope"})
+        assert r.status_code == 200 and r.json()["rows"] == 2 and r.headers["cache-control"] == "no-cache"
+        assert r.headers["content-encoding"] == "gzip"
+        src = h.get("/all").text.split('data-drill="')[1].split('"')[0].replace("&amp;", "&")
+        r = h.get(src)
+        assert "immutable" in r.headers["cache-control"] and r.json()["rows"] == 2
+        assert h.get("/data/drill.json", params={"scope": "all"}).json()["rows"] == 4
+        assert "drill.js" in h.get("/").text and 'data-drill="/data/drill.json?scope=latest' in h.get("/").text
         r = h.get("/all", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
         assert '<a href="/all" class="active">Drilldown (All)</a>' in r.text and 'id="page-data"' in r.text
@@ -101,7 +117,7 @@ def test_search_across_domains(settings):
         assert "No matches." in r.text and 'name="f_host" form="search-form"' in r.text   # filters stay editable
         ov = h.get("/").text   # the overview's Drilldown (All) tab: filter form and first records
         assert 'data-tab="drill"' in ov and 'action="/all"' in ov and 'name="f_host" form="search-form"' in ov
-        assert ov.count('<table id="results"') == 1 and 'data-panel="drill" hidden' in ov
+        assert ov.count('<table id="results"') == 1 and 'data-scope="latest" hidden' in ov
         r = h.get("/all", params={"scope": "all"})   # unfiltered history: hourly figures, all 4 pairs
         assert "updated once an hour" in r.text and "4 host and address pairs" in r.text
         assert "updated once an hour" not in h.get("/all", params={"scope": "all", "f_host": "www"}).text

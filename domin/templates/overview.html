@@ -62,13 +62,13 @@
     <button type="button" role="tab" class="tab active" data-tab="domains">Domains <small>{{ domains|length }}</small></button>
     <button type="button" role="tab" class="tab" data-tab="drill">Drilldown (All)</button>
   </div>
-  <div data-panel="drill" hidden>
+  <div data-panel="drill" data-drill="{{ drill_src }}" data-scope="latest" hidden>
     <div class="card-head">
       {{ drill.drill_form('', '', 'latest', fields) }}
-      <a class="btn small" href="/all">Open the full drilldown: figures and charts →</a>
+      <a class="btn small" id="drill-open" href="/all">Open the full drilldown: figures and charts →</a>
     </div>
-    <p class="muted small-note">The first {{ drill_rows|length }} records of the latest scans. A search or a column filter opens
-      the full drilldown, where the figures, charts and every matching record follow it.</p>
+    <p class="muted small-note">Records of the latest scans, the first {{ drill_rows|length }} shown. Enter opens the full
+      drilldown, where the figures, charts and every matching record follow the filters.</p>
     {{ drill.records_table(drill_rows, {}, false) }}
   </div>
   <div data-panel="domains">

@@ -199,11 +199,11 @@ function allCharts() {
   // a click on a bar sets that column's filter box to the bar's value and runs the search
   const d = pageData();
   for (const id of ["countries", "netnames", "asns"]) {
-    const rows = (d[id] || []).filter((r) => r.label !== "Other");
-    hbar(id, d[id], "Addresses", (ev, els) => {
-      const box = $(`[name="f_${document.getElementById(id).dataset.col}"]`);
+    hbar(id, d[id], "Addresses", (ev, els) => {   // labels read at the click: drill.js redraws the bars
+      const canvas = document.getElementById(id);
+      const box = $(`[name="f_${canvas.dataset.col}"]`);
       if (!els.length || !box) return;
-      box.value = rows[els[0].index].label;
+      box.value = Chart.getChart(canvas).data.labels[els[0].index];
       $("#search-form").requestSubmit();
     });
   }

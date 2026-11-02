@@ -279,6 +279,34 @@ def search_summary(conn: sqlite3.Connection, q: str = "", field: str = "", histo
     return out
 
 
+def drill_columns(conn: sqlite3.Connection, history: bool = False) -> dict:
+    """Every record of the latest scans (history: one row per domain, host and address) column by column, for the
+    Drilldown filtered in the browser. A column with many repeats is sent as its distinct values ("d") plus one
+    index per row ("i"): about 1.7 MB gzip'd for 163k records."""
+    frm, args = _matching("", "", history, None)
+    cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
+    keys = ["domain", *RECORD_FIELDS, "last_seen"]
+    if history:
+        keys += ["first_seen", "seen"]
+        sql = (f"SELECT d.name, {cols}, substr(MAX(s.started), 1, 10), substr(MIN(s.started), 1, 10), COUNT(*)"
+               f" {frm} GROUP BY s.domain_id, r.host, r.ip ORDER BY r.host, r.ip")
+    else:
+        sql = f"SELECT d.name, {cols}, substr(s.started, 1, 10) {frm} ORDER BY r.host, r.ip"
+    columns: list[list] = [[] for _ in keys]
+    for row in conn.execute(sql, args):
+        for col, v in zip(columns, row, strict=True):
+            col.append("" if v is None else v)
+    out: dict = {}
+    for k, vals in zip(keys, columns, strict=True):
+        uniq = list(dict.fromkeys(vals))
+        if len(uniq) < len(vals) / 2:
+            index = {v: i for i, v in enumerate(uniq)}
+            out[k] = {"d": uniq, "i": [index[v] for v in vals]}
+        else:
+            out[k] = vals
+    return {"rows": len(columns[0]), "columns": out, "eu": EU_NAMES}
+
+
 def breakdown(rows: list[dict], field: str, limit: int = 10) -> list[dict]:
     """Distinct addresses per value of field; the tail is folded into 'Other'."""
     groups: dict[str, set[str]] = {}

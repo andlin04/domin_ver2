@@ -9,7 +9,11 @@ Domain inventory: host names, addresses and hosting providers per domain, and ho
   countries and EU share, charts of countries, providers and ASNs (click a bar to filter), and every record. Search
   host, address, ASN, prefix, network, description or country, in the latest scans or the whole history (first
   and last seen); the search and the column filters narrow the figures, charts and table together. CSV download.
-- **Tables:** sort by any column; a filter box under each column heading, and the filters add up (search page:
+  Filtering runs in the browser as you type: the page fetches the whole dataset once (`/data/drill.json`, gzip'd,
+  about 1.7 MB for 163k records; built once per scan, the history once an hour; cached by the browser), so many
+  users filtering at once cost the server nothing. Without it (no JavaScript, load error) the same filters run on
+  the server when Enter is pressed.
+- **Tables:** sort by any column; a filter box under each column heading, and the filters add up (Drilldown:
   across every match, not just the page shown).
 - **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
 - **Admin page:** usage statistics without stored IP addresses, scan job control, live tuning (see below).
