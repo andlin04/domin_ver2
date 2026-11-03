@@ -306,6 +306,18 @@ def test_scans_per_day_limit(settings):
         assert r.status_code == 429 and "per day" in r.text
 
 
+def test_internal_ips_skip_scan_limits(settings):
+    s = replace(settings, scans_per_hour=1, scans_per_day=1, queue_max=1, internal_ips=("192.0.2.0/24",))
+    with TestClient(create_app(s), client=("192.0.2.9", 50000)) as h:
+        for name in ("i1.se", "i2.se", "i3.se"):
+            assert h.post("/api/scan", json={"domain": name}).status_code == 200
+    with TestClient(create_app(s), client=("198.51.100.7", 50000)) as h:   # a visitor, even claiming an internal IP
+        r = h.post("/api/scan", json={"domain": "v1.se"}, headers={"x-real-ip": "192.0.2.9"})
+        assert r.status_code == 503   # the queue is full of the internal jobs
+    with TestClient(create_app(s), client=("127.0.0.1", 50000)) as h:   # nginx passes the internal client's address
+        assert h.post("/api/scan", json={"domain": "i4.se"}, headers={"x-real-ip": "192.0.2.9"}).status_code == 200
+
+
 def test_amass_output_old_and_new_formats():
     out = "a.ex.se\nB.EX.se.\nother.se\n\nc.ex.se (FQDN) --> a_record --> 192.0.2.1 (IPAddress)\n"
     assert scanner.amass_hosts(out, "ex.se") == {"a.ex.se", "b.ex.se", "c.ex.se"}

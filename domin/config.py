@@ -26,6 +26,7 @@ class Settings:
     scans_paused: bool = False     # the worker leaves queued jobs waiting
     analytics_days: int = 180      # visit statistics older than this are deleted
     admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; everyone else gets 404
+    internal_ips: tuple[str, ...] = ()   # private API clients (over a VPN): POST /api/scan without visitor limits
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -45,4 +46,5 @@ class Settings:
             lookups_per_minute=int(env("DOMIN_LOOKUPS_PER_MINUTE", "30")),
             analytics_days=int(env("DOMIN_ANALYTICS_DAYS", "180")),
             admin_ips=tuple(x.strip() for x in env("DOMIN_ADMIN_IPS", ADMIN_IPS).split(",") if x.strip()),
+            internal_ips=tuple(x.strip() for x in env("DOMIN_INTERNAL_IPS", "").split(",") if x.strip()),
         )

@@ -71,6 +71,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return db.connect(settings.db_path)
 
     admin_nets = [ipaddress.ip_network(x, strict=False) for x in settings.admin_ips]
+    internal_nets = [ipaddress.ip_network(x, strict=False) for x in settings.internal_ips]
 
     def peer_ip(request: Request) -> str:
         """The visitor's address: X-Real-IP only when nginx on this host proxies (nginx sets it from $remote_addr,
@@ -89,12 +90,15 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return peer[:64]
         return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
 
-    def admin_allowed(request: Request) -> bool:
+    def peer_in(request: Request, nets) -> bool:
         try:
             ip = ipaddress.ip_address(peer_ip(request))
         except ValueError:
             return False
-        return any(ip in n for n in admin_nets)
+        return any(ip in n for n in nets)
+
+    def admin_allowed(request: Request) -> bool:
+        return peer_in(request, admin_nets)
 
     def live() -> Settings:
         with conn() as c:
@@ -377,6 +381,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             s = admin.effective(settings, c)
             who = admin.client_key(c, client_ip(request))
+            if peer_in(request, internal_nets):   # DOMIN_INTERNAL_IPS: no visitor limits
+                return jobs.enqueue(c, name, client=who)
             last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
                              (name,)).fetchone()[0]
             if s.once_per_day and last and last[:10] == db.now()[:10]:

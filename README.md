@@ -86,4 +86,6 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 Settings (environment): `DOMIN_DB`, `DOMIN_REFRESH_DAYS` (re-scan domains older than N days, 0 = off),
 `DOMIN_SCAN_WORKERS`, `DOMIN_MAX_HOSTS`, `DOMIN_SCANS_PER_HOUR`, `DOMIN_SCANS_PER_DAY` (200),
 `DOMIN_USER_WORKERS` (3 parallel visitor scans), `DOMIN_REFRESH_WORKERS` (2 parallel refreshes, a separate queue),
-`DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin).
+`DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin), `DOMIN_INTERNAL_IPS`
+(private API clients, e.g. over a VPN: `POST /api/scan` without the per-client, once-a-day and queue limits; empty
+by default).
