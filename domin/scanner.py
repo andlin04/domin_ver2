@@ -98,6 +98,7 @@ def from_amass(domain: str, amass: str) -> set[str]:
         return set()
     found: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="amass-") as work:
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": work}  # the app's secrets stay out of a third-party tool
         # amass 3.23: -trf = trusted resolvers file (older versions: -resolvers)
         active = ["-active", "-trf", RESOLVERS, "-dns-qps", "100", "-max-dns-queries", "20000"]
         for mode in (["-passive"], active):
@@ -105,7 +106,7 @@ def from_amass(domain: str, amass: str) -> set[str]:
             names = os.path.join(work, f"names{mode[0]}.txt")
             try:
                 subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-o", names, "-timeout", "15"],
-                               capture_output=True, text=True, timeout=960)
+                               capture_output=True, text=True, timeout=960, env=env)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 log.warning("amass %s %s: %s", mode[0], domain, str(exc)[:80])
             try:

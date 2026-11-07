@@ -119,7 +119,7 @@ fi
 # service and all its child processes, whatever they resolve.
 NON_PUBLIC="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4 ::1/128 fc00::/7 fe80::/10 ff00::/8"
 
-unit() {  # name, description, command, extra [Service] line
+unit() {  # name, description, command, memory limit, task limit, extra [Service] line
   cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]
 Description=$2
@@ -140,15 +140,35 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$DATA
 IPAddressDeny=$NON_PUBLIC
-${4:-}
+${6:-}
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryMax=$4
+TasksMax=$5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
 # X-Real-IP from nginx is trusted from localhost only (domin/web.py client_ip); no --proxy-headers needed.
-unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log" "IPAddressAllow=localhost"  # nginx connects over loopback
-unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker"
+unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log" 2G 200 "IPAddressAllow=localhost"  # nginx connects over loopback
+unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker" 16G 2000
 
 cat > /etc/nginx/sites-available/domin <<EOF
 limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;

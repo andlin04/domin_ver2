@@ -334,6 +334,22 @@ def test_amass_output_old_and_new_formats():
     assert scanner.amass_hosts(out, "ex.se") == {"a.ex.se", "b.ex.se", "c.ex.se"}
 
 
+def test_amass_gets_no_app_environment(monkeypatch):
+    seen = []
+    monkeypatch.setenv("DOMIN_SECRET_KEY", "x")
+    monkeypatch.setattr(scanner.shutil, "which", lambda exe: "/bin/amass")
+    monkeypatch.setattr(scanner.subprocess, "run", lambda args, **kw: seen.append(kw["env"]))
+    assert scanner.from_amass("ex.se", "amass") == set()
+    assert len(seen) == 2 and all(set(env) == {"PATH", "HOME"} for env in seen)
+
+
+def test_services_are_sandboxed_with_limits():
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    for line in ("CapabilityBoundingSet=", "SystemCallFilter=@system-service", "MemoryMax=$4", "TasksMax=$5"):
+        assert line in install.splitlines()
+    assert '" 2G 200 "' in install and '" 16G 2000' in install
+
+
 def test_amass_runs_passive_then_active(monkeypatch):
     calls = []
 
