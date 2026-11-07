@@ -115,7 +115,11 @@ if [ "$(/usr/local/bin/amass -version 2>&1)" != "v3.23.3" ]; then
   rm -f "$ZIP"
 fi
 
-unit() {  # name, description, command
+# A scanned domain's DNS decides where the scan tools connect: the kernel refuses every non-public address for the
+# service and all its child processes, whatever they resolve.
+NON_PUBLIC="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4 ::1/128 fc00::/7 fe80::/10 ff00::/8"
+
+unit() {  # name, description, command, extra [Service] line
   cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]
 Description=$2
@@ -135,13 +139,15 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$DATA
+IPAddressDeny=$NON_PUBLIC
+${4:-}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
 # X-Real-IP from nginx is trusted from localhost only (domin/web.py client_ip); no --proxy-headers needed.
-unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log"
+unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log" "IPAddressAllow=localhost"  # nginx connects over loopback
 unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker"
 
 cat > /etc/nginx/sites-available/domin <<EOF

@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -37,6 +38,16 @@ def settings(tmp_path):
                                       ("app.localhost", None), ("x.invalid", None), ("a" * 3000 + ".se", None)])
 def test_normalize(raw, want):
     assert normalize_domain(raw) == want
+
+
+def test_services_refuse_non_public_addresses():
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    deny = next(line for line in install.splitlines() if line.startswith("NON_PUBLIC="))
+    for net in ("10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7"):
+        assert net in deny
+    assert "IPAddressDeny=$NON_PUBLIC" in install
+    worker = next(line for line in install.splitlines() if line.startswith("unit domin-worker"))
+    assert "IPAddressAllow" not in worker   # only the web app, for nginx over loopback
 
 
 def test_wal_kept_between_connections(settings):
