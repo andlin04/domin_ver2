@@ -2,6 +2,15 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: updates that leave scans running
+
+- `deploy/update.sh`: code-only update from a tar on stdin (`git archive HEAD domin deploy | ssh <host> 'sudo bash
+  /opt/domin/app/deploy/update.sh'`). Copies the changed files and restarts only what they need: the web app for any
+  change under domin/, the worker only when a file it runs changed (not templates/, static/, web.py).
+- A worker restart puts the posture scans it interrupted back in the queue (same row, same place) instead of failing
+  them; a scan interrupted a second time fails ("worker restarted twice"), so it cannot loop.
+- Rollback: revert this change; updates go back to `tar -x` plus restarting both services.
+
 ## 2026-11-08: fixed versions for NVD matches
 
 - CVEs matched through NVD (by CPE, e.g. Apache httpd) showed "no fixed version published yet" even when the

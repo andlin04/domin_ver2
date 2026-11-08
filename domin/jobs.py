@@ -264,7 +264,8 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     with db.connect(settings.db_path) as conn:  # a crash or restart leaves 'running' rows behind
         conn.execute("UPDATE jobs SET status = 'failed', error = 'worker restarted', finished = ? "
                      "WHERE status = 'running'", (db.now(),))
-        posture.fail_running(conn)
+        if n := posture.requeue_running(conn):
+            log.info("restart: %d posture scans requeued", n)
     housekeeping(settings)
     if once:
         for refresh in (False, True):

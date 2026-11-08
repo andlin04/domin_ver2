@@ -186,7 +186,7 @@ dropins() {  # write | remove: the services' IPAddressAllow for the tunnel and a
   done
   if [ "$changed" = 1 ]; then
     systemctl daemon-reload
-    # a restart fails the scans running now ("worker restarted"); only when the drop-in changed
+    # a restart requeues the posture scans running now (they start over); only when the drop-in changed
     for unit in domin-worker domin; do
       ! systemctl is-active -q "$unit" || systemctl restart "$unit"
     done

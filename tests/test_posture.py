@@ -145,11 +145,16 @@ def test_paused_scans_leave_posture_queued(settings, nmap):
     assert run_queue(settings) == 0
 
 
-def test_restart_fails_running_posture(settings):
+def test_restart_requeues_running_posture_once(settings):
     with db.connect(settings.db_path) as c:
         posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana")
-        assert posture.claim(c)
-        assert posture.fail_running(c) == 1
+        first = posture.claim(c)
+        assert posture.requeue_running(c) == 1
+        again = posture.claim(c)   # back in the queue, same row
+        assert again and again["id"] == first["id"] and again["note"] == posture.REQUEUED
+        assert posture.requeue_running(c) == 0   # interrupted a second time: fails, no loop
+        row = c.execute("SELECT status, error FROM posture_scans WHERE id = ?", (first["id"],)).fetchone()
+        assert row["status"] == "failed" and row["error"] == "worker restarted twice"
 
 
 def test_dropping_a_domain_drops_its_posture(settings):

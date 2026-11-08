@@ -204,10 +204,17 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     log.info("posture %s %s: %s", row["domain"], row["ip"], res.get("error") or "done")
 
 
-def fail_running(conn: sqlite3.Connection) -> int:
-    """Rows a crash or restart left running."""
-    return conn.execute("UPDATE posture_scans SET status = 'failed', finished = ?, error = 'worker restarted' "
-                        "WHERE status = 'running'", (db.now(),)).rowcount
+REQUEUED = "requeued after a worker restart"
+
+
+def requeue_running(conn: sqlite3.Connection) -> int:
+    """Rows a crash or restart left running go back to the queue (a scan changes nothing on the target, so it can
+    start over) and keep their place. A row that was already requeued once fails instead, so a scan that takes the
+    worker down cannot loop. Returns how many were requeued."""
+    conn.execute("UPDATE posture_scans SET status = 'failed', finished = ?, error = 'worker restarted twice' "
+                 "WHERE status = 'running' AND note = ?", (db.now(), REQUEUED))
+    return conn.execute("UPDATE posture_scans SET status = 'queued', started = NULL, note = ? "
+                        "WHERE status = 'running'", (REQUEUED,)).rowcount
 
 
 def current(conn: sqlite3.Connection, domain: str = "", limit: int = 500) -> list[dict]:
