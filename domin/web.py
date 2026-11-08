@@ -406,7 +406,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(403, f"{name} is outside the configured inventory scope")
             s = admin.effective(settings, c)
             who = admin.client_key(c, client_ip(request))
-            if peer_in(request, internal_nets):   # DOMIN_INTERNAL_IPS: no visitor limits
+            if peer_in(request, internal_nets) or s.scan_limits_off:   # trusted clients / limits off in Settings
                 return jobs.enqueue(c, name, client=who)
             last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
                              (name,)).fetchone()[0]

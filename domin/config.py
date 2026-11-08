@@ -22,6 +22,7 @@ class Settings:
     scan_timeout_hours: int = 3    # a longer scan fails at its next progress step
     lookups_per_minute: int = 30   # per client IP, for /api/rdap and /api/email
     once_per_day: bool = True      # POST /api/scan: each domain at most once per day
+    scan_limits_off: bool = False  # POST /api/scan: skip all visitor limits (once-per-day, rate, quota, queue)
     scans_paused: bool = False     # the worker leaves queued jobs waiting
     analytics_days: int = 180      # visit statistics older than this are deleted
     admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; empty = no admin page
@@ -53,6 +54,7 @@ class Settings:
             scan_timeout_hours=int(env("DOMIN_SCAN_TIMEOUT_HOURS", "3")),
             lookups_per_minute=int(env("DOMIN_LOOKUPS_PER_MINUTE", "30")),
             analytics_days=int(env("DOMIN_ANALYTICS_DAYS", "180")),
+            scan_limits_off=env("DOMIN_SCAN_LIMITS_OFF", "").strip().lower() in ("1", "true", "yes", "on"),
             admin_ips=tuple(x.strip() for x in env("DOMIN_ADMIN_IPS", "").split(",") if x.strip()),
             internal_ips=tuple(x.strip() for x in env("DOMIN_INTERNAL_IPS", "").split(",") if x.strip()),
             cve_db_mode="shared" if env("DOMIN_CVE_DB_MODE", "own").strip().lower() == "shared" else "own",

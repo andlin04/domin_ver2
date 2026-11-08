@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: Settings tick-box to disable scan limits
+
+- Settings (admin) gains a **Disable scan limits** tick-box. With it on, `POST /api/scan` skips every visitor limit
+  (once-per-day, per-client hour/day caps, the daily total and the queue cap), so a domain can be re-scanned freely.
+  Off by default; leave it off on an instance exposed to abuse. Also settable at start with `DOMIN_SCAN_LIMITS_OFF=1`.
+- Reversible: untick it (or revert the commit); no data change.
+
 ## 2026-11-08: security portal (CVE look-up and host fingerprinting)
 
 - A Security page (analyst or admin runs it; any signed-in user reads it). Look up the known vulnerabilities (CVEs)

@@ -29,6 +29,8 @@ PAGE_GAP_CAP = 30 * 60   # seconds: a longer gap counts as the visitor having le
 TUNABLE = {
     "scans_paused": ("Pause the scan worker (queued jobs wait)", None, None),
     "once_per_day": ("Each domain at most once per day", None, None),
+    "scan_limits_off": ("Disable scan limits — retry any domain freely (leave off where abuse is a concern)",
+                        None, None),
     "scans_per_hour": ("Scans per hour per client", 0, 1000),
     "scans_per_day": ("Scans per day per client", 0, 100000),
     "scans_per_day_total": ("Visitor scans per day, all clients together", 0, 100000),

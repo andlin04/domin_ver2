@@ -117,6 +117,16 @@ def test_tuning_applies_to_the_scan_api(settings):
         assert [r[0][:2] for r in c.execute("SELECT client FROM jobs")] == ["h:"]
 
 
+def test_scan_limits_off_bypasses_limits(settings):
+    # once_per_day defaults on and the per-hour cap is 1, yet with the limits-off tick every retry goes through
+    with db.connect(settings.db_path) as c:
+        admin.kv_set(c, "tuning", '{"scans_per_hour": 1, "scan_limits_off": true}')
+    with client(settings) as h:
+        assert h.post("/api/scan", json={"domain": "a.se"}).status_code == 200
+        assert h.post("/api/scan", json={"domain": "a.se"}).status_code == 200   # same domain again, same day
+        assert h.post("/api/scan", json={"domain": "b.se"}).status_code == 200   # past the per-hour cap
+
+
 def test_cancel_queued_and_kill_running(settings, monkeypatch):
     with db.connect(settings.db_path) as c:
         queued = jobs.enqueue(c, "queued.se")
