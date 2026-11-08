@@ -437,6 +437,22 @@ def cve_hop(conn: sqlite3.Connection, cfg: dict, scan_route: dict | None = None,
     return {**h, "cve": True} if h else None
 
 
+MULLVAD_SUFFIX = ".relays.mullvad.net"
+MULLVAD_DNS = "10.64.0.1"   # Mullvad's resolver, reachable only inside the tunnel
+
+
+def mullvad_dns(host: str) -> list[str]:
+    """A relay name's A records from Mullvad's in-tunnel resolver; [] when the tunnel or the name is missing."""
+    import dns.exception
+    import dns.resolver
+    r = dns.resolver.Resolver(configure=False)
+    r.nameservers, r.lifetime = [MULLVAD_DNS], 4.0
+    try:
+        return [a.to_text() for a in r.resolve(host, "A")]
+    except (dns.exception.DNSException, OSError):
+        return []
+
+
 def resolve(host: str) -> str:
     """The proxy's numeric address (proxychains needs one); IPv4 first."""
     try:
@@ -448,6 +464,8 @@ def resolve(host: str) -> str:
     except OSError:
         infos = []
     ips = [str(i[4][0]) for i in infos]
+    if not ips and host.lower().endswith(MULLVAD_SUFFIX):
+        ips = mullvad_dns(host)   # hosts without public DNS: ask Mullvad's resolver inside the tunnel
     if not ips:
         raise ProxyError(f"the proxy host {host} does not resolve")
     return next((ip for ip in ips if ":" not in ip), ips[0])

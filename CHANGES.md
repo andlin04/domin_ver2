@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: Mullvad relay names resolve inside the tunnel
+
+- A host without public DNS resolves `*.relays.mullvad.net` through Mullvad's in-tunnel resolver (10.64.0.1), so
+  Follow host / Fixed / Automatic can pick relays in any country.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: clearer routes page, Mullvad setup fixes
 
 - Routes page, top: **This host**: proxychains4 and wireguard-tools installed, the tor client's SOCKS5 answering,

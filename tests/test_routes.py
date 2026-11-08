@@ -764,3 +764,21 @@ def test_route_enabled_verified_and_fail_closed(settings, monkeypatch):
         proxy.save_route(c, {"id": "r2", "name": "Germany", "kind": "mullvad", "mullvad_mode": "fixed",
                              "mullvad_country": "de", "enabled_shown": "1", "enabled": "on"})
         assert proxy.find(proxy.get(c), "r2")["enabled"]
+
+
+def test_mullvad_relay_names_fall_back_to_the_in_tunnel_resolver(monkeypatch):
+    from domin import proxy as px
+
+    def no_dns(*a, **k):
+        raise OSError("no public DNS")
+    monkeypatch.setattr(px.socket, "getaddrinfo", no_dns)
+    asked = []
+    monkeypatch.setattr(px, "mullvad_dns", lambda host: asked.append(host) or ["10.124.0.99"])
+    assert px.resolve("de-fra-wg-socks5-001.relays.mullvad.net") == "10.124.0.99"
+    assert asked == ["de-fra-wg-socks5-001.relays.mullvad.net"]
+    try:
+        px.resolve("proxy.example.invalid")
+        raise AssertionError("expected ProxyError")
+    except px.ProxyError:
+        pass
+    assert len(asked) == 1   # other names never go to Mullvad's resolver
