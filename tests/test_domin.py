@@ -389,6 +389,14 @@ def test_uninstall_removes_services_and_keeps_data():
     assert "rm -rf /var/lib/domin" in purge_block and "rm -rf /var/lib/domin" not in u.split('if [ "$purge"', 1)[0]
 
 
+def test_install_starts_nginx_so_reinstall_after_uninstall_works():
+    # a single-site uninstall.sh disables+stops nginx; a reinstall must start it again, not just `reload`
+    # (a bare reload fails under set -e and aborts with the public site down). enable --now precedes reload.
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    assert "systemctl enable -q --now nginx" in install
+    assert install.index("systemctl enable -q --now nginx") < install.index("systemctl reload nginx")
+
+
 def test_internal_ips_skip_scan_limits(settings):
     s = replace(settings, scans_per_hour=1, scans_per_day=1, queue_max=1, internal_ips=("192.0.2.0/24",))
     with TestClient(create_app(s), client=("192.0.2.9", 50000)) as h:
