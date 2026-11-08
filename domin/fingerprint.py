@@ -179,8 +179,8 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
 
     Returns {target, ip, services, note, error, raw, params}. Each service carries its CPEs' findings
     (deduped, worst first) and a `matched` flag (did any CPE yield a cve target to look up). params is
-    the nmap command line that ran, plus the route ("via socks5 192.0.2.10:1080",
-    "via mullvad se-got-wg-socks5-001 (se, follow host)") when via (the hop, proxy.hop) is on."""
+    the nmap command line that ran, plus the route ("via Office: socks5 192.0.2.10:1080",
+    "via Mullvad: mullvad se-got-wg-socks5-001 (se, follow host)") when via (the hop, proxy.hop) is on."""
     via = via if via and via.get("enabled") else None
     params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
     if via:

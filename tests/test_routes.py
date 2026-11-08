@@ -69,7 +69,13 @@ def doc_addresses_are_public(monkeypatch):
 
 
 def cfg(**kw) -> dict:
-    return {**proxy.DEFAULT, "route": "mullvad", "posture": True, **kw}
+    """The single-route setting of earlier builds (stored under LEGACY_KEY: read through the migration)."""
+    return {**proxy.LEGACY_DEFAULT, "route": "mullvad", "posture": True, **kw}
+
+
+def rt(kind: str = "mullvad", **kw) -> dict:
+    """A named route."""
+    return {**proxy.ROUTE_DEFAULT, "id": "r1", "name": proxy.KINDS[kind], "kind": kind, **kw}
 
 
 def no_fetch():
@@ -119,34 +125,35 @@ def test_failed_refresh_keeps_a_stale_list_and_no_list_is_an_error(settings):
 
 def test_follow_host_picks_a_relay_in_the_address_country(settings):
     with db.connect(settings.db_path) as c, no_fetch() as client:
-        h = proxy.hop(c, cfg(mullvad_mode="follow"), "posture", "198.51.100.7", "Sweden", client, random.Random(1))
+        h = proxy.hop(c, rt(mullvad_mode="follow"), "198.51.100.7", "Sweden", client, random.Random(1))
         assert h["type"] == "socks5" and h["host"].startswith("se-") and h["port"] == 1080
         assert h["label"].endswith("(se, follow host)")
         # a country without an active relay: the fallback, else the scan fails
-        h = proxy.hop(c, cfg(mullvad_mode="follow", mullvad_fallback="de"), "posture", "198.51.100.7", "Finland",
+        h = proxy.hop(c, rt(mullvad_mode="follow", mullvad_fallback="de"), "198.51.100.7", "Finland",
                       client)
-        assert h["label"] == "mullvad de-fra-wg-socks5-001 (de, follow host: no active Mullvad relay in fi, fallback)"
+        assert h["label"] == ("Mullvad: mullvad de-fra-wg-socks5-001 (de, follow host: no active Mullvad relay in "
+                              "fi, fallback)")
         with pytest.raises(proxy.ProxyError, match="no active Mullvad relay in fi, and no fallback country"):
-            proxy.hop(c, cfg(mullvad_mode="follow"), "posture", "198.51.100.7", "Finland", client)
+            proxy.hop(c, rt(mullvad_mode="follow"), "198.51.100.7", "Finland", client)
         with pytest.raises(proxy.ProxyError, match="the address has no country"):
-            proxy.hop(c, cfg(mullvad_mode="follow"), "posture", "198.51.100.8", "", client)
+            proxy.hop(c, rt(mullvad_mode="follow"), "198.51.100.8", "", client)
 
 
 def test_fixed_country_and_city(settings):
     with db.connect(settings.db_path) as c, no_fetch() as client:
-        h = proxy.hop(c, cfg(mullvad_mode="fixed", mullvad_country="se", mullvad_city="sto"), "posture",
+        h = proxy.hop(c, rt(mullvad_mode="fixed", mullvad_country="se", mullvad_city="sto"),
                       "198.51.100.7", "Germany", client)
         assert h["host"] == "se-sto-wg-socks5-002.relays.mullvad.net" and h["label"].endswith("(se, fixed)")
         with pytest.raises(proxy.ProxyError, match="no active Mullvad relay in fi"):
-            proxy.hop(c, cfg(mullvad_mode="fixed", mullvad_country="fi"), "posture", "198.51.100.7", "", client)
+            proxy.hop(c, rt(mullvad_mode="fixed", mullvad_country="fi"), "198.51.100.7", "", client)
 
 
 def test_automatic_follows_then_falls_back_then_takes_any(settings):
     with db.connect(settings.db_path) as c, no_fetch() as client:
-        assert proxy.hop(c, cfg(), "posture", "198.51.100.7", "Germany", client)["label"].endswith("(de, automatic)")
-        h = proxy.hop(c, cfg(mullvad_fallback="se"), "posture", "198.51.100.8", "", client)
+        assert proxy.hop(c, rt(), "198.51.100.7", "Germany", client)["label"].endswith("(de, automatic)")
+        h = proxy.hop(c, rt(mullvad_fallback="se"), "198.51.100.8", "", client)
         assert h["label"].endswith("(se, automatic: the address has no country, fallback)")
-        h = proxy.hop(c, cfg(), "posture", "198.51.100.8", "", client, random.Random(3))
+        h = proxy.hop(c, rt(), "198.51.100.8", "", client, random.Random(3))
         assert "automatic: the address has no country, any relay" in h["label"]
         assert h["host"] != "fi-hel-wg-socks5-001.relays.mullvad.net"   # never an inactive relay
 
@@ -161,9 +168,9 @@ def test_private_targets_never_go_through_tor_or_mullvad(settings):
     with db.connect(settings.db_path) as c:
         for route, name in (("tor", "Tor"), ("mullvad", "Mullvad")):
             with pytest.raises(proxy.ProxyError, match=f"private address can't go through {name}"):
-                proxy.hop(c, cfg(route=route), "posture", "172.20.4.50")
-        assert proxy.hop(c, cfg(route="custom", host="192.0.2.10"), "posture", "172.20.4.50")["host"] == "192.0.2.10"
-        assert proxy.hop(c, cfg(route="tor", posture=False), "posture", "172.20.4.50") is None   # not ticked
+                proxy.hop(c, rt(route), "172.20.4.50")
+        assert proxy.hop(c, rt("custom", host="192.0.2.10"), "172.20.4.50")["host"] == "192.0.2.10"
+        assert proxy.hop(c, None, "172.20.4.50") is None   # direct
 
 
 def test_country_code_from_dbip_or_the_record(settings):
@@ -195,9 +202,9 @@ def nmap_conf(monkeypatch, hop) -> str:
 
 def test_proxychains_conf_for_tor_and_mullvad(settings, monkeypatch):
     with db.connect(settings.db_path) as c:
-        tor = proxy.hop(c, cfg(route="tor"), "posture", "198.51.100.7")
-        mv = proxy.hop(c, cfg(mullvad_mode="fixed", mullvad_country="de"), "posture", "198.51.100.7")
-    assert proxy.route(tor) == "tor 127.0.0.1:9050"
+        tor = proxy.hop(c, rt("tor"), "198.51.100.7")
+        mv = proxy.hop(c, rt(mullvad_mode="fixed", mullvad_country="de"), "198.51.100.7")
+    assert proxy.route(tor) == "Tor: tor 127.0.0.1:9050"
     assert nmap_conf(monkeypatch, tor).endswith("[ProxyList]\nsocks5 127.0.0.1 9050\n")
     assert nmap_conf(monkeypatch, mv).endswith("[ProxyList]\nsocks5 10.124.0.5 1080\n")   # relay name resolved
 
@@ -206,7 +213,7 @@ def test_worker_records_the_mullvad_route_without_secrets(settings, monkeypatch)
     seen = []
     monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
     with db.connect(settings.db_path) as c:
-        admin.kv_set(c, proxy.KEY, json.dumps(cfg(mullvad_mode="follow")))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(cfg(mullvad_mode="follow")))
         mullvad.save_tunnel(c, {**mullvad.TUNNEL_DEFAULT, "account": ACCOUNT, "private_key": KEY,
                                 "address": "10.64.0.2/32"})
         n = posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana")
@@ -215,11 +222,11 @@ def test_worker_records_the_mullvad_route_without_secrets(settings, monkeypatch)
     with db.connect(settings.db_path) as c:
         rows = {r["ip"]: r for r in posture.current(c, DOM)}
     assert rows["198.51.100.7"]["status"] == "done"
-    assert " via mullvad se-" in rows["198.51.100.7"]["params"]
+    assert " via Mullvad: mullvad se-" in rows["198.51.100.7"]["params"]
     assert rows["198.51.100.7"]["params"].endswith("(se, follow host)")
     assert rows["198.51.100.8"]["error"] == "route: the address has no country, and no fallback country is set"
     assert rows["172.20.4.50"]["error"] == "route: private address can't go through Mullvad"
-    assert all(r["params"].endswith(("(se, follow host)", "via Mullvad, follow host")) for r in rows.values())
+    assert all(r["params"].endswith(("(se, follow host)", "via Mullvad: mullvad, follow host")) for r in rows.values())
     for r in rows.values():
         assert ACCOUNT not in json.dumps(r) and KEY not in json.dumps(r)
 
@@ -262,22 +269,20 @@ def test_routed_inventory_job_uses_the_socks_client_and_doh(settings, monkeypatc
     monkeypatch.setattr(scanner, "_resolver", never)
     progress = []
     with db.connect(settings.db_path) as c:
-        admin.kv_set(c, proxy.KEY, json.dumps(cfg(route="tor", posture=False, inventory=True)))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(cfg(route="tor", posture=False, inventory=True)))
         records = scanner.run(c, DOM, settings, progress.append, client=no_fetch())
     assert str(seen["proxy"].url) == "socks5://127.0.0.1:9050"
     assert seen["doh"] > 0 and set(seen["urls"]) == {"dns.quad9.net", "crt.sh"}
     assert {r["host"] for r in records} == {DOM, f"www.{DOM}"}
-    assert "route: tor 127.0.0.1:9050" in progress and "amass skipped (routed scan)" in progress
+    assert "route: Tor: tor 127.0.0.1:9050" in progress and "amass skipped (routed scan)" in progress
 
 
 def test_mullvad_inventory_uses_the_fixed_or_fallback_country(settings):
     with db.connect(settings.db_path) as c, no_fetch() as client:
-        inv = {"posture": False, "inventory": True}
-        assert proxy.hop(c, cfg(**inv, mullvad_fallback="de"), "inventory", client=client)["host"].startswith("de-")
-        assert proxy.hop(c, cfg(**inv, mullvad_mode="fixed", mullvad_country="se", mullvad_city="got"),
-                         "inventory", client=client)["host"].startswith("se-got-")
+        assert proxy.hop(c, rt(mullvad_fallback="de"), client=client)["host"].startswith("de-")
+        assert proxy.hop(c, rt(mullvad_mode="fixed", mullvad_country="se", mullvad_city="got"), client=client)["host"].startswith("se-got-")
         with pytest.raises(proxy.ProxyError, match="no fallback country"):
-            proxy.hop(c, cfg(**inv, mullvad_mode="follow"), "inventory", client=client)
+            proxy.hop(c, rt(mullvad_mode="follow"), client=client)
 
 
 def test_internal_zone_inventory_stays_direct(settings, monkeypatch):
@@ -293,7 +298,7 @@ def test_internal_zone_inventory_stays_direct(settings, monkeypatch):
     monkeypatch.setattr(proxy, "handshake", never)
     s = replace(settings, internal_zones=("home.arpa",), internal_dns=("172.20.0.252",))
     with db.connect(s.db_path) as c, no_fetch() as client:
-        admin.kv_set(c, proxy.KEY, json.dumps(cfg(route="tor", inventory=True)))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(cfg(route="tor", inventory=True)))
         assert scanner.run(c, "srv.home.arpa", s, client=client, resolver=FakeRes()) == [
             {"host": "srv.home.arpa", "ip": ""}]
 
@@ -303,7 +308,7 @@ def test_inventory_job_fails_closed_when_the_route_is_down(settings, monkeypatch
         raise AssertionError("must not go out direct")
     monkeypatch.setattr(scanner.tools, "http_client", never)
     with db.connect(settings.db_path) as c:
-        admin.kv_set(c, proxy.KEY, json.dumps(cfg(route="tor", inventory=True)))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(cfg(route="tor", inventory=True)))
         jobs.enqueue(c, DOM)
         job = jobs.claim(c)
     jobs.run_job(settings, job)   # the conftest refuses every proxy connect
@@ -342,10 +347,14 @@ def app_client(settings):
                       base_url="https://testserver", client=("127.0.0.1", 50000))
 
 
+def route_form(**kw) -> dict:
+    return {"name": "Mullvad", "kind": "mullvad", "mullvad_mode": "follow", "mullvad_fallback": "se", **kw}
+
+
 def page_form(**kw) -> dict:
-    return {"route": "mullvad", "posture": "on", "type": "socks5", "host": "", "port": "1080",
-            "tor_host": "127.0.0.1", "tor_port": "9050", "mullvad_mode": "follow", "mullvad_fallback": "se",
-            "doh": proxy.DOH, "mullvad_address": "10.64.0.2/32", **kw}
+    """The shared settings form."""
+    return {"posture": "r1", "inventory": "direct", "cve": "direct", "doh": proxy.DOH,
+            "mullvad_address": "10.64.0.2/32", **kw}
 
 
 def test_tunnel_credentials_are_validated_kept_and_cleared():
@@ -373,13 +382,20 @@ def test_admin_saves_mullvad_route_and_tunnel_request_has_no_secrets(settings):
         csrf = sign_in(h, "adm")
         page = h.get("/admin/security/scan-settings").text
         assert "Tunnel state not checked" in page and "4 relays" in page and "Sweden (se, 2)" in page
+        for bad, msg in ((route_form(mullvad_fallback="xx"), "Fallback country"),
+                         (route_form(mullvad_mode="fixed"), "Pick the Mullvad country")):
+            r = h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **bad})
+            assert r.status_code == 422 and msg in r.text
+        assert h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **route_form()},
+                      follow_redirects=False).status_code == 303
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **page_form(
             mullvad_account=ACCOUNT, mullvad_key=KEY, mullvad_address="10.64.0.2/32")}, follow_redirects=False)
         assert r.status_code == 303 and "tunnel-requested" in r.headers["location"]
         text = flag.read_text()
         assert text.startswith("requested ") and ACCOUNT not in text and KEY not in text
         page = h.get("/admin/security/scan-settings").text
-        assert "Posture scans: Mullvad, follow host (fallback se) · Inventory jobs: direct" in page
+        assert ("Posture scans (default): Mullvad: mullvad, follow host (fallback se) · Inventory jobs: direct · "
+                "CVE look-ups: direct") in page
         assert ACCOUNT not in page and KEY not in page and page.count("saved; blank keeps it") == 2
         assert "Mullvad tunnel down" in page
         assert "a request is waiting for the host" in page
@@ -390,18 +406,15 @@ def test_admin_saves_mullvad_route_and_tunnel_request_has_no_secrets(settings):
         (settings.db_path.parent / mullvad.STATUS_FILE).write_text(
             json.dumps({"at": "2026-11-08T10:00:00", "ok": True, "message": "tunnel up via se-got-wg-001"}))
         assert "2026-11-08T10:00:00: tunnel up via se-got-wg-001" in h.get("/admin/security/scan-settings").text
-        for bad, msg in ((page_form(mullvad_fallback="xx"), "Fallback country"),
-                         (page_form(mullvad_mode="fixed"), "Pick the Mullvad country"),
-                         (page_form(mullvad_account="12"), "16 digits")):
-            r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **bad})
-            assert r.status_code == 422 and msg in r.text
+        r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **page_form(mullvad_account="12")})
+        assert r.status_code == 422 and "16 digits" in r.text
         assert h.post("/admin/security/scan-settings/tunnel", data={"csrf": csrf},
                       follow_redirects=False).status_code == 303 and flag.exists()
-        assert "Test route: Mullvad tunnel down" in h.post("/admin/security/scan-settings/test",
-                                                            data={"csrf": csrf}).text
+        assert "Test route: Mullvad: Mullvad tunnel down" in h.post("/admin/security/scan-settings/test",
+                                                                     data={"csrf": csrf, "route": "r1"}).text
     with db.connect(settings.db_path) as c:
         assert mullvad.get_tunnel(c)["private_key"] == KEY
-        assert proxy.get(c)["mullvad_fallback"] == "se"
+        assert proxy.find(proxy.get(c), "r1")["mullvad_fallback"] == "se"
 
 
 def test_relay_list_refresh_button(settings, monkeypatch):
@@ -415,22 +428,172 @@ def test_relay_list_refresh_button(settings, monkeypatch):
 
 
 def test_only_admins_reach_the_route_endpoints(settings):
+    with db.connect(settings.db_path) as c:
+        proxy.save_route(c, route_form())
     for name in ("ana", "vee"):
         with app_client(settings) as h:
             csrf = sign_in(h, name)
-            for path in ("", "/test", "/relays", "/tunnel"):
-                assert h.post(f"/admin/security/scan-settings{path}", data={"csrf": csrf, **page_form()}
+            for path in ("", "/test", "/relays", "/tunnel", "/routes", "/routes/r1/delete"):
+                assert h.post(f"/admin/security/scan-settings{path}",
+                              data={"csrf": csrf, **page_form(), **route_form(id="r1", name="Changed")}
                               ).status_code == 404
     assert not (settings.db_path.parent / mullvad.REQUEST_FILE).exists()
+    with db.connect(settings.db_path) as c:
+        assert [r["name"] for r in proxy.get(c)["routes"]] == ["Mullvad"]
 
+
+# ---- migration from the single route ----
 
 def test_settings_saved_before_routes_still_apply(settings):
     with db.connect(settings.db_path) as c:
-        admin.kv_set(c, proxy.KEY, json.dumps({"enabled": True, "type": "http", "host": "192.0.2.10", "port": 3128,
-                                               "username": "", "password": "", "cve": True}))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps({"enabled": True, "type": "http", "host": "192.0.2.10",
+                                                      "port": 3128, "username": "", "password": "", "cve": True}))
         got = proxy.get(c)
-    assert got["route"] == "custom" and got["posture"] and not got["inventory"] and "enabled" not in got
-    assert proxy.state_line(got) == "Posture scans: http 192.0.2.10:3128 · Inventory jobs: direct"
+    assert [(r["id"], r["name"], r["kind"], r["type"]) for r in got["routes"]] == [("r1", "Custom proxy", "custom",
+                                                                                     "http")]
+    assert (got["posture"], got["inventory"], got["cve"]) == ("r1", "direct", "r1")
+    assert proxy.state_line(got) == ("Posture scans (default): Custom proxy: http 192.0.2.10:3128 · Inventory jobs: "
+                                     "direct · CVE look-ups: Custom proxy: http 192.0.2.10:3128")
+
+
+@pytest.mark.parametrize("old, want", [
+    ({}, ([], "direct", "direct", "direct")),
+    ({"route": "direct", "host": "192.0.2.10", "posture": True}, (["Custom proxy"], "direct", "direct", "direct")),
+    ({"route": "tor", "posture": True, "inventory": True, "cve": True}, (["Tor"], "r1", "r1", "r1")),
+    ({"route": "tor", "posture": False, "inventory": True, "cve": True}, (["Tor"], "direct", "r1", "direct")),
+    ({"route": "mullvad", "posture": True, "inventory": False, "mullvad_mode": "fixed", "mullvad_country": "de"},
+     (["Mullvad"], "r1", "direct", "direct")),
+])
+def test_migration_keeps_the_single_route_and_its_tick_boxes(settings, old, want):
+    with db.connect(settings.db_path) as c:
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps({**old, "doh": "https://doh.example/dns-query"}) if old else
+                     "{}")
+        got = proxy.get(c)
+    assert ([r["name"] for r in got["routes"]], got["posture"], got["inventory"], got["cve"]) == want
+    assert got["doh"] == ("https://doh.example/dns-query" if old else proxy.DOH)
+
+
+def test_migrated_route_keeps_working_and_the_old_setting_stays(settings, monkeypatch):
+    """The old setting is never rewritten: a rollback finds it as it was. Tor for posture and inventory, Mullvad
+    settings carried over, then a save through the new page."""
+    old = cfg(route="tor", inventory=True, tor_port=9150, mullvad_mode="fixed", mullvad_country="de")
+    seen = []
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
+    with db.connect(settings.db_path) as c:
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(old))
+        assert proxy.hop(c, proxy.pick(proxy.get(c), "", "inventory"))["port"] == 9150
+        n = posture.enqueue(c, DOM, posture.targets(c, DOM, ip="198.51.100.7")[0], "22", "ana")
+    assert run_queue(settings) == n == 1 and seen[0]["port"] == 9150
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **route_form(name="Second")})
+    with db.connect(settings.db_path) as c:
+        assert [r["name"] for r in proxy.get(c)["routes"]] == ["Tor", "Second"]
+        assert proxy.get(c)["posture"] == "r1" and proxy.find(proxy.get(c), "r2")
+        assert json.loads(admin.kv_get(c, proxy.LEGACY_KEY)) == old
+        assert posture.profile(c, "default")["route"] == ""   # existing profiles: Default
+
+
+# ---- routes per scan profile ----
+
+def two_routes(c) -> None:
+    """r1 Tor (the default route), r2 Mullvad fixed de; a profile 'viade' on r2 and one 'direct' on Direct."""
+    proxy.save_route(c, {"name": "Tor", "kind": "tor", "tor_host": "127.0.0.1", "tor_port": "9050"})
+    proxy.save_route(c, route_form(name="Germany", mullvad_mode="fixed", mullvad_country="de"))
+    proxy.put(c, proxy.check_shared({"posture": "r1"}, proxy.get(c)))
+    for name, route in (("viade", "r2"), ("plain", "direct")):
+        p, err = posture.check_profile(name, "22", 2, 3, 60, route, {"r1", "r2"})
+        posture.save_profile(c, p, "", "ana")
+
+
+def test_profile_route_is_used_by_a_posture_scan_and_recorded(settings, monkeypatch):
+    seen = []
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
+    one = [{"ip": "198.51.100.7", "hosts": ["www.routes.example"], "country": "Sweden"}]
+    with db.connect(settings.db_path) as c:
+        two_routes(c)
+        for name in ("viade", "default", "plain"):
+            posture.enqueue(c, DOM, one, posture.profile(c, name), "ana")
+            c.commit()
+            assert run_queue(settings) == 1
+    assert seen[0]["host"].startswith("de-") and seen[1]["host"] == "127.0.0.1" and seen[2] is None
+    with db.connect(settings.db_path) as c:
+        rows = [dict(r) for r in c.execute("SELECT profile, route, params FROM posture_scans ORDER BY id")]
+    assert [r["route"] for r in rows] == ["r2", "", "direct"]
+    assert rows[0]["params"].endswith(" via Germany: mullvad de-fra-wg-socks5-001 (de, fixed)")
+    assert rows[1]["params"].endswith(" via Tor: tor 127.0.0.1:9050")   # Default: the default route
+    assert " via " not in rows[2]["params"]
+
+
+def test_default_follows_the_default_route_and_a_deleted_route_fails_closed(settings, monkeypatch):
+    seen = []
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
+    one = [{"ip": "198.51.100.7", "hosts": ["www.routes.example"], "country": "Sweden"}]
+    with db.connect(settings.db_path) as c:
+        two_routes(c)
+        cfg2 = proxy.get(c)
+        assert proxy.pick(cfg2)["name"] == "Tor" and proxy.pick(cfg2, "r2")["name"] == "Germany"
+        assert proxy.pick(cfg2, "direct") is None
+        proxy.put(c, proxy.check_shared({"posture": "r2"}, cfg2))
+        posture.enqueue(c, DOM, one, posture.profile(c, "default"), "ana")   # queued on Default
+    assert run_queue(settings) == 1 and seen[-1]["host"].startswith("de-")   # the default as it is at run time
+    with db.connect(settings.db_path) as c:
+        c.execute("UPDATE posture_scans SET status = 'queued', route = 'r9' WHERE id = 1")
+    assert run_queue(settings) == 1 and len(seen) == 1   # a route that is gone: no scan
+    with db.connect(settings.db_path) as c:
+        row = c.execute("SELECT status, error, params FROM posture_scans WHERE id = 1").fetchone()
+    assert row["status"] == "failed" and row["error"] == "route: the scan route no longer exists (Settings · Routes)"
+    assert row["params"] == "via a deleted route"
+
+
+def test_delete_is_refused_while_a_route_is_in_use(settings):
+    with db.connect(settings.db_path) as c:
+        two_routes(c)
+        assert proxy.delete_route(c, "r2") == "Germany is in use (scan profile viade): pick another route there first."
+        assert proxy.delete_route(c, "r1") == "Tor is in use (default route): pick another route there first."
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        page = h.get("/admin/security/scan-settings").text
+        assert "scan profile viade" in page
+        r = h.post("/admin/security/scan-settings/routes/r2/delete", data={"csrf": csrf})
+        assert r.status_code == 409 and "Germany is in use (scan profile viade)" in r.text
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")   # analysts pick routes in profiles; the list shows each profile's route
+        assert h.post("/admin/security/profiles", data={"csrf": csrf, "name": "viade", "ports": "22", "intensity": "2",
+                                                        "timing": "3", "timeout": "60", "route": "r9"}
+                      ).status_code == 422
+        assert h.post("/admin/security/profiles", data={"csrf": csrf, "name": "viade", "ports": "22", "intensity": "2",
+                                                        "timing": "3", "timeout": "60", "route": ""},
+                      follow_redirects=False).status_code == 303
+        page = h.get("/admin/security/profiles").text
+        assert "<td>Default (Tor)</td>" in page and "<td>Direct</td>" in page
+        assert "route Default (Tor)" in h.get(f"/admin/security?domain={DOM}").text
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        assert h.post("/admin/security/scan-settings/routes/r2/delete", data={"csrf": csrf},
+                      follow_redirects=False).status_code == 303
+    with db.connect(settings.db_path) as c:
+        assert [r["id"] for r in proxy.get(c)["routes"]] == ["r1"]
+
+
+def test_inventory_and_cve_routes(settings):
+    with db.connect(settings.db_path) as c, no_fetch() as client:
+        two_routes(c)
+        cfg2 = proxy.check_shared({"posture": "r1", "inventory": "r2", "cve": "r1"}, proxy.get(c))
+        assert proxy.hop(c, proxy.pick(cfg2, "", "inventory"), client=client)["host"].startswith("de-")
+        assert proxy.label(cfg2, "", "inventory") == "Germany: mullvad, fixed de"
+        tor = proxy.pick(cfg2)
+        own = proxy.hop(c, tor, "198.51.100.7")
+        assert proxy.cve_hop(c, cfg2, tor, own) == {**own, "cve": True}   # the scan's own hop
+        other = proxy.cve_hop(c, cfg2, proxy.find(cfg2, "r2"), None, client)
+        assert other["host"] == "127.0.0.1" and other["cve"]   # the CVE route on its own
+        assert proxy.cve_hop(c, {**cfg2, "cve": "direct"}, tor, own) is None
+        proxy.save_route(c, {"name": "Socks4", "kind": "custom", "type": "socks4", "host": "192.0.2.10",
+                             "port": "1080"})
+        for use in ("inventory", "cve"):
+            with pytest.raises(ValueError, match="socks4"):
+                proxy.check_shared({use: "r3"}, proxy.get(c))
+        assert proxy.check_shared({"posture": "r3"}, proxy.get(c))["posture"] == "r3"
 
 
 def test_tunnel_script_syntax():

@@ -37,59 +37,84 @@ def app_client(settings):
 
 
 def form(**kw) -> dict:
-    return {"route": "custom", "posture": "on", "type": "socks5", "host": "192.0.2.10", "port": "1080", **kw}
+    """The route form for a custom proxy."""
+    return {"name": "Office", "kind": "custom", "type": "socks5", "host": "192.0.2.10", "port": "1080", **kw}
+
+
+def shared(**kw) -> dict:
+    return {"posture": "direct", "inventory": "direct", "cve": "direct", "doh": proxy.DOH, **kw}
 
 
 # ---- settings ----
 
-def test_check_validates_the_form():
+def test_check_route_validates_the_form():
+    cfg = {**proxy.DEFAULT, "routes": []}
     for bad in (form(type="ftp"), form(host="socks5://192.0.2.10"), form(host="proxy host"), form(port="0"),
                 form(port="70000"), form(port="x"), form(host=""), form(username="a b"),
-                form(password=SECRET), form(type="socks4", cve="on"), form(type="socks4", inventory="on"),
-                form(route="tor-ish"), form(doh="http://dns.example/dns-query")):
+                form(password=SECRET), form(kind="vpn"), form(name=""), form(name="Direct"), form(name="default"),
+                form(name="x" * 41), form(name="<b>"), form(id="r9")):
         with pytest.raises(ValueError):
-            proxy.check(bad, {})
-    assert proxy.check(form(host="proxy.corp.example"), {})["host"] == "proxy.corp.example"
-    assert proxy.check(form(route="direct", host=""), {})["route"] == "direct"   # direct may leave it blank
-    assert proxy.check(form(type="http", cve="on"), {})["cve"] is True
+            proxy.check_route(bad, cfg)
+    assert proxy.check_route(form(host="proxy.corp.example"), cfg)["host"] == "proxy.corp.example"
+    r = proxy.check_route(form(type="http", name="  Office   proxy "), cfg)
+    assert r["id"] == "r1" and r["name"] == "Office proxy" and r["kind"] == "custom"
+    taken = {**cfg, "routes": [{**proxy.ROUTE_DEFAULT, **r}], "next": 2}
+    with pytest.raises(ValueError, match="already"):
+        proxy.check_route(form(name="office PROXY"), taken)
+    assert proxy.check_route(form(name="Office proxy", id="r1", type="socks4"), taken)["type"] == "socks4"
+    for use in ("inventory", "cve"):   # socks4 can't carry the HTTPS look-ups a route is used for
+        with pytest.raises(ValueError, match="socks4"):
+            proxy.check_route(form(name="Office proxy", id="r1", type="socks4"), {**taken, use: "r1"})
+    tor = proxy.check_route({"name": "Tor", "kind": "tor", "host": "", "type": "nope"}, cfg)
+    assert (tor["tor_host"], tor["tor_port"], tor["host"]) == ("127.0.0.1", 9050, "")   # only the kind's fields
 
 
 def test_password_is_kept_replaced_or_cleared(settings):
     with db.connect(settings.db_path) as c:
-        proxy.save(c, form(username="scanner", password=SECRET))
-        assert proxy.get(c)["password"] == SECRET
-        proxy.save(c, form(username="scanner", password=""))   # blank keeps it
-        assert proxy.get(c)["password"] == SECRET
-        proxy.save(c, form(username="scanner", password="harmless-pw-2"))
-        assert proxy.get(c)["password"] == "harmless-pw-2"
-        proxy.save(c, form(username="scanner", clear_password="on"))
-        assert proxy.get(c)["password"] == ""
-        assert "password" not in proxy.public(proxy.get(c))
+        rid = proxy.save_route(c, form(username="scanner", password=SECRET))["id"]
+        assert proxy.find(proxy.get(c), rid)["password"] == SECRET
+        proxy.save_route(c, form(id=rid, username="scanner", password=""))   # blank keeps it
+        assert proxy.find(proxy.get(c), rid)["password"] == SECRET
+        proxy.save_route(c, form(id=rid, username="scanner", password="harmless-pw-2"))
+        assert proxy.find(proxy.get(c), rid)["password"] == "harmless-pw-2"
+        proxy.save_route(c, form(id=rid, username="scanner", clear_password="on"))
+        assert proxy.find(proxy.get(c), rid)["password"] == ""
+        assert all("password" not in r for r in proxy.public(proxy.get(c))["routes"])
+        other = proxy.save_route(c, form(name="Second", username="scanner"))   # a new route: no saved one to keep
+        assert other["id"] != rid and other["password"] == ""
 
 
-def test_only_admins_see_and_change_scan_settings(settings):
+def test_only_admins_see_and_change_routes(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
-        assert "Scan settings" in h.get("/admin/settings").text and "Scan settings" not in h.get("/admin/security").text
-        r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **form(username="scanner",
-                                                                                password=SECRET)},
+        assert ">Routes</a>" in h.get("/admin/settings").text and ">Routes</a>" not in h.get("/admin/security").text
+        r = h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form(username="scanner",
+                                                                                       password=SECRET)},
                    follow_redirects=False)
-        assert r.status_code == 303
+        assert r.status_code == 303 and "route-saved" in r.headers["location"]
+        assert h.post("/admin/security/scan-settings", data={"csrf": csrf, **shared(posture="r1")},
+                      follow_redirects=False).status_code == 303
         page = h.get("/admin/security/scan-settings").text
-        assert "Posture scans: socks5 192.0.2.10:1080 · Inventory jobs: direct" in page and "saved; blank keeps it" in page and SECRET not in page
-        assert "Scans go through socks5 192.0.2.10:1080" in h.get(f"/admin/security?domain={DOM}").text
-        r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **form(port="99999")})
-        assert r.status_code == 422 and "Port" in r.text
-        assert h.post("/admin/security/scan-settings", data=form()).status_code == 403   # no CSRF token
+        assert "Posture scans (default): Office: socks5 192.0.2.10:1080 · Inventory jobs: direct" in page
+        assert "default route" in page and SECRET not in page
+        edit = h.get("/admin/security/scan-settings?edit=r1").text
+        assert "Change route Office" in edit and "saved; blank keeps it" in edit and SECRET not in edit
+        assert "Scans go through Office: socks5 192.0.2.10:1080" in h.get(f"/admin/security?domain={DOM}").text
+        r = h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form(id="r1", port="99999")})
+        assert r.status_code == 422 and "Port" in r.text and "Change route" in r.text
+        r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **shared(posture="r7")})
+        assert r.status_code == 422 and "pick one from the list" in r.text
+        assert h.post("/admin/security/scan-settings/routes", data=form()).status_code == 403   # no CSRF token
     for name in ("ana", "vee"):
         with app_client(settings) as h:
             csrf = sign_in(h, name)
-            assert "Scan settings" not in h.get("/admin/security").text
+            assert ">Routes</a>" not in h.get("/admin/security/profiles").text
             assert h.get("/admin/security/scan-settings").status_code == 404
-            assert h.post("/admin/security/scan-settings", data={"csrf": csrf, **form()}).status_code == 404
-            assert h.post("/admin/security/scan-settings/test", data={"csrf": csrf}).status_code == 404
+            for path in ("", "/routes", "/routes/r1/delete", "/test"):
+                assert h.post(f"/admin/security/scan-settings{path}", data={"csrf": csrf, **form(id="r1", port="2")}
+                              ).status_code == 404
     with db.connect(settings.db_path) as c:
-        assert proxy.get(c)["port"] == 1080
+        assert proxy.find(proxy.get(c), "r1")["port"] == 1080 and proxy.get(c)["posture"] == "r1"
 
 
 def test_off_shows_no_route(settings):
@@ -180,13 +205,14 @@ def test_worker_records_the_route_without_the_password(settings, monkeypatch):
     seen = []
     monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
     with db.connect(settings.db_path) as c:
-        admin.kv_set(c, proxy.KEY, json.dumps(ON))
+        admin.kv_set(c, proxy.LEGACY_KEY, json.dumps(ON))   # the single-route setting of earlier builds
         n = posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana")
     assert run_queue(settings) == n == 2
     assert all(v and v["host"] == "192.0.2.10" for v in seen)
     with db.connect(settings.db_path) as c:
         rows = posture.current(c, DOM)
-    assert all(r["status"] == "done" and r["params"].endswith(" via socks5 192.0.2.10:1080") for r in rows)
+    assert all(r["status"] == "done" and r["params"].endswith(" via Custom proxy: socks5 192.0.2.10:1080")
+               for r in rows)
     assert all(SECRET not in r["params"] for r in rows)
 
 
@@ -254,10 +280,15 @@ def test_test_button_shows_the_result(settings, monkeypatch):
     fake_connect(monkeypatch, bytes([5, 0]))
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
-        assert "nothing to test" in h.post("/admin/security/scan-settings/test", data={"csrf": csrf}).text
-        h.post("/admin/security/scan-settings", data={"csrf": csrf, **form()})
-        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf})
-        assert r.status_code == 200 and "Test route: SOCKS5 at 192.0.2.10:1080 OK" in r.text
+        assert "Direct has nothing to test" in h.post("/admin/security/scan-settings/test",
+                                                      data={"csrf": csrf, "route": "direct"}).text
+        h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form()})
+        h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, "name": "Tor", "kind": "tor",
+                                                            "tor_host": "127.0.0.1", "tor_port": "9050"})
+        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
+        assert r.status_code == 200 and "Test route: Office: SOCKS5 at 192.0.2.10:1080 OK" in r.text
+        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r2"})
+        assert "Test route: Tor: SOCKS5 at 127.0.0.1:9050 OK" in r.text
 
 
 # ---- CVE look-ups ----

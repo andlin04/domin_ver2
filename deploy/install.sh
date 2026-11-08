@@ -291,7 +291,7 @@ ln -sf /etc/nginx/sites-available/domin /etc/nginx/sites-enabled/domin
 rm -f /etc/nginx/sites-enabled/default
 nginx -t -q
 
-# Mullvad tunnel settings saved on the Scan settings page: a root path unit runs mullvad-tunnel.sh apply
+# Mullvad tunnel settings saved on the Routes page (Settings): a root path unit runs mullvad-tunnel.sh apply
 install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
 
 systemctl daemon-reload

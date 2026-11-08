@@ -448,9 +448,9 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert "CVE look-up" not in page and 'aria-label="Settings sections"' not in page   # moved under Settings
         look = h.get("/admin/security/lookup").text
         assert "Product (CPE)" in look and 'aria-label="Settings sections"' in look
-        # an analyst's Settings opens Scan profiles; General and Scan settings stay admin-only
+        # an analyst's Settings opens Scan profiles; General and Routes stay admin-only
         assert '<a href="/admin/security/profiles" class="active">Settings</a>' in look
-        assert ">General</a>" not in look and ">Scan settings</a>" not in look
+        assert ">General</a>" not in look and ">Routes</a>" not in look
 
 
 def test_authorised_use_notice_can_be_dismissed_for_good(settings):

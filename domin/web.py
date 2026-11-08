@@ -531,7 +531,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "tunnel-requested": "Saved. The tunnel settings were handed to the host; its result shows below.",
-           "relays": "Mullvad relay list refreshed.",
+           "relays": "Mullvad relay list refreshed.", "route-saved": "Route saved.", "route-deleted": "Route removed.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
@@ -910,8 +910,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
+            routes = proxy.get(c)
+            default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       report=rep, profiles=posture.profiles(c), scan_route=proxy.describe(proxy.get(c), "posture"),
+                       report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes),
+                       scan_route=proxy.label(routes, default.get("route", "")),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
@@ -928,7 +931,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     def lookup_view(request, u, s, ctx):
         with conn() as c:
-            route = proxy.describe(proxy.get(c), "posture")
+            route = proxy.label(proxy.get(c))   # ad-hoc fingerprints take the default route
         return shell(request, "lookup.html", u, s, ctx.pop("status", 200), scan_route=route, **ctx)
 
     @app.get(base + "/security/lookup", response_class=HTMLResponse, include_in_schema=False)
@@ -1032,8 +1035,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):
         with conn() as c:
             rows = posture.profiles(c)
+            routes = proxy.names(proxy.get(c))
         return shell(request, "profiles.html", u, s, status, profiles=rows, error=error, form=form or {},
-                     default_ports=fingerprint.DEFAULT_PORTS)
+                     default_ports=fingerprint.DEFAULT_PORTS, route_names=routes)
 
     @app.get(base + "/security/profiles", response_class=HTMLResponse, include_in_schema=False)
     def profiles_page(request: Request):
@@ -1055,7 +1059,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return profiles_view(request, u, s, 403, "Changing scan profiles needs the analyst role.", data)
             p, error = posture.check_profile((data.get("name") or "").strip().lower(),
                                              (data.get("ports") or "").strip(), data.get("intensity"),
-                                             data.get("timing"), data.get("timeout"))
+                                             data.get("timing"), data.get("timeout"), (data.get("route") or "").strip(),
+                                             {r["id"] for r in proxy.get(c)["routes"]})
             if not p:
                 return profiles_view(request, u, s, 422, error, data)
             posture.save_profile(c, p, (data.get("note") or "").strip(), u["name"])
@@ -1074,43 +1079,51 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return profiles_view(request, u, s, 422, "The default profile cannot be deleted.")
         return back(f"{base}/security/profiles")
 
-    # --- scan settings: the route posture scans and inventory jobs take (admin only) -----------------------------
+    # --- routes: named scan routes and the shared route settings (admin only; URL kept from "Scan settings") ------
 
     state_dir = settings.db_path.parent   # the tunnel request and status files (domin-mullvad.path watches it)
+    route_page = base + "/security/scan-settings"
 
     def scan_settings_view(request, c, u, s, status: int = 200, error: str = "", form: dict | None = None,
-                           test: tuple[bool, str] | None = None, tunnel: tuple[bool, str] | None = None):
+                           test: tuple[bool, str] | None = None, tunnel: tuple[bool, str] | None = None,
+                           edit: dict | None = None):
+        """form: a refused shared save; edit: the route form (a refused save, or ?edit=<id>). Never a password,
+        account number or key."""
         saved = proxy.get(c)
         cfg = proxy.public(saved)
         tun = mullvad.tunnel_public(mullvad.get_tunnel(c))
-        if form:   # a refused save shows what was typed (never a password, account number or key)
-            cfg.update({k: form.get(k, "") for k in ("route", "type", "host", "port", "username", "tor_host",
-                                                     "tor_port", "mullvad_mode", "mullvad_country", "mullvad_city",
-                                                     "mullvad_fallback", "doh")},
-                       **{k: form.get(k) == "on" for k in ("posture", "inventory", "cve")})
+        if form:
+            cfg.update({k: form.get(k, "") for k in (*proxy.USES, "doh")})
             tun.update(address=form.get("mullvad_address", ""), entry=form.get("mullvad_entry", ""))
+        if edit is None:
+            old = proxy.find(saved, request.query_params.get("edit", ""))
+            edit = proxy.public_route(old) if old else {**proxy.ROUTE_DEFAULT}
+        rows = [{**r, "details": proxy.details(r), "uses": proxy.in_use(c, saved, r["id"])} for r in cfg["routes"]]
         relays, fetched = mullvad.load(c)
         a = mullvad.age(fetched)
-        return shell(request, "scan_settings.html", u, s, status, proxy=cfg, types=proxy.TYPES, error=error,
-                     test=test, state=proxy.state_line(saved), routes=proxy.ROUTE_NAMES, modes=mullvad.MODE_NAMES,
-                     countries=mullvad.countries(relays), cities=mullvad.cities(relays), relay_count=len(relays),
+        return shell(request, "scan_settings.html", u, s, status, cfg=cfg, rows=rows, edit=edit, types=proxy.TYPES,
+                     kinds=proxy.KINDS, error=error, test=test, state=proxy.state_line(saved),
+                     modes=mullvad.MODE_NAMES, countries=mullvad.countries(relays), cities=mullvad.cities(relays),
+                     relay_count=len(relays),
                      relay_age=(f"{int(a.total_seconds() // 3600)} h" if a is not None else ""),
                      relays_stale=a is None or a > mullvad.MAX_AGE, tun=tun, tunnel=tunnel,
                      apply=mullvad.apply_status(state_dir))
 
-    @app.get(base + "/security/scan-settings", response_class=HTMLResponse, include_in_schema=False)
+    @app.get(route_page, response_class=HTMLResponse, include_in_schema=False)
     def scan_settings_page(request: Request):
         with conn() as c:
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            check = proxy.get(c)["route"] == "mullvad" or any(mullvad.get_tunnel(c).values())
+            check = (any(r["kind"] == "mullvad" for r in proxy.get(c)["routes"])
+                     or any(mullvad.get_tunnel(c).values()))
         tunnel = proxy.tunnel_state() if check else None   # a sync route: runs in the thread pool
         with conn() as c:
             return scan_settings_view(request, c, u, s, tunnel=tunnel)
 
-    @app.post(base + "/security/scan-settings", include_in_schema=False)
+    @app.post(route_page, include_in_schema=False)
     async def scan_settings_save(request: Request):
+        """The shared settings: default, inventory and CVE look-up routes, DoH server, Mullvad tunnel credentials."""
         data = await form(request)
         with conn() as c:
             s, u, redirect = admin_only(request, c, data)
@@ -1118,16 +1131,45 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
             try:   # both checked before either is stored
                 tunnel_cfg = mullvad.check_tunnel(data, mullvad.get_tunnel(c))
-                proxy.save(c, data)
+                shared = proxy.check_shared(data, proxy.get(c))
             except ValueError as exc:
                 return scan_settings_view(request, c, u, s, 422, str(exc), data)
+            proxy.put(c, shared)
             changed = mullvad.save_tunnel(c, tunnel_cfg)
         if changed:
             mullvad.request_apply(state_dir)
-            return back(base + "/security/scan-settings", "tunnel-requested")
-        return back(base + "/security/scan-settings", "saved")
+            return back(route_page, "tunnel-requested")
+        return back(route_page, "saved")
 
-    @app.post(base + "/security/scan-settings/tunnel", include_in_schema=False)
+    @app.post(route_page + "/routes", include_in_schema=False)
+    async def scan_route_save(request: Request):
+        """Add a named route (blank id) or change one."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                proxy.save_route(c, data)
+            except ValueError as exc:
+                old = proxy.find(proxy.get(c), (data.get("id") or "").strip())
+                edit = {**proxy.ROUTE_DEFAULT, **{k: data.get(k, "") for k in proxy.ROUTE_DEFAULT if k != "password"},
+                        "password_saved": bool(old and old.get("password"))}
+                return scan_settings_view(request, c, u, s, 422, str(exc), edit=edit)
+        return back(route_page, "route-saved")
+
+    @app.post(route_page + "/routes/{rid}/delete", include_in_schema=False)
+    async def scan_route_delete(request: Request, rid: str):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            if error := proxy.delete_route(c, rid):
+                return scan_settings_view(request, c, u, s, 409, error)
+        return back(route_page, "route-deleted")
+
+    @app.post(route_page + "/tunnel", include_in_schema=False)
     async def scan_settings_tunnel(request: Request):
         """Ask the host to apply the saved tunnel settings again (no secrets in the request file)."""
         data = await form(request)
@@ -1136,9 +1178,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if redirect:
                 return redirect
         mullvad.request_apply(state_dir)
-        return back(base + "/security/scan-settings", "tunnel-requested")
+        return back(route_page, "tunnel-requested")
 
-    @app.post(base + "/security/scan-settings/relays", include_in_schema=False)
+    @app.post(route_page + "/relays", include_in_schema=False)
     async def scan_settings_relays(request: Request):
         data = await form(request)
         with conn() as c:
@@ -1152,32 +1194,29 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return scan_settings_view(request, c, u, s, 502, str(exc))
         with conn() as c:
             mullvad.store(c, fresh)
-        return back(base + "/security/scan-settings", "relays")
+        return back(route_page, "relays")
 
-    @app.post(base + "/security/scan-settings/test", include_in_schema=False)
+    @app.post(route_page + "/test", include_in_schema=False)
     async def scan_settings_test(request: Request):
-        """Handshake with the saved route's proxy from the web process (Mullvad: the in-tunnel SOCKS5); no traffic
+        """Handshake with one saved route's proxy from the web process (Mullvad: the in-tunnel SOCKS5); no traffic
         to any target."""
         data = await form(request)
         with conn() as c:
             s, u, redirect = admin_only(request, c, data)
             if redirect:
                 return redirect
-            cfg = proxy.get(c)
-        r, tunnel = cfg["route"], None
-        if r == "mullvad":
+            r = proxy.find(proxy.get(c), (data.get("route") or "").strip())
+        tunnel = None
+        if not r:
+            result = (False, "Pick a saved route to test (Direct has nothing to test).")
+        elif r["kind"] == "mullvad":
             tunnel = await run_in_threadpool(proxy.tunnel_state)
-            result = tunnel
-        elif r == "direct":
-            result = (False, "The route is direct: nothing to test.")
-        elif r == "custom" and not cfg["host"]:
-            result = (False, "Save a proxy host first.")
+            result = (tunnel[0], f"{r['name']}: {tunnel[1]}")
         else:
-            target = cfg if r == "custom" else {"type": "socks5", "host": cfg["tor_host"], "port": cfg["tor_port"]}
             try:
-                result = (True, await run_in_threadpool(proxy.handshake, target))
+                result = (True, f"{r['name']}: " + await run_in_threadpool(proxy.handshake, proxy.greet_target(r)))
             except proxy.ProxyError as exc:
-                result = (False, str(exc))
+                result = (False, f"{r['name']}: {exc}")
         with conn() as c:
             return scan_settings_view(request, c, u, s, test=result, tunnel=tunnel)
 
@@ -1189,7 +1228,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            via = proxy.get(c)
+            routes = proxy.get(c)
             if not users.can(u["role"], "analyst"):
                 return lookup_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
             if data.get("kind") == "host":
@@ -1215,28 +1254,32 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                     target = cve.parse_target(data)
                 except ValueError as exc:
                     return lookup_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
-        def pick_hop(ip: str = "") -> dict | None:   # in the thread pool: may fetch the Mullvad relay list
+        def pick_hops(ip: str) -> tuple[dict | None, dict | None]:   # in the thread pool: may fetch relay lists
+            """(scan hop, CVE look-up hop) for an ad-hoc fingerprint: the default route."""
             with conn() as c2:
-                return proxy.hop(c2, via, "posture", ip, "", http)
+                r = proxy.pick(routes)
+                hop = proxy.hop(c2, r, ip, "", http)
+                return hop, proxy.cve_hop(c2, routes, r, hop, http)
+
+        def lookup_hop() -> dict | None:
+            with conn() as c2:
+                return proxy.cve_hop(c2, routes, client=http)
 
         if host_params is not None:
             ip0, name, ports = host_params
             try:
-                hop = await run_in_threadpool(pick_hop, ip0)
+                hop, cve_via = await run_in_threadpool(pick_hops, ip0)
             except proxy.ProxyError as exc:   # fail closed: no direct scan instead
                 scan = {"target": name, "ip": ip0, "services": [], "note": "", "error": f"route: {exc}",
-                        "params": f"via {proxy.describe(via, 'posture')}"}
+                        "params": f"via {proxy.label(routes) or 'a deleted route'}"}
                 return lookup_view(request, u, s, security_ctx(host_result=scan, form=data))
-            with proxy.cve_client(hop, http) as lookups:
+            with proxy.cve_client(cve_via, http) as lookups:
                 scan = await run_in_threadpool(
                     fingerprint.scan, ip0, cve_db=cve_db, client=lookups, api_key=settings.nvd_api_key,
                     ports=ports, display=name, via=hop)
             return lookup_view(request, u, s, security_ctx(host_result=scan, form=data))
-        try:
-            hop = await run_in_threadpool(pick_hop)
-        except proxy.ProxyError:
-            hop = {"enabled": True, "cve": via.get("cve"), "type": "none"}   # route down: local database only
-        with proxy.cve_client(hop, http) as lookups:
+        cve_via = await run_in_threadpool(lookup_hop)   # route down: local database only (proxy.NO_LOOKUPS)
+        with proxy.cve_client(cve_via, http) as lookups:
             result = await run_in_threadpool(cve.lookup, cve_db, target, lookups, settings.nvd_api_key)
         result["label"] = cve.target_label(target)
         return lookup_view(request, u, s, security_ctx(result=result, form=data))

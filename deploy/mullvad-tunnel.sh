@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mullvad split tunnel for domin's routed scans (Scan settings: route Mullvad), as root:
+# Mullvad split tunnel for domin's routed scans (Settings > Routes: a Mullvad route), as root:
 #
 #   bash deploy/mullvad-tunnel.sh up       bring the tunnel up (or re-apply it) with the saved credentials
 #   bash deploy/mullvad-tunnel.sh down     stop it, and drop the service drop-ins this script wrote
@@ -12,7 +12,7 @@
 # (the relays' SOCKS5 proxies) goes through it. No DNS change, no default route; everything else stays as it is.
 #
 # Credentials, first found:
-#   1. the domin database (Settings > Scan settings): a WireGuard private key with its tunnel address (used as they
+#   1. the domin database (Settings > Routes): a WireGuard private key with its tunnel address (used as they
 #      are: no key generation, no API call), or an account number; optional entry country
 #   2. /etc/domin/mullvad-account (account number only; owner root, mode 0600 or 0400)
 # With an account number only, a key is generated once (/etc/wireguard/mullvad.key) and registered with Mullvad.
@@ -24,7 +24,7 @@
 #
 # Writes /etc/systemd/system/{domin-worker,domin}.service.d/20-routes.conf (IPAddressAllow=10.64.0.0/10, and
 # 127.0.0.1/32 for a local tor client): the services refuse every non-public address otherwise. A status line for the
-# Scan settings page goes to $DATA/mullvad.status (no secrets).
+# Routes page goes to $DATA/mullvad.status (no secrets).
 set -Eeuo pipefail
 umask 077
 
@@ -159,11 +159,11 @@ up() {
   for b in wg wg-quick curl python3; do command -v "$b" >/dev/null || fail "$b is missing (apt install wireguard-tools curl python3)"; done
   load_credentials
   if [ -n "$PRIV" ]; then
-    [ -n "$ADDRESS" ] || fail "a private key needs its tunnel address (Scan settings)"
+    [ -n "$ADDRESS" ] || fail "a private key needs its tunnel address (Settings > Routes)"
   elif [ -n "$ACCOUNT" ]; then
     register
   else
-    fail "no Mullvad credentials (Scan settings, or $ACCOUNT_FILE)"
+    fail "no Mullvad credentials (Settings > Routes, or $ACCOUNT_FILE)"
   fi
   ADDRESS=${ADDRESS%%,*}   # IPv4 only: the split tunnel carries 10.64.0.0/10
   [[ "$ADDRESS" =~ ^[0-9.]+/[0-9]+$ ]] || fail "unexpected tunnel address"

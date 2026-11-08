@@ -5,7 +5,7 @@ active) when installed. Names resolve over the old version's resolver set. Brute
 zone has wildcard DNS. Address owner comes from RDAP (ipwhois), cached per announced prefix and per address in the
 database; country from the DB-IP table when loaded.
 
-Routed (Scan settings: a route ticked for inventory jobs; external zones only): crt.sh and RDAP go through the hop
+Routed (Settings · Routes: the route for inventory jobs; external zones only): crt.sh and RDAP go through the hop
 as an httpx proxy, DNS goes over DoH through the same client, amass is skipped. The hop must answer first (fail
 closed: the job fails with the reason).
 """
@@ -337,7 +337,7 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
     via = None
     if not internal:   # internal zones never leave the LAN: always direct
         cfg = proxy.get(conn)
-        via = proxy.hop(conn, cfg, "inventory", client=client)   # ProxyError: the job fails with the reason
+        via = proxy.hop(conn, proxy.pick(cfg, "", "inventory"), client=client)   # ProxyError: the job fails
     if via:   # routed: fail closed, the hop must answer before anything goes out
         proxy.handshake(via)
         progress(f"route: {proxy.route(via)}")

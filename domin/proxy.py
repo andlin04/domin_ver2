@@ -1,7 +1,9 @@
-"""Scan routes: how posture scans and inventory jobs reach the internet (Settings · Scan settings).
+"""Scan routes: how posture scans and inventory jobs reach the internet (Settings · Routes).
 
-Routes: direct, a custom proxy (socks5 / socks4 / http), Tor (the local tor client's SOCKS5) or Mullvad (a relay's
-SOCKS5 inside the host's Mullvad tunnel, chosen per target: mullvad.py). Tick boxes pick which jobs use the route.
+Named routes, each a custom proxy (socks5 / socks4 / http), Tor (the local tor client's SOCKS5) or Mullvad (a
+relay's SOCKS5 inside the host's Mullvad tunnel, chosen per target: mullvad.py). "Direct" is built in. Shared
+settings pick the default route for posture scans, the route for inventory jobs and the route for CVE look-ups; a
+scan profile picks "Default" (the default posture route), Direct or a named route.
 
 Posture scans: nmap runs under proxychains4 with a per-run config file (:func:`conf`), so the connect scan and the
 version probes both leave through the hop. nmap's own ``--proxies`` covers version detection and NSE only, so it is
@@ -10,8 +12,9 @@ not used. Inventory jobs: HTTP look-ups through httpx with the hop as proxy, DNS
 reason, never a direct scan. Tor and Mullvad never carry a private target.
 
 A hop is one resolved proxy for one scan: {enabled, type, host, port, username, password, cve, label}. The settings
-live as JSON in the kv table; the custom proxy's password is stored in plain text there (the database is readable by
-the service user only) and never rendered back.
+live as JSON in the kv table (KEY); a custom proxy's password is stored in plain text there (the database is
+readable by the service user only) and never rendered back. The single-route settings of earlier builds
+(LEGACY_KEY) are read once into one named route when KEY is missing, and never written or removed.
 """
 from __future__ import annotations
 
@@ -28,20 +31,24 @@ import httpx
 
 from . import admin, mullvad, tools
 
-KEY = "scan_proxy"
+KEY = "scan_routes"
+LEGACY_KEY = "scan_proxy"   # the single route before named routes: read for the migration only
 TYPES = ("socks5", "socks4", "http")
-ROUTES = ("direct", "custom", "tor", "mullvad")
-ROUTE_NAMES = {"direct": "direct", "custom": "custom proxy", "tor": "Tor", "mullvad": "Mullvad"}
-JOBS = {"posture": "Posture scans", "inventory": "Inventory jobs"}
+KINDS = {"custom": "Custom proxy", "tor": "Tor", "mullvad": "Mullvad"}
+DIRECT = "direct"
+USES = {"posture": "default route", "inventory": "inventory jobs", "cve": "CVE look-ups"}
 DOH = "https://dns.quad9.net/dns-query"
-DEFAULT = {"route": "direct", "posture": True, "inventory": False,
-           "type": "socks5", "host": "", "port": 1080, "username": "", "password": "", "cve": False,
-           "tor_host": "127.0.0.1", "tor_port": 9050,
-           "mullvad_mode": "auto", "mullvad_country": "", "mullvad_city": "", "mullvad_fallback": "", "doh": DOH}
+ROUTE_DEFAULT = {"id": "", "name": "", "kind": "custom", "type": "socks5", "host": "", "port": 1080, "username": "",
+                 "password": "", "tor_host": "127.0.0.1", "tor_port": 9050, "mullvad_mode": "auto",
+                 "mullvad_country": "", "mullvad_city": "", "mullvad_fallback": ""}
+DEFAULT = {"routes": [], "next": 1, "posture": DIRECT, "inventory": DIRECT, "cve": DIRECT, "doh": DOH}
+LEGACY_DEFAULT = {"route": "direct", "posture": True, "inventory": False, "cve": False, "doh": DOH,
+                  **{k: v for k, v in ROUTE_DEFAULT.items() if k not in ("id", "name", "kind")}}
 TIMEOUT = 5.0   # seconds, handshake test and pre-flight check
 
 _NAME = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}"
                    r"[A-Za-z0-9])?)*$")
+_ROUTE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,39}$")
 _CRED = re.compile(r"^[!-~]{1,255}$")   # printable ASCII, no spaces: proxychains splits its line on whitespace
 _DOH = re.compile(r"^https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]{0,200})?$")
 _CC = re.compile(r"^[a-z]{2}$")
@@ -52,18 +59,94 @@ class ProxyError(RuntimeError):
     """The route cannot be used (unresolvable, unreachable, refused the handshake, no relay, private target)."""
 
 
-def get(conn: sqlite3.Connection) -> dict:
-    raw = json.loads(admin.kv_get(conn, KEY) or "{}")
-    if "route" not in raw and raw:   # settings saved before routes: on/off for the custom proxy, posture only
+# ---- settings ----
+
+def legacy(raw: dict) -> dict:
+    """The single-route settings of earlier builds, with their defaults."""
+    raw = dict(raw)
+    if "route" not in raw and raw:   # saved before routes: on/off for the custom proxy, posture only
         raw["route"] = "custom" if raw.get("enabled") else "direct"
         raw["posture"] = True
     raw.pop("enabled", None)
-    return {**DEFAULT, **raw}
+    return {**LEGACY_DEFAULT, **raw}
+
+
+def migrate(raw: dict) -> dict:
+    """Named-route settings from the single-route ones: the route becomes one named route (named after its kind), its
+    tick boxes the defaults. A custom proxy filled in but not in use is kept as a route nothing uses."""
+    old = legacy(raw)
+    cfg = {**DEFAULT, "routes": [], "doh": old["doh"]}
+    kind = old["route"] if old["route"] in KINDS else "custom" if old["host"] else ""
+    if not kind:
+        return cfg
+    r = {**ROUTE_DEFAULT, **{k: old[k] for k in ROUTE_DEFAULT if k in old}, "id": "r1", "name": KINDS[kind],
+         "kind": kind}
+    cfg.update(routes=[r], next=2)
+    if old["route"] == kind:
+        cfg["posture"] = r["id"] if old["posture"] else DIRECT
+        cfg["inventory"] = r["id"] if old["inventory"] else DIRECT
+        cfg["cve"] = r["id"] if old["posture"] and old["cve"] else DIRECT   # look-ups went with the posture hop
+    return cfg
+
+
+def get(conn: sqlite3.Connection) -> dict:
+    raw = admin.kv_get(conn, KEY)
+    if raw is None:
+        return migrate(json.loads(admin.kv_get(conn, LEGACY_KEY) or "{}"))
+    cfg = {**DEFAULT, **json.loads(raw)}
+    cfg["routes"] = [{**ROUTE_DEFAULT, **r} for r in cfg["routes"]]
+    return cfg
+
+
+def put(conn: sqlite3.Connection, cfg: dict) -> None:
+    admin.kv_set(conn, KEY, json.dumps(cfg))
+
+
+def find(cfg: dict, rid: str) -> dict | None:
+    return next((r for r in cfg["routes"] if r["id"] == rid), None)
+
+
+def pick(cfg: dict, rid: str = "", use: str = "posture") -> dict | None:
+    """The route a scan takes: rid '' = the shared choice for `use`, 'direct' or a route id. None = direct. A route
+    that no longer exists is a ProxyError (fail closed)."""
+    rid = rid or cfg[use]
+    if rid == DIRECT:
+        return None
+    if r := find(cfg, rid):
+        return r
+    raise ProxyError("the scan route no longer exists (Settings · Routes)")
+
+
+def names(cfg: dict) -> dict[str, str]:
+    """Display names by route id, for pickers and lists ('' = Default)."""
+    default = find(cfg, cfg["posture"])
+    return {"": f"Default ({default['name'] if default else 'Direct'})", DIRECT: "Direct",
+            **{r["id"]: r["name"] for r in cfg["routes"]}}
+
+
+def label(cfg: dict, rid: str = "", use: str = "posture") -> str:
+    """How a scan on this route goes out ('' = direct), for a page."""
+    try:
+        return describe(pick(cfg, rid, use), use == "inventory")
+    except ProxyError:
+        return "a deleted route (scans fail)"
 
 
 def public(cfg: dict) -> dict:
     """The settings for a page: no password, only whether one is saved."""
-    return {**{k: v for k, v in cfg.items() if k != "password"}, "password_saved": bool(cfg.get("password"))}
+    return {**cfg, "routes": [public_route(r) for r in cfg["routes"]]}
+
+
+def public_route(r: dict) -> dict:
+    return {**{k: v for k, v in r.items() if k != "password"}, "password_saved": bool(r.get("password"))}
+
+
+def in_use(conn: sqlite3.Connection, cfg: dict, rid: str) -> list[str]:
+    """What uses a route: the shared choices, then scan profiles by name."""
+    got = [name for use, name in USES.items() if cfg[use] == rid]
+    got += [f"scan profile {r[0]}" for r in conn.execute(
+        "SELECT name FROM posture_profiles WHERE route = ? ORDER BY name", (rid,))]
+    return got
 
 
 def _host(value: str, label: str) -> str:
@@ -85,63 +168,119 @@ def _port(value: str | None, label: str) -> int:
     return port
 
 
-def check(form: dict[str, str], old: dict, countries: set[str] | None = None) -> dict:
-    """Validate the settings form into a config; raises ValueError with a message for the user. A blank password
-    keeps the saved one, unless clear_password is ticked. countries: the Mullvad country codes of the cached relay
-    list (None: not checked)."""
-    route = (form.get("route") or "direct").strip()
-    kind = (form.get("type") or "").strip()
-    host = (form.get("host") or "").strip()
-    user = (form.get("username") or "").strip()
-    pw = form.get("password") or ""
-    if route not in ROUTES:
-        raise ValueError(f"Route: one of {', '.join(ROUTES)}.")
-    if kind not in TYPES:
-        raise ValueError(f"Type: one of {', '.join(TYPES)}.")
-    if host:
+def _https_ok(r: dict | None) -> bool:
+    return not (r and r["kind"] == "custom" and r["type"] == "socks4")
+
+
+def check_route(form: dict[str, str], cfg: dict, countries: set[str] | None = None) -> dict:
+    """Validate the route form (a new route when id is blank) into a route; raises ValueError with a message for the
+    user. Only the chosen kind's fields are read. A blank password keeps the saved one, unless clear_password is
+    ticked. countries: the Mullvad country codes of the cached relay list (None: not checked)."""
+    rid = (form.get("id") or "").strip()
+    old = find(cfg, rid) if rid else None
+    if rid and not old:
+        raise ValueError("That route no longer exists.")
+    name = " ".join((form.get("name") or "").split())
+    if not _ROUTE_NAME.match(name) or name.lower() in (DIRECT, "default"):
+        raise ValueError("Name: 1-40 letters, digits, spaces or . _ ( ) -; not Direct or Default.")
+    if any(r["name"].lower() == name.lower() and r["id"] != rid for r in cfg["routes"]):
+        raise ValueError(f"There is a route named {name} already.")
+    kind = (form.get("kind") or "").strip()
+    if kind not in KINDS:
+        raise ValueError("Kind: custom proxy, Tor or Mullvad.")
+    r = {**ROUTE_DEFAULT, "id": rid or f"r{cfg['next']}", "name": name, "kind": kind}
+    if kind == "custom":
+        typ = (form.get("type") or "").strip()
+        host = (form.get("host") or "").strip()
+        user = (form.get("username") or "").strip()
+        pw = form.get("password") or ""
+        if typ not in TYPES:
+            raise ValueError(f"Type: one of {', '.join(TYPES)}.")
+        if not host:
+            raise ValueError("Give the proxy's host.")
         _host(host, "Host")
-    elif route == "custom":
-        raise ValueError("Give the proxy's host to use the custom proxy.")
-    port = _port(form.get("port"), "Port")
-    if user and not _CRED.match(user):
-        raise ValueError("User name: up to 255 printable characters, no spaces.")
-    if pw and not _CRED.match(pw):
-        raise ValueError("Password: up to 255 printable characters, no spaces.")
-    if not pw and form.get("clear_password") != "on":
-        pw = old.get("password", "")
-    if pw and not user:
-        raise ValueError("A password needs a user name.")
-    posture, inventory, cve = (form.get(k) == "on" for k in ("posture", "inventory", "cve"))
-    if route == "custom" and kind == "socks4" and (cve or inventory):
-        raise ValueError("A socks4 proxy can't carry HTTPS look-ups (CVE look-ups, inventory jobs): use socks5 or "
-                         "http.")
-    tor_host = _host((form.get("tor_host") or DEFAULT["tor_host"]).strip(), "Tor address")
-    tor_port = _port(form.get("tor_port") or str(DEFAULT["tor_port"]), "Tor port")
-    mode = (form.get("mullvad_mode") or "auto").strip()
-    country, city, fallback = ((form.get(k) or "").strip().lower()
-                               for k in ("mullvad_country", "mullvad_city", "mullvad_fallback"))
-    if mode not in mullvad.MODES:
-        raise ValueError("Mullvad mode: follow host, fixed or automatic.")
-    for label, cc in (("Mullvad country", country), ("Fallback country", fallback)):
-        if cc and (not _CC.match(cc) or (countries is not None and cc not in countries)):
-            raise ValueError(f"{label}: a country from the Mullvad relay list.")
-    if city and not _CITY.match(city):
-        raise ValueError("Mullvad city: a city from the Mullvad relay list.")
-    if route == "mullvad" and mode == "fixed" and not country:
-        raise ValueError("Pick the Mullvad country for the fixed mode.")
+        port = _port(form.get("port"), "Port")
+        if user and not _CRED.match(user):
+            raise ValueError("User name: up to 255 printable characters, no spaces.")
+        if pw and not _CRED.match(pw):
+            raise ValueError("Password: up to 255 printable characters, no spaces.")
+        if not pw and form.get("clear_password") != "on" and old:
+            pw = old.get("password", "")
+        if pw and not user:
+            raise ValueError("A password needs a user name.")
+        r.update(type=typ, host=host, port=port, username=user, password=pw)
+        uses = [USES[u] for u in ("inventory", "cve") if cfg[u] == r["id"]]
+        if typ == "socks4" and uses:
+            raise ValueError(f"A socks4 proxy can't carry HTTPS look-ups ({' and '.join(uses)} use this route): use "
+                             "socks5 or http.")
+    elif kind == "tor":
+        r.update(tor_host=_host((form.get("tor_host") or ROUTE_DEFAULT["tor_host"]).strip(), "Tor address"),
+                 tor_port=_port(form.get("tor_port") or str(ROUTE_DEFAULT["tor_port"]), "Tor port"))
+    else:
+        mode = (form.get("mullvad_mode") or "auto").strip()
+        country, city, fallback = ((form.get(k) or "").strip().lower()
+                                   for k in ("mullvad_country", "mullvad_city", "mullvad_fallback"))
+        if mode not in mullvad.MODES:
+            raise ValueError("Mullvad mode: follow host, fixed or automatic.")
+        for what, cc in (("Mullvad country", country), ("Fallback country", fallback)):
+            if cc and (not _CC.match(cc) or (countries is not None and cc not in countries)):
+                raise ValueError(f"{what}: a country from the Mullvad relay list.")
+        if city and not _CITY.match(city):
+            raise ValueError("Mullvad city: a city from the Mullvad relay list.")
+        if mode == "fixed" and not country:
+            raise ValueError("Pick the Mullvad country for the fixed mode.")
+        r.update(mullvad_mode=mode, mullvad_country=country, mullvad_city=city if country else "",
+                 mullvad_fallback=fallback)
+    return r
+
+
+def _countries(conn: sqlite3.Connection) -> set[str] | None:
+    return {c for c, _, _ in mullvad.countries(mullvad.load(conn)[0])} or None
+
+
+def save_route(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
+    """Add or change one route (raises ValueError)."""
+    cfg = get(conn)
+    r = check_route(form, cfg, _countries(conn))
+    if old := find(cfg, r["id"]):
+        cfg["routes"][cfg["routes"].index(old)] = r
+    else:
+        cfg["routes"].append(r)
+        cfg["next"] += 1
+    put(conn, cfg)
+    return r
+
+
+def delete_route(conn: sqlite3.Connection, rid: str) -> str:
+    """Remove a route nothing uses; returns the reason when it can't ('' = removed)."""
+    cfg = get(conn)
+    r = find(cfg, rid)
+    if not r:
+        return "That route no longer exists."
+    if uses := in_use(conn, cfg, rid):
+        return f"{r['name']} is in use ({', '.join(uses)}): pick another route there first."
+    cfg["routes"].remove(r)
+    put(conn, cfg)
+    return ""
+
+
+def check_shared(form: dict[str, str], cfg: dict) -> dict:
+    """Validate the shared choices (default posture route, inventory route, CVE look-up route, DoH server) into new
+    settings; raises ValueError."""
+    out = dict(cfg)
+    ids = {r["id"] for r in cfg["routes"]} | {DIRECT}
+    for use in USES:
+        rid = (form.get(use) or DIRECT).strip()
+        if rid not in ids:
+            raise ValueError(f"Route for {USES[use]}: pick one from the list.")
+        if use != "posture" and not _https_ok(find(cfg, rid)):
+            raise ValueError(f"A socks4 proxy can't carry HTTPS look-ups ({USES[use]}): use socks5 or http.")
+        out[use] = rid
     doh = (form.get("doh") or DOH).strip()
     if not _DOH.match(doh):
         raise ValueError("DoH server: an https:// URL (https://dns.quad9.net/dns-query).")
-    return {"route": route, "posture": posture, "inventory": inventory, "type": kind, "host": host, "port": port,
-            "username": user, "password": pw, "cve": cve, "tor_host": tor_host, "tor_port": tor_port,
-            "mullvad_mode": mode, "mullvad_country": country, "mullvad_city": city if country else "",
-            "mullvad_fallback": fallback, "doh": doh}
-
-
-def save(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
-    cfg = check(form, get(conn), {c for c, _, _ in mullvad.countries(mullvad.load(conn)[0])} or None)
-    admin.kv_set(conn, KEY, json.dumps(cfg))
-    return cfg
+    out["doh"] = doh
+    return out
 
 
 def _addr(host: str) -> str:
@@ -149,69 +288,92 @@ def _addr(host: str) -> str:
 
 
 def route(cfg: dict | None) -> str:
-    """A hop's label ('socks5 192.0.2.10:1080', 'tor 127.0.0.1:9050', 'mullvad se-got-wg-socks5-001 (se, follow
-    host)'), '' when there is none. Never the credentials."""
+    """A hop's label ('Office: socks5 192.0.2.10:1080', 'Tor: tor 127.0.0.1:9050', 'Mullvad: mullvad
+    se-got-wg-socks5-001 (se, follow host)'), '' when there is none. Never the credentials."""
     if not cfg or not cfg.get("enabled"):
         return ""
     return cfg.get("label") or f"{cfg['type']} {_addr(cfg['host'])}:{cfg['port']}"
 
 
-def describe(cfg: dict, job: str) -> str:
-    """How a job type goes out under these settings ('' = direct)."""
-    r = cfg.get("route", "direct")
-    if r == "direct" or not cfg.get(job):
-        return ""
-    if r == "custom":
-        return f"{cfg['type']} {_addr(cfg['host'])}:{cfg['port']}"
-    if r == "tor":
-        return f"Tor {_addr(cfg['tor_host'])}:{cfg['tor_port']}"
-    mode = cfg.get("mullvad_mode", "auto")
+def details(r: dict, inventory: bool = False) -> str:
+    """A route's settings in a few words, never the credentials."""
+    k = r["kind"]
+    if k == "custom":
+        return f"{r['type']} {_addr(r['host'])}:{r['port']}"
+    if k == "tor":
+        return f"tor {_addr(r['tor_host'])}:{r['tor_port']}"
+    mode = r.get("mullvad_mode", "auto")
     if mode == "fixed":
-        where = cfg["mullvad_country"] + (f"-{cfg['mullvad_city']}" if cfg.get("mullvad_city") else "")
-        return f"Mullvad, fixed {where}"
-    fb = f" (fallback {cfg['mullvad_fallback']})" if cfg.get("mullvad_fallback") else ""
-    if job == "inventory":   # a domain has no single country: the fallback country, or any relay
-        return f"Mullvad, {cfg['mullvad_fallback']}" if fb else ("Mullvad, any country" if mode == "auto" else
-                                                                 "Mullvad, follow host (no fallback: fails)")
-    return f"Mullvad, {mullvad.MODE_NAMES[mode]}{fb}"
+        where = r["mullvad_country"] + (f"-{r['mullvad_city']}" if r.get("mullvad_city") else "")
+        return f"mullvad, fixed {where}"
+    fb = f" (fallback {r['mullvad_fallback']})" if r.get("mullvad_fallback") else ""
+    if inventory:   # a domain has no single country: the fallback country, or any relay
+        return f"mullvad, {r['mullvad_fallback']}" if fb else ("mullvad, any country" if mode == "auto" else
+                                                               "mullvad, follow host (no fallback: fails)")
+    return f"mullvad, {mullvad.MODE_NAMES[mode]}{fb}"
+
+
+def describe(r: dict | None, inventory: bool = False) -> str:
+    """'<route name>: <details>'; '' for direct."""
+    return f"{r['name']}: {details(r, inventory)}" if r else ""
 
 
 def state_line(cfg: dict) -> str:
-    return " · ".join(f"{name}: {describe(cfg, job) or 'direct'}" for job, name in JOBS.items())
+    return " · ".join(f"{name}: {label(cfg, '', use) or 'direct'}" for name, use in (
+        ("Posture scans (default)", "posture"), ("Inventory jobs", "inventory"), ("CVE look-ups", "cve")))
 
 
-def _hop(cfg: dict, kind: str, host: str, port: int, label: str, user: str = "", pw: str = "") -> dict:
+def _hop(kind: str, host: str, port: int, label: str, user: str = "", pw: str = "") -> dict:
     return {"enabled": True, "type": kind, "host": host, "port": int(port), "username": user, "password": pw,
-            "cve": bool(cfg.get("cve")), "label": label}
+            "cve": False, "label": label}
 
 
 def public_address(ip: str) -> bool:
     return ipaddress.ip_address(ip).is_global
 
 
-def hop(conn: sqlite3.Connection, cfg: dict, job: str, ip: str = "", country: str = "",
+def hop(conn: sqlite3.Connection, r: dict | None, ip: str = "", country: str = "",
         client: httpx.Client | None = None, rng: random.Random | None = None) -> dict | None:
-    """The hop one scan uses: None = direct. job: 'posture' (ip and country: the target) or 'inventory'. Raises
-    ProxyError when the route can't carry it (private target through Tor or Mullvad, no Mullvad relay)."""
-    r = cfg.get("route", "direct")
-    if r == "direct" or not cfg.get(job):
+    """The hop one scan takes on route r (None = direct, gives None). ip and country: the target (a posture scan);
+    blank for an inventory job or a look-up. Raises ProxyError when the route can't carry it (private target through
+    Tor or Mullvad, no Mullvad relay)."""
+    if not r:
         return None
-    if r == "custom":
-        return _hop(cfg, cfg["type"], cfg["host"], cfg["port"], "", cfg.get("username", ""), cfg.get("password", ""))
+    k, name = r["kind"], r["name"]
+    if k == "custom":
+        return _hop(r["type"], r["host"], r["port"], f"{name}: {details(r)}", r.get("username", ""),
+                    r.get("password", ""))
     if ip and not public_address(ip):
-        raise ProxyError(f"private address can't go through {ROUTE_NAMES[r]}")
-    if r == "tor":
-        return _hop(cfg, "socks5", cfg["tor_host"], cfg["tor_port"],
-                    f"tor {_addr(cfg['tor_host'])}:{cfg['tor_port']}")
+        raise ProxyError(f"private address can't go through {KINDS[k]}")
+    if k == "tor":
+        return _hop("socks5", r["tor_host"], r["tor_port"], f"{name}: {details(r)}")
     try:
         relays = mullvad.relays(conn, client)
         cc = mullvad.country_code(conn, ip, country) if ip else ""
-        relay, how = mullvad.choose(cfg, relays, cc, rng)
+        relay, how = mullvad.choose(r, relays, cc, rng)
     except mullvad.MullvadError as exc:
         raise ProxyError(str(exc)) from None
-    name = relay["socks_name"].split(".")[0]
-    return _hop(cfg, "socks5", relay["socks_name"], relay["socks_port"],
-                f"mullvad {name} ({relay['country_code']}, {how})")
+    short = relay["socks_name"].split(".")[0]
+    return _hop("socks5", relay["socks_name"], relay["socks_port"],
+                f"{name}: mullvad {short} ({relay['country_code']}, {how})")
+
+
+NO_LOOKUPS = {"enabled": True, "cve": True, "type": "none"}   # cve_client: local database only, never direct
+
+
+def cve_hop(conn: sqlite3.Connection, cfg: dict, scan_route: dict | None = None, scan_hop: dict | None = None,
+            client: httpx.Client | None = None) -> dict | None:
+    """The hop for CVE look-ups (None = direct): the scan's own hop when the CVE route is the scan's route (the same
+    relay), else the CVE route resolved without a target. A route that can't be used gives NO_LOOKUPS."""
+    if cfg["cve"] == DIRECT:
+        return None
+    if scan_route and scan_route["id"] == cfg["cve"]:
+        return {**scan_hop, "cve": True} if scan_hop else NO_LOOKUPS
+    try:
+        h = hop(conn, pick(cfg, "", "cve"), client=client)
+    except ProxyError:
+        return NO_LOOKUPS
+    return {**h, "cve": True} if h else None
 
 
 def resolve(host: str) -> str:
@@ -276,6 +438,13 @@ def handshake(cfg: dict, timeout: float = TIMEOUT) -> str:
         raise ProxyError(f"cannot reach the proxy at {ip}:{cfg['port']}: {exc.strerror or exc}") from None
 
 
+def greet_target(r: dict) -> dict:
+    """What the Test button greets for a custom or Tor route."""
+    if r["kind"] == "tor":
+        return {"type": "socks5", "host": r["tor_host"], "port": r["tor_port"]}
+    return r
+
+
 def tunnel_state(timeout: float = 1.5) -> tuple[bool, str]:
     """Whether Mullvad's in-tunnel SOCKS5 (10.64.0.1:1080) answers a handshake: the tunnel is up."""
     host, port = mullvad.IN_TUNNEL
@@ -299,9 +468,9 @@ cve_proxy = http_proxy
 
 @contextmanager
 def cve_client(cfg: dict | None, default: httpx.Client | None) -> Iterator[httpx.Client | None]:
-    """The client for CVE look-ups: `default` unless the hop is on with look-ups through it; then a client via the
-    hop (closed afterwards). A hop that can't carry them (socks4) gives None (local database only), never a direct
-    client."""
+    """The client for CVE look-ups: `default` unless the hop is on with look-ups through it (cve_hop); then a client
+    via the hop (closed afterwards). A hop that can't carry them (socks4, NO_LOOKUPS) gives None (local database
+    only), never a direct client."""
     if not (cfg and cfg.get("enabled") and cfg.get("cve")):
         yield default
         return

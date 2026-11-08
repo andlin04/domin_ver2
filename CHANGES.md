@@ -2,6 +2,30 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: named scan routes, chosen per scan profile
+
+- Settings · **Routes** (was Scan settings; URL unchanged, admin only): a list of named routes, each a custom proxy
+  (socks5 / socks4 / http, host, port, user, password), Tor (SOCKS address) or Mullvad (follow host / fixed /
+  automatic, country, city, fallback). Direct is built in. Add, edit, delete; each route has its own **Test** button.
+  A route in use (default, inventory or CVE look-up route, or a scan profile) can't be deleted; the page says which.
+  Passwords are never shown again (blank keeps, a tick clears).
+- Shared settings on the same page: **Default route** (posture scans whose profile says Default, ad-hoc fingerprints),
+  **Route for inventory jobs**, **CVE look-ups through** (Direct or a route; socks4 refused for inventory and CVE
+  look-ups), DoH server, Mullvad tunnel credentials and relay list as before.
+- Scan profiles get a **Route**: Default, Direct or a named route; the profile list and the Posture profile picker
+  show it. A queued scan keeps its profile's route (Default resolves when it runs); a route deleted meanwhile fails the
+  scan ("route: the scan route no longer exists"). Scan parameters record "via <route name>: <details>", no secrets.
+  CVE look-ups take the scan's own hop when the CVE route is the scan's route, else the CVE route on its own; a CVE
+  route that can't be used gives the local CVE database only. Fail closed everywhere, as before.
+- Database: column `route` on `posture_profiles` and `posture_scans` (added at start, default '' = Default).
+
+Migration: the existing route becomes a named route automatically (named Custom proxy, Tor or Mullvad; its tick
+boxes become the defaults: posture scans → default route, inventory jobs → inventory route, CVE look-ups → CVE route);
+existing profiles get Default. The new settings are kv `scan_routes`; the old kv `scan_proxy` is only read, never
+changed. Rollback: redeploy the previous build; it reads `scan_proxy` as it was before this update (route changes made
+since are not carried back) and ignores the new columns. To redo the migration later, delete kv `scan_routes`
+(`sqlite3 /var/lib/domin/domin.db "DELETE FROM kv WHERE key = 'scan_routes'"`).
+
 ## 2026-11-08: Scan profiles, CVE look-up and Scan settings under Settings
 
 - The Settings menu has sections General · Scan profiles · CVE look-up · Scan settings; Posture shows the report

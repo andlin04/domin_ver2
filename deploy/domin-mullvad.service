@@ -1,4 +1,4 @@
-# domin: apply the Mullvad tunnel settings saved on the Scan settings page (started by domin-mullvad.path).
+# domin: apply the Mullvad tunnel settings saved on the Routes page (Settings) (started by domin-mullvad.path).
 # mullvad-tunnel.sh removes the request file first and writes /var/lib/domin/mullvad.status for the page.
 [Unit]
 Description=domin: apply the Mullvad tunnel settings

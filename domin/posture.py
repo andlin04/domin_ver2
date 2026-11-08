@@ -56,8 +56,10 @@ def profile(conn: sqlite3.Connection, name: str) -> dict | None:
     return dict(row) if row else None
 
 
-def check_profile(name: str, ports: str, intensity, timing, timeout) -> tuple[dict | None, str]:
-    """Validate a profile form; returns (profile, "") or (None, error)."""
+def check_profile(name: str, ports: str, intensity, timing, timeout, route: str = "",
+                  routes: set[str] = frozenset()) -> tuple[dict | None, str]:
+    """Validate a profile form; returns (profile, "") or (None, error). route: '' (Default: the default route),
+    'direct' or one of the route ids in routes."""
     if not _PROFILE_NAME.match(name or ""):
         return None, "Name: 1-40 lower-case letters, digits, - or _."
     if not fingerprint.valid_ports(ports):
@@ -68,15 +70,20 @@ def check_profile(name: str, ports: str, intensity, timing, timeout) -> tuple[di
         return None, "Intensity, timing and timeout must be whole numbers."
     if not (0 <= intensity <= 9 and 1 <= timing <= 4 and 10 <= timeout <= 900):
         return None, "Intensity 0-9, timing 1-4, timeout 10-900 seconds."
-    return {"name": name, "ports": ports, "intensity": intensity, "timing": timing, "timeout": timeout}, ""
+    if route not in ("", proxy.DIRECT, *routes):
+        return None, "Route: pick one from the list."
+    return {"name": name, "ports": ports, "intensity": intensity, "timing": timing, "timeout": timeout,
+            "route": route}, ""
 
 
 def save_profile(conn: sqlite3.Connection, p: dict, note: str, by: str) -> None:
-    conn.execute("""INSERT INTO posture_profiles (name, ports, intensity, timing, timeout, note, updated, updated_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET ports = excluded.ports,
-                    intensity = excluded.intensity, timing = excluded.timing, timeout = excluded.timeout,
-                    note = excluded.note, updated = excluded.updated, updated_by = excluded.updated_by""",
-                 (p["name"], p["ports"], p["intensity"], p["timing"], p["timeout"], note[:200], db.now(), by))
+    conn.execute("""INSERT INTO posture_profiles (name, ports, intensity, timing, timeout, route, note, updated,
+                    updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET
+                    ports = excluded.ports, intensity = excluded.intensity, timing = excluded.timing,
+                    timeout = excluded.timeout, route = excluded.route, note = excluded.note,
+                    updated = excluded.updated, updated_by = excluded.updated_by""",
+                 (p["name"], p["ports"], p["intensity"], p["timing"], p["timeout"], p.get("route", ""), note[:200],
+                  db.now(), by))
 
 
 def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
@@ -89,11 +96,11 @@ def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
 def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict | str, requested_by: str,
             batch: list[int] | None = None) -> int:
     """Queue one posture scan per address with the profile's parameters (prof: name, ports, intensity, timing,
-    timeout; a bare port list means the default knobs); an address already queued or running for the domain is
-    left alone. Returns how many were queued. batch, when given, gets the row id per address (new or already
-    pending): the set the progress dialog follows."""
+    timeout, route; a bare port list means the default knobs and route); an address already queued or running for
+    the domain is left alone. Returns how many were queued. batch, when given, gets the row id per address (new or
+    already pending): the set the progress dialog follows."""
     if isinstance(prof, str):
-        prof = {"name": "", "ports": prof, "intensity": 2, "timing": 3, "timeout": 120}
+        prof = {"name": "", "ports": prof, "intensity": 2, "timing": 3, "timeout": 120, "route": ""}
     n = 0
     for t in found:
         row = conn.execute("""SELECT id FROM posture_scans WHERE domain = ? AND ip = ?
@@ -103,10 +110,11 @@ def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict
                 batch.append(row["id"])
             continue
         cur = conn.execute("""INSERT INTO posture_scans (domain, ip, hosts, country, ports, status, requested_by,
-                              created, profile, intensity, timing, timeout) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?,
-                              ?, ?, ?)""",
+                              created, profile, intensity, timing, timeout, route) VALUES (?, ?, ?, ?, ?, 'queued',
+                              ?, ?, ?, ?, ?, ?, ?)""",
                            (domain, t["ip"], ",".join(t["hosts"]), t["country"], prof["ports"], requested_by,
-                            db.now(), prof["name"], prof["intensity"], prof["timing"], prof["timeout"]))
+                            db.now(), prof["name"], prof["intensity"], prof["timing"], prof["timeout"],
+                            prof.get("route") or ""))
         if batch is not None:
             batch.append(cur.lastrowid)
         n += 1
@@ -172,16 +180,18 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     if not users.posture_ok(users.get_scope(conn), row["ip"], row["country"]):
         _finish(conn, row["id"], "failed", {"error": "outside the posture scope (Settings changed after queueing)"})
         return
-    cfg = proxy.get(conn)   # read per scan: a change on the Scan settings page applies to the next one
-    try:
-        via = proxy.hop(conn, cfg, "posture", row["ip"], row["country"], client)
+    cfg = proxy.get(conn)   # read per scan: a change on the Routes page applies to the next one
+    r = None
+    try:   # the profile's route, copied at queueing ('' = the default route as it is now)
+        r = proxy.pick(cfg, row.get("route") or "")
+        via = proxy.hop(conn, r, row["ip"], row["country"], client)
     except proxy.ProxyError as exc:   # fail closed: never a direct scan instead
         _finish(conn, row["id"], "failed", {"error": f"route: {exc}",
-                                            "params": f"via {proxy.describe(cfg, 'posture')}"})
+                                            "params": f"via {proxy.describe(r) or 'a deleted route'}"})
         log.info("posture %s %s: route: %s", row["domain"], row["ip"], exc)
         return
     try:
-        with proxy.cve_client(via, client) as lookups:
+        with proxy.cve_client(proxy.cve_hop(conn, cfg, r, via, client), client) as lookups:
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],
                                    display=row["hosts"].split(",")[0] or row["ip"],
                                    intensity=row.get("intensity", 2), timing=row.get("timing", 3),

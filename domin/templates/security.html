@@ -32,7 +32,7 @@
       </select></label>
     <label class="field">Profile
       <select name="profile">
-        {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %}</option>{% endfor %}
+        {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %} · route {{ route_names.get(pr.route, 'a deleted route') }}</option>{% endfor %}
       </select></label>
     <label class="field">Ports <small>optional override</small>
       <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile" size="12"

@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS posture_scans (   -- stage 2: one fingerprint + CVE m
     intensity INTEGER NOT NULL DEFAULT 2,
     timing INTEGER NOT NULL DEFAULT 3,
     timeout INTEGER NOT NULL DEFAULT 120,
-    params TEXT NOT NULL DEFAULT ''       -- the nmap command line that ran
+    params TEXT NOT NULL DEFAULT '',      -- the nmap command line that ran
+    route TEXT NOT NULL DEFAULT ''        -- scan route id from the profile ('' = the default route, 'direct')
 );
 CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, picked per posture scan
     name TEXT PRIMARY KEY,
@@ -120,6 +121,7 @@ CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, pi
     intensity INTEGER NOT NULL DEFAULT 2,  -- nmap --version-intensity 0-9
     timing INTEGER NOT NULL DEFAULT 3,     -- nmap -T1..-T4
     timeout INTEGER NOT NULL DEFAULT 120,  -- per-host seconds
+    route TEXT NOT NULL DEFAULT '',        -- scan route id (proxy.py): '' = the default route, 'direct'
     note TEXT NOT NULL DEFAULT '',
     updated TEXT NOT NULL DEFAULT '',
     updated_by TEXT NOT NULL DEFAULT ''
@@ -184,9 +186,11 @@ def init(path: Path) -> None:
         have = {r["name"] for r in conn.execute("PRAGMA table_info(posture_scans)")}
         for col, ddl in (("profile", "TEXT NOT NULL DEFAULT ''"), ("intensity", "INTEGER NOT NULL DEFAULT 2"),
                          ("timing", "INTEGER NOT NULL DEFAULT 3"), ("timeout", "INTEGER NOT NULL DEFAULT 120"),
-                         ("params", "TEXT NOT NULL DEFAULT ''")):
+                         ("params", "TEXT NOT NULL DEFAULT ''"), ("route", "TEXT NOT NULL DEFAULT ''")):
             if col not in have:
                 conn.execute(f"ALTER TABLE posture_scans ADD COLUMN {col} {ddl}")
+        if "route" not in {r["name"] for r in conn.execute("PRAGMA table_info(posture_profiles)")}:
+            conn.execute("ALTER TABLE posture_profiles ADD COLUMN route TEXT NOT NULL DEFAULT ''")
         from .fingerprint import DEFAULT_PORTS  # local import: fingerprint -> cve
         conn.execute("INSERT OR IGNORE INTO posture_profiles (name, ports, note, updated) VALUES ('default', ?, ?, ?)",
                      (DEFAULT_PORTS, "Common services, light version probes", now()))

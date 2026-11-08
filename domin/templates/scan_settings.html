@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Scan settings · domin{% endblock %}
+{% block title %}Routes · domin{% endblock %}
 {% block page %}settings{% endblock %}
 {% block content %}
-<section class="hero"><div><h1>Scan settings</h1>
-  <p class="muted">The route posture scans and inventory jobs take to the internet: direct, a custom proxy, Tor or
-    Mullvad. Posture scans run nmap under proxychains4; inventory jobs send their look-ups through the route and resolve
-    names over DNS-over-HTTPS through it. When the route can't be used, the scan fails; it never falls back to a direct
-    scan. Internal zones always stay direct. Applies to the next scan, no restart.</p></div></section>
+<section class="hero"><div><h1>Routes</h1>
+  <p class="muted">Named routes posture scans and inventory jobs take to the internet: a custom proxy, Tor or Mullvad;
+    Direct is built in. A scan profile picks its route (Default: the default route below). Posture scans run nmap
+    under proxychains4; inventory jobs send their look-ups through the route and resolve names over DNS-over-HTTPS
+    through it. When the route can't be used, the scan fails; it never falls back to a direct scan. Internal zones
+    always stay direct. Applies to the next scan, no restart.</p></div></section>
 
 {% set sub = "scan-settings" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
@@ -14,77 +15,110 @@
 {% if test %}<p class="note {{ 'ok' if test[0] else 'bad' }}" role="status">Test route: {{ test[1] }}</p>{% endif %}
 <p class="note scan-state" role="status">{{ state }}</p>
 
-<form method="post" action="{{ base }}/security/scan-settings">
-<input type="hidden" name="csrf" value="{{ csrf }}">
 <section class="card">
-  <h2>Route</h2>
-  <div class="grid g3">
-    <label class="field">Route
-      <select name="route">{% for k, name in routes.items() %}<option value="{{ k }}" {% if proxy.route == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
-  </div>
-  <label class="tick"><input type="checkbox" name="posture" {% if proxy.posture %}checked{% endif %}> Posture scans</label>
-  <label class="tick"><input type="checkbox" name="inventory" {% if proxy.inventory %}checked{% endif %}> Inventory jobs
-    <small>(external zones; amass is skipped when routed)</small></label>
-  <label class="tick"><input type="checkbox" name="cve" {% if proxy.cve %}checked{% endif %}>
-    Also send the posture scans' CVE look-ups (OSV, NVD) through the route</label>
-  <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
-    <input name="doh" value="{{ proxy.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
-  <p><button class="btn primary" type="submit">Save</button></p>
+  <h2>Routes <small>{{ rows|length }} + Direct</small></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Kind</th><th>Settings</th><th>Used by</th><th></th></tr></thead>
+    <tbody>
+    <tr><td><b>Direct</b></td><td>built in</td><td>no proxy</td><td></td><td></td></tr>
+    {% for r in rows %}<tr>
+      <td><b>{{ r.name }}</b></td><td>{{ kinds[r.kind] }}</td><td class="mono">{{ r.details }}</td>
+      <td>{{ r.uses|join(', ') or '—' }}</td>
+      <td>
+        <a class="btn small" href="{{ base }}/security/scan-settings?edit={{ r.id }}#route-form">Edit</a>
+        <form method="post" action="{{ base }}/security/scan-settings/test" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="route" value="{{ r.id }}">
+          <button class="btn small" type="submit">Test</button></form>
+        <form method="post" action="{{ base }}/security/scan-settings/routes/{{ r.id }}/delete" class="inline"
+              data-confirm="Delete route {{ r.name }}?">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="btn small" type="submit">Delete</button></form>
+      </td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="muted">Test: custom proxy and Tor connect and complete the greeting (SOCKS5: with the user name and
+    password); Mullvad checks the in-tunnel SOCKS5. No request to any target. A route in use can't be deleted.</p>
 </section>
 
-<section class="card">
-  <h2>Custom proxy <small>socks5 / socks4 / http</small></h2>
+<section class="card" id="route-form">
+  <h2>{% if edit.id %}Change route {{ edit.name }}{% else %}Add a route{% endif %}</h2>
+  <form method="post" action="{{ base }}/security/scan-settings/routes">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ edit.id }}">
+  <div class="grid g3">
+    <label class="field">Name <small>letters, digits, spaces, . _ ( ) -</small>
+      <input name="name" value="{{ edit.name }}" required maxlength="40" autocomplete="off"></label>
+    <label class="field">Kind <small>only that kind's fields are used</small>
+      <select name="kind">{% for k, name in kinds.items() %}<option value="{{ k }}" {% if edit.kind == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+  </div>
+
+  <h3>Custom proxy <small>socks5 / socks4 / http</small></h3>
   <div class="grid g3">
     <label class="field">Type
-      <select name="type">{% for t in types %}<option value="{{ t }}" {% if proxy.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+      <select name="type">{% for t in types %}<option value="{{ t }}" {% if edit.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
     <label class="field">Host <small>IP address or host name</small>
-      <input name="host" value="{{ proxy.host }}" maxlength="253" spellcheck="false" autocapitalize="off"
+      <input name="host" value="{{ edit.host }}" maxlength="253" spellcheck="false" autocapitalize="off"
         placeholder="192.0.2.10"></label>
     <label class="field">Port
-      <input name="port" type="number" min="1" max="65535" value="{{ proxy.port }}" required></label>
+      <input name="port" type="number" min="1" max="65535" value="{{ edit.port }}"></label>
     <label class="field">User name <small>optional</small>
-      <input name="username" value="{{ proxy.username }}" maxlength="255" autocomplete="off" spellcheck="false"
+      <input name="username" value="{{ edit.username }}" maxlength="255" autocomplete="off" spellcheck="false"
         autocapitalize="off"></label>
-    <label class="field">Password <small>{% if proxy.password_saved %}saved; blank keeps it{% else %}optional{% endif %}</small>
+    <label class="field">Password <small>{% if edit.password_saved %}saved; blank keeps it{% else %}optional{% endif %}</small>
       <input name="password" type="password" maxlength="255" autocomplete="new-password"></label>
-    {% if proxy.password_saved %}<label class="tick"><input type="checkbox" name="clear_password"> Clear the saved password</label>{% endif %}
+    {% if edit.password_saved %}<label class="tick"><input type="checkbox" name="clear_password"> Clear the saved password</label>{% endif %}
   </div>
   <p class="muted">socks4 can't carry HTTPS look-ups (CVE look-ups, inventory jobs). The password is stored in plain
     text in the database (readable by the service account only).</p>
-</section>
 
-<section class="card">
-  <h2>Tor <small>the local tor client's SOCKS5</small></h2>
+  <h3>Tor <small>the local tor client's SOCKS5</small></h3>
   <div class="grid g3">
-    <label class="field">Address <input name="tor_host" value="{{ proxy.tor_host }}" maxlength="253" spellcheck="false"
+    <label class="field">Address <input name="tor_host" value="{{ edit.tor_host }}" maxlength="253" spellcheck="false"
       autocapitalize="off"></label>
-    <label class="field">Port <input name="tor_port" type="number" min="1" max="65535" value="{{ proxy.tor_port }}"></label>
+    <label class="field">Port <input name="tor_port" type="number" min="1" max="65535" value="{{ edit.tor_port }}"></label>
   </div>
   <p class="muted">One exit for all scans: no per-host country with Tor. Exits block many ports and scans are slow.
     Private addresses can't go through Tor.</p>
-</section>
 
-<section class="card">
-  <h2>Mullvad <small>a relay's SOCKS5 inside the host's Mullvad tunnel, per target</small></h2>
-  <p class="note {{ 'ok' if tunnel and tunnel[0] else 'bad' if tunnel else '' }}" role="status">
-    {% if tunnel %}{{ tunnel[1] }}{% else %}Tunnel state not checked.{% endif %}</p>
+  <h3>Mullvad <small>a relay's SOCKS5 inside the host's Mullvad tunnel, per target</small></h3>
   <div class="grid g3">
     <label class="field">Breakout
-      <select name="mullvad_mode">{% for k, name in modes.items() %}<option value="{{ k }}" {% if proxy.mullvad_mode == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+      <select name="mullvad_mode">{% for k, name in modes.items() %}<option value="{{ k }}" {% if edit.mullvad_mode == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">Fixed country
-      <select name="mullvad_country"><option value="">—</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if proxy.mullvad_country == cc %}selected{% endif %}>{{ name }} ({{ cc }}, {{ n }})</option>{% endfor %}</select></label>
+      <select name="mullvad_country"><option value="">—</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if edit.mullvad_country == cc %}selected{% endif %}>{{ name }} ({{ cc }}, {{ n }})</option>{% endfor %}</select></label>
     <label class="field">Fixed city <small>optional</small>
-      <select name="mullvad_city"><option value="">any</option>{% for cc, code, name in cities %}<option value="{{ code }}" {% if proxy.mullvad_city == code %}selected{% endif %}>{{ cc }}: {{ name }}</option>{% endfor %}</select></label>
+      <select name="mullvad_city"><option value="">any</option>{% for cc, code, name in cities %}<option value="{{ code }}" {% if edit.mullvad_city == code %}selected{% endif %}>{{ cc }}: {{ name }}</option>{% endfor %}</select></label>
     <label class="field">Fallback country
-      <select name="mullvad_fallback"><option value="">none</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if proxy.mullvad_fallback == cc %}selected{% endif %}>{{ name }} ({{ cc }})</option>{% endfor %}</select></label>
+      <select name="mullvad_fallback"><option value="">none</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if edit.mullvad_fallback == cc %}selected{% endif %}>{{ name }} ({{ cc }})</option>{% endfor %}</select></label>
   </div>
   <p class="muted"><b>Follow host</b>: a relay in the address's country (DB-IP), else the fallback country, else the
     scan fails. <b>Fixed</b>: the country (and city) above. <b>Automatic</b>: the address's country, else the fallback,
     else any relay. Inventory jobs use the fixed or fallback country (automatic without a fallback: any relay). A relay
     is picked at random among the active ones. Private addresses can't go through Mullvad.</p>
-  <p class="muted">Relay list: {% if relay_count %}{{ relay_count }} relays, {{ relay_age }} old{% if relays_stale %} (refreshed at the next scan){% endif %}{% else %}not fetched yet{% endif %}.</p>
+  <p><button class="btn primary" type="submit">Save route</button>
+    {% if edit.id %}<a class="btn" href="{{ base }}/security/scan-settings#route-form">Add a new one instead</a>{% endif %}</p>
+  </form>
+</section>
 
-  <h3>Tunnel credentials</h3>
+<form method="post" action="{{ base }}/security/scan-settings">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<section class="card">
+  <h2>Shared settings <small>one set per host</small></h2>
+  <div class="grid g3">
+    <label class="field">Default route <small>posture scans whose profile says Default; ad-hoc fingerprints</small>
+      <select name="posture"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.posture == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+    <label class="field">Route for inventory jobs <small>external zones; amass is skipped when routed</small>
+      <select name="inventory"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.inventory == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+    <label class="field">CVE look-ups through <small>OSV, NVD; the scan's own hop when it is the scan's route</small>
+      <select name="cve"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.cve == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+  </div>
+  <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
+    <input name="doh" value="{{ cfg.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
+  <p class="muted">A CVE look-up route that can't be used gives the local CVE database only, never a direct look-up.</p>
+
+  <h3>Mullvad tunnel</h3>
+  <p class="note {{ 'ok' if tunnel and tunnel[0] else 'bad' if tunnel else '' }}" role="status">
+    {% if tunnel %}{{ tunnel[1] }}{% else %}Tunnel state not checked.{% endif %}</p>
+  <p class="muted">Relay list: {% if relay_count %}{{ relay_count }} relays, {{ relay_age }} old{% if relays_stale %} (refreshed at the next scan){% endif %}{% else %}not fetched yet{% endif %}.</p>
   <div class="grid g3">
     <label class="field">Account number <small>{% if tun.account_saved %}saved; blank keeps it{% else %}16 digits; optional with a key{% endif %}</small>
       <input name="mullvad_account" type="password" maxlength="19" inputmode="numeric" autocomplete="off"></label>
@@ -103,17 +137,11 @@
     it with Mullvad. Saving changed credentials asks the host to apply them (mullvad-tunnel.sh through the
     domin-mullvad path unit). They are stored in the database and never shown again.
     Last apply: {% if apply.at %}<span class="{{ 'ok' if apply.ok else 'bad' }}">{{ apply.at }}: {{ apply.message }}</span>{% else %}none yet{% endif %}{% if apply.pending %} · a request is waiting for the host{% endif %}.</p>
-  <p><button class="btn primary" type="submit">Save</button></p>
+  <p><button class="btn primary" type="submit">Save shared settings</button></p>
 </section>
 </form>
 
 <section class="card">
-  <form method="post" action="{{ base }}/security/scan-settings/test" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn" type="submit">Test route</button>
-    <span class="muted">Custom proxy and Tor: connects and completes the greeting (SOCKS5: with the user name and
-      password). Mullvad: the in-tunnel SOCKS5. No request to any target.</span>
-  </form>
   <form method="post" action="{{ base }}/security/scan-settings/relays" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn" type="submit">Refresh relay list</button>
