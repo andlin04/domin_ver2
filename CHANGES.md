@@ -5,6 +5,7 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 ## 2026-11-08: routes table Save button
 
 - The button under the routes table reads "Save" (was "Make the ticked route the preferred one"); same form.
+  It uses the primary style like every other Save button.
 - Rollback: restore the old button text in `domin/templates/scan_settings.html`.
 
 ## 2026-11-08: ready-made Tor and Mullvad routes
