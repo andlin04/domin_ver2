@@ -1,0 +1,8 @@
+# domin: import the newest copy of the public database (started by domin-public-sync.path).
+# public-sync.sh removes the request file first and writes /var/lib/domin/public-sync.status for the page.
+[Unit]
+Description=domin: import the public database copy
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/domin/app/deploy/public-sync.sh import

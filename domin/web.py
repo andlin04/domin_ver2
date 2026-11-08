@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, mullvad, posture, proxy, tags, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, mullvad, posture, proxy, publicsync, tags, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -536,7 +536,8 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
-           "posture-pending": "Those addresses are already queued or running."}
+           "posture-pending": "Those addresses are already queued or running.",
+           "sync-requested": "Sync started; reload in a minute for the result."}
 PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
 PENDING_MIN = 5
@@ -863,7 +864,19 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return shell(request, "settings.html", u, s, status, scope=scope,
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
                      countries=countries, roles=users.ROLES, error=error,
-                     internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets)
+                     internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,
+                     sync=publicsync.status(settings.db_path.parent, c))
+
+    @app.post(base + "/settings/public-sync", include_in_schema=False)
+    async def settings_public_sync(request: Request):
+        """Ask the host to import the newest copy of the public database (the request file holds a time only)."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+        publicsync.request_sync(settings.db_path.parent)
+        return back(base + "/settings", "sync-requested")
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):

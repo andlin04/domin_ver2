@@ -2,6 +2,20 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: Settings > Public database (staging copy of the public data)
+
+- Settings (admin) has a "Public database" section with a Sync button: it replaces this instance's inventory
+  (domains, scans, records, address and country caches) with the newest copy of the public server's database and
+  adds this instance's own scans back on top with new ids (their jobs follow). Users, settings, posture scans,
+  profiles, tags and queued jobs are not touched; no job is created.
+- The copy reaches the host by itself: `deploy/public-sync.sh receive` (the forced command of one SSH key) keeps a
+  checked zstd copy in /var/lib/domin-sync. The button drops /var/lib/domin/public-sync.request; the new root path
+  unit domin-public-sync.path runs `public-sync.sh import` (`python -m domin import-public <db>`, then restarts
+  domin) and writes /var/lib/domin/public-sync.status for the page.
+- install.sh installs and enables domin-public-sync.path.
+- Rollback: `systemctl disable --now domin-public-sync.path`, remove the two unit files, revert this change; restore
+  the database from a backup to undo an import.
+
 ## 2026-11-08: routes table Save button
 
 - The button under the routes table reads "Save" (was "Make the ticked route the preferred one"); same form.

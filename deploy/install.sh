@@ -293,9 +293,13 @@ nginx -t -q
 
 # Mullvad tunnel settings saved on the Routes page (Settings): a root path unit runs mullvad-tunnel.sh apply
 install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
+# Settings > Public database > Sync: a root path unit runs public-sync.sh import (a staging copy of the public data)
+install -m 644 "$APP/app/deploy/domin-public-sync.path" "$APP/app/deploy/domin-public-sync.service" \
+  /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable -q --now domin-mullvad.path
+systemctl enable -q --now domin-public-sync.path
 systemctl enable -q domin
 systemctl restart domin
 if [ "$WORKER" = 1 ]; then systemctl enable -q domin-worker; systemctl restart domin-worker

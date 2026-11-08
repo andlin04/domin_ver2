@@ -92,4 +92,22 @@
 
   <p><button class="btn primary" type="submit">Save settings</button></p>
 </form>
+
+<section class="card">
+  <h2>Public database</h2>
+  <p class="muted">Replaces the inventory here with the newest copy of the public server's database. This instance's
+    own scans stay; users, settings, posture scans and queued jobs are not touched, and nothing starts scanning.</p>
+  <dl class="facts">
+    <dt>Copy on this host</dt><dd>{{ sync.received or "none received yet" }}</dd>
+    <dt>Last sync</dt><dd>{% if sync.imported %}{{ sync.imported }}: {{ sync.scans }} public scans (newest
+      {{ sync.latest or "?" }}), {{ sync.records }} records, {{ sync.own }} own scans kept{% else %}never{% endif %}</dd>
+    {% if sync.at %}<dt>Last run</dt><dd>{{ sync.at }}: {{ "OK" if sync.ok else "failed" }}{% if sync.message %},
+      {{ sync.message }}{% endif %}</dd>{% endif %}
+  </dl>
+  <form method="post" action="{{ base }}/settings/public-sync">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if sync.pending %}<p class="muted">Sync running.</p>{% else %}
+    <p><button class="btn primary" type="submit">Sync</button></p>{% endif %}
+  </form>
+</section>
 {% endblock %}

@@ -1,14 +1,15 @@
-"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|
+"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-public <db>|
 user-add|user-list|user-passwd|user-role|user-2fa-reset|admin-password}."""
 from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import logging
 import sys
 from pathlib import Path
 
-from . import admin, db, importer, jobs, users
+from . import admin, db, importer, jobs, publicsync, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -39,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("domain")
     geo = sub.add_parser("geoip", help="load a DB-IP 'IP to Country Lite' CSV (.csv or .csv.gz) for visitor countries")
     geo.add_argument("file", type=Path)
+    pub = sub.add_parser("import-public", help="replace the inventory with a copy of the public database "
+                                               "(own scans are kept; Settings > Sync runs this)")
+    pub.add_argument("file", type=Path)
     ua = sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
     ua.add_argument("--role", choices=users.ROLES, default="viewer")
@@ -77,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "geoip":
         with db.connect(settings.db_path) as conn:
             print(f"{admin.import_geo(conn, args.file)} address ranges loaded")
+    elif args.cmd == "import-public":
+        with db.connect(settings.db_path) as conn:
+            print(json.dumps(publicsync.import_public(conn, args.file)))
     elif args.cmd == "user-add":
         with db.connect(settings.db_path) as conn:
             try:
