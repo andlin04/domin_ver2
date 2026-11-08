@@ -147,6 +147,17 @@ def names(cfg: dict, tests: dict | None = None) -> dict[str, str]:
             **{r["id"]: name(r) for r in cfg["routes"]}}
 
 
+def picker_names(cfg: dict, tests: dict | None = None) -> dict[str, str]:
+    """Direct, then every route with its state, for the shared pickers: '<name> — enabled, not tested', '— enabled,
+    verified', '— last test failed', '— disabled'."""
+    def state(r: dict) -> str:
+        t = (tests or {}).get(r["id"])
+        if not r.get("enabled", True):
+            return "disabled"
+        return "last test failed" if t and not t.get("ok") else "enabled, verified" if t else "enabled, not tested"
+    return {DIRECT: "Direct", **{r["id"]: f"{r['name']} — {state(r)}" for r in cfg["routes"]}}
+
+
 def label(cfg: dict, rid: str = "", use: str = "posture") -> str:
     """How a scan on this route goes out ('' = direct), for a page."""
     try:
@@ -318,6 +329,8 @@ def delete_route(conn: sqlite3.Connection, rid: str) -> str:
     if uses := in_use(conn, cfg, rid):
         return f"{r['name']} is in use ({', '.join(uses)}): pick another route there first."
     cfg["routes"].remove(r)
+    if r["kind"] in READY:   # no ready-made route of this kind is created again
+        cfg["dismissed"] = sorted({*cfg.get("dismissed", []), r["kind"]})
     put(conn, cfg)
     forget_test(conn, rid)
     return ""
@@ -596,6 +609,34 @@ def kinds(cap: dict, current: str = "") -> list[dict]:
     for k, works in zip(out, (True, tor["ok"], tun["ok"]), strict=True):
         k["state"] = "bad" if not works else "ok" if cap["proxychains"] else "warn"
     return out
+
+
+READY = {"tor": {"name": "Tor", "kind": "tor"},
+         "mullvad": {"name": "Mullvad (automatic)", "kind": "mullvad", "mullvad_mode": "auto",
+                     "mullvad_fallback": MULLVAD_FALLBACK}}
+
+
+def ready_made(conn: sqlite3.Connection, cap: dict) -> list[str]:
+    """One route per kind this host supports (Tor: its SOCKS5 answers; Mullvad: the tunnel is up), created once:
+    enabled, not tested, used by nothing. Not when a route of that kind exists, nor when the admin deleted the
+    ready-made one or any route of that kind (the kind is kept under "dismissed"). Returns the new route ids."""
+    cfg = get(conn)
+    have = {r["kind"] for r in cfg["routes"]} | set(cfg.get("dismissed", []))
+    avail = {"tor": cap["tor"]["ok"], "mullvad": cap["tunnel"]["ok"]}
+    added = []
+    for kind, base in READY.items():
+        if not avail[kind] or kind in have:
+            continue
+        taken = {r["name"].lower() for r in cfg["routes"]}
+        name = next(n for n in (base["name"], *(f"{base['name']} {i}" for i in range(2, 99)))
+                    if n.lower() not in taken)
+        r = {**ROUTE_DEFAULT, **base, "id": f"r{cfg['next']}", "name": name}
+        cfg["routes"].append(r)
+        cfg["next"] += 1
+        added.append(r["id"])
+    if added:
+        put(conn, cfg)
+    return added
 
 
 def http_proxy(cfg: dict) -> httpx.Proxy:

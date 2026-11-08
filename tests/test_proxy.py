@@ -282,12 +282,11 @@ def test_test_button_shows_the_result(settings, monkeypatch):
         csrf = sign_in(h, "adm")
         assert "Direct has nothing to test" in h.post("/admin/security/scan-settings/test",
                                                       data={"csrf": csrf, "route": "direct"}).text
+        # Tor answered, so the page above made the ready-made Tor route r1; Office is r2
         h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form()})
-        h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, "name": "Tor", "kind": "tor",
-                                                            "tor_host": "127.0.0.1", "tor_port": "9050"})
-        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
-        assert r.status_code == 200 and "Test route: Office: SOCKS5 at 192.0.2.10:1080 OK" in r.text
         r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r2"})
+        assert r.status_code == 200 and "Test route: Office: SOCKS5 at 192.0.2.10:1080 OK" in r.text
+        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
         assert "Test route: Tor: SOCKS5 at 127.0.0.1:9050 OK" in r.text
 
 

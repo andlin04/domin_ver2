@@ -725,7 +725,7 @@ def test_route_enabled_verified_and_fail_closed(settings, monkeypatch):
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
         page = h.get("/admin/security/scan-settings").text
-        assert page.count('<span class="pill">not tested</span>') == 2 and page.count("✓ on") == 2
+        assert page.count('<span class="pill">not tested</span>') == 2 and page.count('name="on" value="1" data-autosubmit') == 2
         assert '<input type="radio" name="posture" value="r1" form="default-form"\n        checked>' in page
         r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
         assert "Test route: Tor: cannot reach the proxy" in r.text and '<span class="pill bad">✗ ' in r.text
@@ -736,7 +736,7 @@ def test_route_enabled_verified_and_fail_closed(settings, monkeypatch):
         assert h.post("/admin/security/scan-settings/routes/r2/enabled", data={"csrf": csrf, "on": "0"},
                       follow_redirects=False).status_code == 303
         page = h.get("/admin/security/scan-settings").text
-        assert '<span class="pill bad">off</span>' in page and ">Turn on</button>" in page
+        assert '<span class="pill bad">off</span>' in page and 'aria-label="Enabled: Germany" >' in page
         assert "Germany is disabled but in use (profile viade): scans on it fail until it is enabled." in page
         assert "Germany (disabled)" in h.get("/admin/security/profiles").text
         assert h.post("/admin/security/scan-settings/default", data={"csrf": csrf, "posture": "r2"},
@@ -782,3 +782,62 @@ def test_mullvad_relay_names_fall_back_to_the_in_tunnel_resolver(monkeypatch):
     except px.ProxyError:
         pass
     assert len(asked) == 1   # other names never go to Mullvad's resolver
+
+
+# ---- ready-made routes ----
+
+def cap(tor: bool, tunnel: bool) -> dict:
+    return {"tor": {"ok": tor}, "tunnel": {"ok": tunnel}}
+
+
+def test_ready_made_routes_once_per_available_kind(settings):
+    with db.connect(settings.db_path) as c:
+        assert proxy.ready_made(c, cap(False, False)) == [] and proxy.get(c)["routes"] == []
+        assert proxy.ready_made(c, cap(True, False)) == ["r1"]
+        assert proxy.ready_made(c, cap(True, True)) == ["r2"]   # Tor exists already: Mullvad only
+        assert proxy.ready_made(c, cap(True, True)) == []        # never duplicated
+        routes = {r["kind"]: r for r in proxy.get(c)["routes"]}
+        assert routes["tor"]["name"] == "Tor" and routes["tor"]["tor_port"] == 9050 and routes["tor"]["enabled"]
+        m = routes["mullvad"]
+        assert (m["name"], m["mullvad_mode"], m["mullvad_fallback"], m["enabled"]) == (
+            "Mullvad (automatic)", "auto", "se", True)
+        assert proxy.tests(c) == {} and proxy.get(c)["posture"] == proxy.DIRECT   # not verified, used by nothing
+        assert proxy.delete_route(c, "r1") == ""
+        assert proxy.ready_made(c, cap(True, True)) == []   # deleted by the admin: not created again
+        assert proxy.get(c)["dismissed"] == ["tor"]
+
+
+def test_ready_made_skips_a_kind_the_admin_made(settings):
+    with db.connect(settings.db_path) as c:
+        proxy.save_route(c, {"name": "Tor", "kind": "custom", "type": "socks5", "host": "192.0.2.10", "port": "1080"})
+        proxy.save_route(c, route_form())
+        assert proxy.ready_made(c, cap(True, True)) == ["r3"]   # a Tor route; the name Tor is taken
+        assert proxy.find(proxy.get(c), "r3")["name"] == "Tor 2"
+
+
+def test_routes_page_offers_ready_made_routes(settings, monkeypatch):
+    with app_client(settings) as h:
+        sign_in(h, "adm")
+        page = h.get("/admin/security/scan-settings").text   # nothing answers: no routes
+        assert 'id="no-routes"' in page and '<a href="#route-form">Add a route</a>' in page
+        answering(monkeypatch, ("127.0.0.1", 9050), mullvad.IN_TUNNEL)
+        status_file(settings, at="t", ok=True, code="up", message="tunnel up via se-got-wg-001",
+                    tunnel={"up": True, "handshake": 1700000000, "relay": "se-got-wg-001", "wg": True})
+        proxy._probes.clear()
+        page = h.get("/admin/security/scan-settings").text
+        assert 'id="no-routes"' not in page
+        shared = page.split('id="shared"')[1]
+        for use in ("posture", "inventory", "cve"):
+            select = shared.split(f'<select name="{use}">')[1].split("</select>")[0]
+            assert ">Direct</option>" in select
+            assert '<option value="r1" >Tor — enabled, not tested</option>' in select
+            assert '<option value="r2" >Mullvad (automatic) — enabled, not tested</option>' in select
+        assert page.count('name="on" value="1" data-autosubmit') == 2   # an Enabled box per route
+        assert page.count('aria-label="Enabled: ') == 2 and page.count(">Test</button>") == 2
+        with db.connect(settings.db_path) as c:
+            proxy.set_enabled(c, "r2", False)
+            proxy.record_test(c, "r1", False, "refused")
+        page = h.get("/admin/security/scan-settings").text
+        assert "Mullvad (automatic) — disabled</option>" in page and "Tor — last test failed</option>" in page
+        with db.connect(settings.db_path) as c:
+            assert len(proxy.get(c)["routes"]) == 2   # not created twice

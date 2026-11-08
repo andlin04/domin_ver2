@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: ready-made Tor and Mullvad routes
+
+- The Routes page creates a "Tor" route when the local tor client answers and a "Mullvad (automatic)" route
+  (fallback se) when the Mullvad tunnel is up: once each, enabled, not tested, used by nothing. Not when a route of
+  that kind exists; a deleted one is not created again.
+- Shared settings: a default-route picker next to the inventory and CVE pickers; each lists Direct and every route
+  with its state (enabled, not tested / verified / last test failed / disabled). With no routes: a pointer to Add a
+  route.
+- Routes table: an Enabled tick box per route (applies on click), and the table wraps so Enabled, Verified and Test
+  fit without scrolling sideways.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: Mullvad relay names resolve inside the tunnel
 
 - A host without public DNS resolves `*.relays.mullvad.net` through Mullvad's in-tunnel resolver (10.64.0.1), so

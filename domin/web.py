@@ -1089,13 +1089,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                            test: tuple[bool, str] | None = None, edit: dict | None = None):
         """form: a refused shared save; edit: the route form (a refused save, or ?edit=<id>). Never a password,
         account number or key."""
+        cap = proxy.host_check(c, state_dir)   # socket probes are cached: quick
+        proxy.ready_made(c, cap)   # a Tor and a Mullvad route once this host supports them
         saved = proxy.get(c)
         cfg = proxy.public(saved)
         tun = mullvad.tunnel_public(mullvad.get_tunnel(c))
         if form:
             cfg.update({k: form.get(k, "") for k in (*proxy.USES, "doh") if k in form})
             tun.update(address=form.get("mullvad_address", ""), entry=form.get("mullvad_entry", ""))
-        cap = proxy.host_check(c, state_dir)   # socket probes are cached: quick
         relays, _ = mullvad.load(c)
         countries = mullvad.countries(relays)
         if edit is None:
@@ -1120,7 +1121,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         apply = cap["apply"]
         return shell(request, "scan_settings.html", u, s, status, cfg=cfg, rows=rows, edit=edit, types=proxy.TYPES,
                      kinds=proxy.KINDS, kind_choices=proxy.kinds(cap, edit.get("kind", "")), cap=cap,
-                     warnings=warnings, route_names=proxy.names(saved, done), error=error, test=test,
+                     warnings=warnings, route_names=proxy.picker_names(saved, done), error=error, test=test,
                      state=proxy.state_line(saved),
                      modes=mullvad.MODE_NAMES, countries=countries, cities=mullvad.cities(relays),
                      tun=tun, apply=apply, last=mullvad.explain(apply))

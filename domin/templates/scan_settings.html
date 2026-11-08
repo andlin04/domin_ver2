@@ -42,7 +42,7 @@
   <h2>Routes <small>{{ rows|length }} + Direct</small></h2>
   <form method="post" action="{{ base }}/security/scan-settings/default" id="default-form">
     <input type="hidden" name="csrf" value="{{ csrf }}"></form>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="routes">
     <thead><tr><th>Preferred</th><th>Name</th><th>Kind and settings</th><th>Enabled</th><th>Verified</th>
       <th>Used by</th><th></th></tr></thead>
     <tbody>
@@ -58,9 +58,11 @@
       <td><b>{{ r.name }}</b></td>
       <td>{{ kinds[r.kind] }} <span class="mono">{{ r.details }}</span></td>
       <td><form method="post" action="{{ base }}/security/scan-settings/routes/{{ r.id }}/enabled" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="on" value="{{ '0' if r.enabled else '1' }}">
-          {% if r.enabled %}<span class="pill ok">✓ on</span>{% else %}<span class="pill bad">off</span>{% endif %}
-          <button class="btn small" type="submit">{{ 'Turn off' if r.enabled else 'Turn on' }}</button></form></td>
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label class="tick enabled-toggle"><input type="checkbox" name="on" value="1" data-autosubmit
+            aria-label="Enabled: {{ r.name }}" {% if r.enabled %}checked{% endif %}>
+            {% if r.enabled %}<span class="pill ok">on</span>{% else %}<span class="pill bad">off</span>{% endif %}</label>
+          <noscript><button class="btn small" type="submit">Save</button></noscript></form></td>
       <td>{% if not r.test %}<span class="pill">not tested</span>
         {% elif r.test.ok %}<span class="pill ok" title="{{ r.test.message }}">✓ {{ when(r.test.at) }}</span>
         {% else %}<span class="pill bad">✗ {{ when(r.test.at) }}</span><br><small class="bad-text">{{ r.test.message }}</small>{% endif %}</td>
@@ -162,6 +164,8 @@
 <section class="card" id="shared">
   <h2>Shared settings <small>one set per host</small></h2>
   <div class="grid g3">
+    <label class="field">Default route for posture scans <small>the preferred route (Routes, above)</small>
+      <select name="posture">{% for rid, name in route_names.items() %}<option value="{{ rid }}" {% if cfg.posture == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">Route for inventory jobs <small>external zones; amass is skipped when routed</small>
       <select name="inventory">{% for rid, name in route_names.items() if rid %}<option value="{{ rid }}" {% if cfg.inventory == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">CVE look-ups through <small>OSV, NVD; the scan's own hop when it is the scan's route</small>
@@ -169,7 +173,8 @@
     <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
       <input name="doh" value="{{ cfg.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
   </div>
-  <p class="muted">The default for posture scans is the preferred route (Routes, above). A CVE look-up route that
+  {% if not rows %}<p class="muted" id="no-routes">No routes yet: add one under <a href="#route-form">Add a route</a>.</p>{% endif %}
+  <p class="muted">A CVE look-up route that
     can't be used gives the local CVE database only, never a direct look-up.</p>
 
   <h3 id="tunnel">Mullvad tunnel <small>needed by Mullvad routes; set up by the host (domin-mullvad service)</small></h3>

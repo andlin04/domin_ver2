@@ -337,6 +337,11 @@ pre.raw-out { max-height: 24rem; overflow: auto; white-space: pre; font: .78rem/
   background: rgba(0, 0, 0, .25); padding: .6rem .8rem; border-radius: 6px; }
 /* Routes page: the host checks, the kind list, tick boxes and radios outside .tune */
 label.tick { display: inline-flex; align-items: center; gap: .45rem; color: var(--text); }
+label.tick input[type=checkbox], label.tick input[type=radio] { width: 1.15rem; height: 1.15rem; margin: 0; padding: 0;
+  flex: none; accent-color: var(--accent); cursor: pointer; }
+table.routes td { white-space: normal; }   /* wraps, so Enabled and Test fit without scrolling sideways */
+table.routes td .pill, table.routes td label.tick { white-space: nowrap; margin: .1rem 0; }
+table.routes td:last-child { white-space: nowrap; }
 ul.kinds { margin: .75rem 0 1.1rem; padding: 0; list-style: none; display: grid; gap: .3rem; color: var(--muted); }
 ul.kinds .pill { min-width: 7.5rem; text-align: center; margin-right: .4rem; }
 table.checks td:first-child { font-weight: 600; white-space: nowrap; }

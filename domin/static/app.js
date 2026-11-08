@@ -381,7 +381,7 @@ $$("form[data-route-form]").forEach((f) => {
 });
 
 // a pick-list that applies itself (CSP allows no inline handlers); data-reset names a field to clear first
-document.querySelectorAll("select[data-autosubmit]").forEach((s) => s.addEventListener("change", () => {
+document.querySelectorAll("select[data-autosubmit], input[type=checkbox][data-autosubmit]").forEach((s) => s.addEventListener("change", () => {
   const other = s.dataset.reset && s.form.elements[s.dataset.reset];
   if (other) other.value = "";
   s.form.submit();
