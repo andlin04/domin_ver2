@@ -89,6 +89,28 @@ CREATE TABLE IF NOT EXISTS visits (
 );
 CREATE INDEX IF NOT EXISTS visits_at ON visits(at);
 CREATE TABLE IF NOT EXISTS geo (start TEXT PRIMARY KEY, end TEXT NOT NULL, cc TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS posture_scans (   -- stage 2: one fingerprint + CVE match per address (domin.posture)
+    id INTEGER PRIMARY KEY,
+    domain TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    hosts TEXT NOT NULL DEFAULT '',       -- the inventory's host names at this address, comma separated
+    country TEXT NOT NULL DEFAULT '',
+    ports TEXT NOT NULL,                  -- the scan parameters: nmap port list
+    status TEXT NOT NULL,                 -- queued | running | done | failed
+    requested_by TEXT NOT NULL DEFAULT '',
+    created TEXT NOT NULL,
+    started TEXT,
+    finished TEXT,
+    services TEXT NOT NULL DEFAULT '[]',  -- json: open ports with service, version, CPEs and CVE findings
+    open_ports INTEGER NOT NULL DEFAULT 0,
+    cves INTEGER NOT NULL DEFAULT 0,      -- distinct CVEs
+    high INTEGER NOT NULL DEFAULT 0,      -- distinct critical + high CVEs
+    note TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    raw TEXT NOT NULL DEFAULT ''          -- nmap XML as returned
+);
+CREATE INDEX IF NOT EXISTS posture_target ON posture_scans(domain, ip, id);
+CREATE INDEX IF NOT EXISTS posture_status ON posture_scans(status, id);
 """
 
 RECORD_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
@@ -179,6 +201,7 @@ def delete_domain(conn: sqlite3.Connection, name: str) -> bool:
     conn.execute("DELETE FROM records WHERE scan_id IN (SELECT id FROM scans WHERE domain_id = ?)", (did,))
     conn.execute("DELETE FROM scans WHERE domain_id = ?", (did,))
     conn.execute("DELETE FROM jobs WHERE domain = ?", (name,))
+    conn.execute("DELETE FROM posture_scans WHERE domain = ?", (name,))
     conn.execute("DELETE FROM domains WHERE id = ?", (did,))
     return True
 

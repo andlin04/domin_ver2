@@ -327,6 +327,12 @@ def _country_ok(country: str, allow: list[str], deny: list[str]) -> bool:
     return (not allow or country in allow) and country not in deny
 
 
+def posture_ok(scope: dict, ip: str, country: str) -> bool:
+    """True when the posture engine may probe this inventoried address: IP rules and geolocation rules."""
+    return (_ip_ok([ip], scope["ip_allow"], scope["ip_deny"])
+            and _country_ok(country, scope["countries_allow"], scope["countries_deny"]))
+
+
 def posture_ip_in_scope(conn: sqlite3.Connection, ip: str) -> bool:
     """True when the posture / fingerprint engine may probe this address (IP allow/deny only)."""
     scope = get_scope(conn)

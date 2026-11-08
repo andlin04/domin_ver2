@@ -81,6 +81,8 @@ def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap") -> str:
     detection and no raw packets, so no root or cap_net_raw is needed."""
     args = [nmap_bin, "-sT", "-sV", "-Pn", "-n", "--version-light", "-oX", "-",
             "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
+    if ":" in ip:
+        args.insert(1, "-6")
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 30)
     except subprocess.TimeoutExpired as exc:
@@ -150,4 +152,4 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
             findings.extend(cache[key]["findings"])
         s["findings"] = _dedupe(findings)
     note = "" if services else "No open TCP ports found in the scanned range."
-    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": ""}
+    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": "", "raw": xml}

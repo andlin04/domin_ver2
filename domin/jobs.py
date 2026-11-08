@@ -11,7 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, db, scanner, users
+from . import admin, cve, db, posture, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -213,6 +213,27 @@ def _scan_loop(settings: Settings, refresh: bool, idle: float) -> None:
         time.sleep(idle)
 
 
+def _posture_next(settings: Settings, cve_db: cve.Database, client) -> bool:
+    """Run one queued posture scan; False when there was none (or scans are paused)."""
+    with db.connect(settings.db_path) as conn:
+        if admin.effective(settings, conn).scans_paused or not (row := posture.claim(conn)):
+            return False
+        posture.run(conn, row, cve_db, client, settings.nvd_api_key)
+        return True
+
+
+def _posture_loop(settings: Settings, idle: float) -> None:
+    cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
+    client = tools.http_client()
+    while True:
+        try:
+            if _posture_next(settings, cve_db, client):
+                continue
+        except Exception:
+            log.exception("posture thread error")
+        time.sleep(idle)
+
+
 def housekeeping(settings: Settings) -> None:
     with db.connect(settings.db_path) as conn:
         live = admin.effective(settings, conn)
@@ -232,12 +253,18 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     with db.connect(settings.db_path) as conn:  # a crash or restart leaves 'running' rows behind
         conn.execute("UPDATE jobs SET status = 'failed', error = 'worker restarted', finished = ? "
                      "WHERE status = 'running'", (db.now(),))
+        posture.fail_running(conn)
     housekeeping(settings)
     if once:
         for refresh in (False, True):
             while (got := _next(settings, refresh))[1]:
                 run_job(*got)
+        cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
+        client = tools.http_client()
+        while _posture_next(settings, cve_db, client):
+            pass
         return
+    threading.Thread(target=_posture_loop, args=(settings, idle), daemon=True, name="posture").start()
     for refresh, n in ((False, settings.user_workers), (True, settings.refresh_workers)):
         for i in range(n):
             threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,

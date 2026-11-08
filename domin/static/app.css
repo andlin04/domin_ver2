@@ -210,6 +210,10 @@ td.path { white-space: normal; min-width: 320px; }
 .svc:first-of-type { border-top: 0; }
 .svc h3 { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; margin: 0 0 .4rem; font-size: 1rem; }
 .svc h3 small { color: var(--muted); font-weight: 400; }
+.posture-pick { align-items: end; margin-bottom: .6rem; }
+.posture-detail > summary { cursor: pointer; padding: .2rem 0; }
+.posture-detail > summary small { margin-left: .4rem; }
+td form { margin: 0; }
 
 @media (max-width: 860px) {
   .g2 { grid-template-columns: 1fr; }

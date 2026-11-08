@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, posture, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -506,7 +506,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
-           "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now."}
+           "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
+           "posture-queued": "Posture scan queued; reload the page to see progress.",
+           "posture-pending": "Those addresses are already queued or running."}
 PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
 PENDING_MIN = 5
@@ -865,6 +867,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 "cve_count": cve_db.size(), "default_ports": fingerprint.DEFAULT_PORTS}
 
     def security_view(request, u, s, ctx):
+        dom = ctx.pop("posture_domain", None)
+        if dom is None:
+            dom = request.query_params.get("domain", "")
+        with conn() as c:
+            known = posture.domains(c)
+            dom = dom if dom in known else ""
+            ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=posture.hosts(c, dom) if dom else [],
+                       posture_rows=posture.current(c, dom))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
@@ -874,6 +884,37 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
         return security_view(request, u, s, security_ctx())
+
+    @app.post(base + "/security/posture", include_in_schema=False)
+    async def security_posture(request: Request):
+        """Stage 2: queue posture scans for a whole domain (its in-scope addresses), one host name or one address
+        (Renew). Analyst or admin; the worker runs them."""
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            dom = (data.get("domain") or "").strip().lower()
+            host = (data.get("host") or "").strip().lower()
+            ip = (data.get("ip") or "").strip()
+            ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
+
+            def refuse(status: int, error: str):
+                return security_view(request, u, s, security_ctx(status, error=error, form=data) | {
+                    "posture_domain": dom})
+            if not users.can(u["role"], "analyst"):
+                return refuse(403, "Running a posture scan needs the analyst role.")
+            if dom not in posture.domains(c):
+                return refuse(422, "Pick a domain with a finished inventory scan.")
+            if not fingerprint.valid_ports(ports):
+                return refuse(422, "Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024).")
+            found, skipped = posture.targets(c, dom, host=host, ip=ip)
+            if not found:
+                what = host or ip or dom
+                why = f" ({skipped} address(es) outside the posture scope; see Settings)" if skipped else ""
+                return refuse(422, f"No address of {what} to scan{why}.")
+            n = posture.enqueue(c, dom, found, ports, u["name"])
+        return back(f"{base}/security?domain={dom}", "posture-queued" if n else "posture-pending")
 
     @app.post(base + "/security/scan", include_in_schema=False)
     async def security_scan(request: Request):

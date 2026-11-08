@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: security posture (stage 2)
+
+- **Security → Posture**: pick an inventoried domain, then scan the **whole domain** or **one host name**. The scan
+  takes the addresses of the domain's latest inventory scan, keeps those inside the posture scope (Settings: IP and
+  country rules) and fingerprints each (nmap `-sT -sV`), matching the services' CPEs against the CVE database.
+- Analyst or admin starts it, only from this page; an inventory scan never starts one.
+- The **worker** runs the posture queue (one address at a time; respects *Pause scans*); the web process never
+  probes a target. The scope is checked again when a queued scan starts.
+- Results persist in the new `posture_scans` table with their parameters (ports), requester and the raw nmap XML.
+  The table shows the latest result per address with **Renew**; each address expands to its services and CVEs.
+- Dropping a domain drops its posture scans. IPv6 addresses are scanned with `nmap -6`.
+- Migration: the table is created at start-up; nothing else changes.
+
 ## 2026-11-08: admin can drop a domain from the inventory
 
 - An **admin** (only) sees a **Drop from inventory** button on a domain's page. It removes that domain and all of its
