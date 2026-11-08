@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: NVD ranges that end "including X"
+
+- An NVD range closed with versionEndIncluding (affected "through 2.4.55") names the last affected version, not the
+  fix: such findings now show "fixed in: after 2.4.55" instead of "no fixed version published yet". Cache format 3:
+  older entries are refetched once; `python -m domin refresh-fixes` updates stored results.
+- Rollback: revert this change.
+
 ## 2026-11-08: posture scans resume where they stopped; fixed versions on stored results
 
 - A posture scan runs its ports in chunks of 10, one nmap run each, and stores each chunk's result (columns

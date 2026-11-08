@@ -33,7 +33,7 @@ OSV = "https://api.osv.dev/v1"
 NVD = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 SOURCE = "OSV.dev + NVD"
 SEVERITIES = ("critical", "high", "medium", "low", "unknown")
-FORMAT = 2   # cache entry format; 2 = NVD findings carry fixed versions (older entries are refetched once)
+FORMAT = 3   # cache entry format; 2 = NVD findings carry fixed versions, 3 = also "after X" (older: refetched once)
 
 _CVSS3 = {"AV": {"N": .85, "A": .62, "L": .55, "P": .2}, "AC": {"L": .77, "H": .44}, "UI": {"N": .85, "R": .62},
           "CIA": {"H": .56, "L": .22, "N": 0.0}}
@@ -102,13 +102,20 @@ def osv_cves(client: httpx.Client, ecosystem: str, name: str, version: str) -> l
 
 
 def nvd_fixed(cve: dict, part: str, vendor: str, product: str) -> list[str]:
-    """Fixed versions from an NVD record: the versionEndExcluding of the vulnerable CPE ranges for this product
-    (the first version outside the range, e.g. 2.4.67 for "2.4.66 and earlier")."""
+    """Fixed versions from an NVD record's vulnerable CPE ranges for this product: versionEndExcluding is the first
+    fixed version (2.4.67 for "before 2.4.67"); a range closed with versionEndIncluding only names the last affected
+    one, so the fix is "after 2.4.55" (NVD does not say which later version)."""
     prefix = f"cpe:2.3:{part}:{vendor}:{product}:".lower()
-    found = [m["versionEndExcluding"] for c in cve.get("configurations") or [] for n in c.get("nodes") or []
-             for m in n.get("cpeMatch") or []
-             if m.get("vulnerable") and m.get("versionEndExcluding")
-             and str(m.get("criteria", "")).lower().startswith(prefix)]
+    found = []
+    for c in cve.get("configurations") or []:
+        for n in c.get("nodes") or []:
+            for m in n.get("cpeMatch") or []:
+                if not (m.get("vulnerable") and str(m.get("criteria", "")).lower().startswith(prefix)):
+                    continue
+                if m.get("versionEndExcluding"):
+                    found.append(m["versionEndExcluding"])
+                elif m.get("versionEndIncluding"):
+                    found.append(f"after {m['versionEndIncluding']}")
     return list(dict.fromkeys(found))
 
 

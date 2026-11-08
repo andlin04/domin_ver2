@@ -77,7 +77,7 @@ def test_nvd_fixed_version_comes_from_the_products_vulnerable_range():
          "versionEndExcluding": "6.0"},
         {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
          "versionEndIncluding": "2.2.34"}]}]}]}
-    assert cve.nvd_fixed(rec, "a", "apache", "http_server") == ["2.4.67"]
+    assert cve.nvd_fixed(rec, "a", "apache", "http_server") == ["2.4.67", "after 2.2.34"]
     assert cve.nvd_fixed({}, "a", "apache", "http_server") == []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -85,7 +85,7 @@ def test_nvd_fixed_version_comes_from_the_products_vulnerable_range():
                                                                      "descriptions": []}}]})
     with client_with(httpx.MockTransport(handler)) as c:
         found = cve.nvd_cves(c, "a", "apache", "http_server", "2.4.66")
-    assert found[0]["fixed"] == "2.4.67"
+    assert found[0]["fixed"] == "2.4.67 / after 2.2.34"
 
 
 # ---- local database + lookup ----
