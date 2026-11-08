@@ -85,7 +85,20 @@ def test_nvd_fixed_version_comes_from_the_products_vulnerable_range():
                                                                      "descriptions": []}}]})
     with client_with(httpx.MockTransport(handler)) as c:
         found = cve.nvd_cves(c, "a", "apache", "http_server", "2.4.66")
-    assert found[0]["fixed"] == "2.4.67 / after 2.2.34"
+    assert found[0]["fixed"] == "2.4.67"   # 2.4.66 is in the 2.4 range only: the 2.2 branch's fix is left out
+
+
+def test_only_the_scanned_versions_branch_gives_the_fix():
+    rec = {"configurations": [{"nodes": [{"cpeMatch": [
+        {"vulnerable": True, "criteria": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*",
+         "versionStartIncluding": "1.11.4", "versionEndExcluding": "1.26.3"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*",
+         "versionStartIncluding": "1.27.0", "versionEndExcluding": "1.27.4"}]}]}]}
+    assert cve.nvd_fixed(rec, "a", "f5", "nginx", "1.18.0") == ["1.26.3"]
+    assert cve.nvd_fixed(rec, "a", "f5", "nginx", "1.27.1") == ["1.27.4"]
+    assert cve.nvd_fixed(rec, "a", "f5", "nginx", "0.9") == ["1.26.3", "1.27.4"]   # in no range: all
+    assert cve.version_key("8.4p1") < cve.version_key("10.0p2") and cve.in_range(
+        {"versionStartExcluding": "2.4.0", "versionEndIncluding": "2.4.55"}, "2.4.55")
 
 
 # ---- local database + lookup ----

@@ -20,10 +20,10 @@
   <h2>Changes <small>last {{ ch.days }} days, each scan against the address's previous scan · {{ ch.changed }} of
     {{ ch.compared }} addresses with two or more scans changed</small></h2>
   <div class="kpis">
-    <div class="kpi {{ 'alarm' if ch.kpi['new-cve'] }}"><span>New CVEs</span><b>+{{ ch.kpi['new-cve'] }}</b></div>
-    <div class="kpi"><span>CVEs gone</span><b class="up">−{{ ch.kpi['gone-cve'] }}</b></div>
-    <div class="kpi {{ 'warn' if ch.kpi.opened }}"><span>Ports opened</span><b>+{{ ch.kpi.opened }}</b></div>
-    <div class="kpi"><span>Ports closed</span><b>−{{ ch.kpi.closed }}</b></div>
+    <div class="kpi {{ 'alarm' if ch.kpi['new-cve'] }}"><span>New CVEs</span><b>{{ '+' if ch.kpi['new-cve'] }}{{ ch.kpi['new-cve'] }}</b></div>
+    <div class="kpi"><span>CVEs gone</span><b class="{{ 'up' if ch.kpi['gone-cve'] }}">{{ '−' if ch.kpi['gone-cve'] }}{{ ch.kpi['gone-cve'] }}</b></div>
+    <div class="kpi {{ 'warn' if ch.kpi.opened }}"><span>Ports opened</span><b>{{ '+' if ch.kpi.opened }}{{ ch.kpi.opened }}</b></div>
+    <div class="kpi"><span>Ports closed</span><b>{{ '−' if ch.kpi.closed }}{{ ch.kpi.closed }}</b></div>
     <div class="kpi"><span>Version changes</span><b>{{ ch.kpi.version }}</b></div>
   </div>
   {% if ch.rows %}

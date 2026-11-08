@@ -90,6 +90,12 @@ def test_scan_matches_cpes_to_cves(tmp_path, monkeypatch):
     assert by_port[9999]["matched"] is False and by_port[9999]["findings"] == []   # no cpe
 
 
+def test_renamed_cpes_are_looked_up_under_both_names():
+    t = fingerprint.parse_cpe("cpe:/a:matt_johnston:dropbear_ssh_server:2018.76")
+    assert [(a["vendor"], a["product"]) for a in fingerprint.with_aliases(t)] == [
+        ("matt_johnston", "dropbear_ssh_server"), ("dropbear_ssh_project", "dropbear_ssh")]
+
+
 def test_ports_split_into_chunks_in_their_own_order():
     assert fingerprint.port_chunks("22,80,1-12,22") == ["22,80,1-8", "9-12"]
     assert fingerprint.port_chunks("443") == ["443"]

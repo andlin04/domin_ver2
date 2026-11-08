@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     pub = sub.add_parser("import-public", help="replace the inventory with a copy of the public database "
                                                "(own scans are kept; Settings > Sync runs this)")
     pub.add_argument("file", type=Path)
-    sub.add_parser("refresh-fixes", help="fill in fixed versions on stored posture findings that have none")
+    sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
     ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
     ua.add_argument("--role", choices=users.ROLES, default="viewer")

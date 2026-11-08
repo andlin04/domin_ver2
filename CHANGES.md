@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: CVE match review (all 237 cached findings checked against NVD)
+
+- A CVE with one range per release branch (nginx 1.26.x fixed in 1.26.3, 1.27.x in 1.27.4) showed every branch's
+  fix; now only the range holding the scanned version counts (all when none does). Cache format 4: refetched once.
+- Dropbear: nmap names it matt_johnston:dropbear_ssh_server, NVD dropbear_ssh_project:dropbear_ssh (2018.76: 0 vs 5
+  CVEs). Both names are looked up now; found on the next scan of such a host.
+- `refresh-fixes` now also corrects fixed versions that differ from a fresh look-up (still never adds or drops CVEs).
+- Changes panel: a zero count shows "0", not "−0" / "+0".
+- Rollback: revert this change.
+
 ## 2026-11-08: NVD ranges that end "including X"
 
 - An NVD range closed with versionEndIncluding (affected "through 2.4.55") names the last affected version, not the

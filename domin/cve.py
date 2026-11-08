@@ -33,7 +33,8 @@ OSV = "https://api.osv.dev/v1"
 NVD = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 SOURCE = "OSV.dev + NVD"
 SEVERITIES = ("critical", "high", "medium", "low", "unknown")
-FORMAT = 3   # cache entry format; 2 = NVD findings carry fixed versions, 3 = also "after X" (older: refetched once)
+FORMAT = 4   # cache entry format; 2 = NVD fixed versions, 3 = "after X", 4 = only the scanned version's range
+#              (older entries are refetched once)
 
 _CVSS3 = {"AV": {"N": .85, "A": .62, "L": .55, "P": .2}, "AC": {"L": .77, "H": .44}, "UI": {"N": .85, "R": .62},
           "CIA": {"H": .56, "L": .22, "N": 0.0}}
@@ -101,21 +102,32 @@ def osv_cves(client: httpx.Client, ecosystem: str, name: str, version: str) -> l
     return out
 
 
-def nvd_fixed(cve: dict, part: str, vendor: str, product: str) -> list[str]:
+def version_key(v: str) -> tuple:
+    """Sortable key for a version string: number and letter runs ("8.4p1" -> 8, 4, p, 1)."""
+    return tuple((0, int(x), "") if x.isdigit() else (1, 0, x) for x in re.findall(r"[0-9]+|[a-z]+", v.lower()))
+
+
+def in_range(m: dict, version: str) -> bool:
+    """Does an NVD cpeMatch range (versionStart/End Including/Excluding) contain version?"""
+    k = version_key(version)
+    checks = (("versionStartIncluding", lambda b: k >= b), ("versionStartExcluding", lambda b: k > b),
+              ("versionEndIncluding", lambda b: k <= b), ("versionEndExcluding", lambda b: k < b))
+    return all(ok(version_key(m[f])) for f, ok in checks if m.get(f))
+
+
+def nvd_fixed(cve: dict, part: str, vendor: str, product: str, version: str = "") -> list[str]:
     """Fixed versions from an NVD record's vulnerable CPE ranges for this product: versionEndExcluding is the first
     fixed version (2.4.67 for "before 2.4.67"); a range closed with versionEndIncluding only names the last affected
-    one, so the fix is "after 2.4.55" (NVD does not say which later version)."""
+    one, so the fix is "after 2.4.55" (NVD does not say which later version). With several ranges (one per release
+    branch: nginx 1.26.x fixed in 1.26.3, 1.27.x in 1.27.4) only those containing version count; none does: all."""
     prefix = f"cpe:2.3:{part}:{vendor}:{product}:".lower()
-    found = []
-    for c in cve.get("configurations") or []:
-        for n in c.get("nodes") or []:
-            for m in n.get("cpeMatch") or []:
-                if not (m.get("vulnerable") and str(m.get("criteria", "")).lower().startswith(prefix)):
-                    continue
-                if m.get("versionEndExcluding"):
-                    found.append(m["versionEndExcluding"])
-                elif m.get("versionEndIncluding"):
-                    found.append(f"after {m['versionEndIncluding']}")
+    ranges = [m for c in cve.get("configurations") or [] for n in c.get("nodes") or [] for m in n.get("cpeMatch") or []
+              if m.get("vulnerable") and str(m.get("criteria", "")).lower().startswith(prefix)
+              and (m.get("versionEndExcluding") or m.get("versionEndIncluding"))]
+    if version and (own := [m for m in ranges if in_range(m, version)]):
+        ranges = own
+    found = [m["versionEndExcluding"] if m.get("versionEndExcluding") else f"after {m['versionEndIncluding']}"
+             for m in ranges]
     return list(dict.fromkeys(found))
 
 
@@ -138,7 +150,7 @@ def nvd_cves(client: httpx.Client, part: str, vendor: str, product: str, version
                 break
         desc = next((d["value"] for d in cve.get("descriptions") or [] if d.get("lang") == "en"), "")
         cid = cve.get("id", "?")
-        fixed = " / ".join(nvd_fixed(cve, part, vendor, product)) or None
+        fixed = " / ".join(nvd_fixed(cve, part, vendor, product, version)) or None
         out.append(_finding(cid, band(score), score, fixed, desc,
                             f"https://nvd.nist.gov/vuln/detail/{cid}", "NVD"))
     return out

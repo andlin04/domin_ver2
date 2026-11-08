@@ -215,15 +215,15 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
 
 def refresh_fixes(conn: sqlite3.Connection, cve_db: cve.Database, client: httpx.Client | None,
                   api_key: str = "") -> dict:
-    """Fill in fixed versions on stored findings that have none (NVD matches stored before NVD fixed versions were
-    read), from a fresh CVE look-up of the same CPEs. Only the `fixed` field changes: which CVEs a scan found stays
-    as it was, so the Changes panel keeps its history. Returns {scans, findings} updated."""
+    """Bring the fixed versions of stored findings up to date from a fresh CVE look-up of the same CPEs (findings
+    stored before NVD ranges were read, or read less precisely). Only the `fixed` field changes: which CVEs a scan
+    found stays as it was, so the Changes panel keeps its history. Returns {scans, findings} updated."""
     lookups: dict[str, dict] = {}
     scans = updated = 0
     for r in conn.execute("SELECT id, services FROM posture_scans WHERE status = 'done' AND cves > 0").fetchall():
         services, n = json.loads(r["services"] or "[]"), 0
         for s in services:
-            if not any(not f.get("fixed") for f in s.get("findings") or []):
+            if not s.get("findings"):
                 continue
             fixed: dict[str, str] = {}
             for t in (a for c in s.get("cpes") or [] if (p := fingerprint.parse_cpe(c))
@@ -233,7 +233,7 @@ def refresh_fixes(conn: sqlite3.Connection, cve_db: cve.Database, client: httpx.
                     lookups[key] = cve.lookup(cve_db, t, client, api_key)
                 fixed.update({f["cve"]: f["fixed"] for f in lookups[key]["findings"] if f.get("fixed")})
             for f in s.get("findings") or []:
-                if not f.get("fixed") and fixed.get(f["cve"]):
+                if fixed.get(f["cve"]) and f.get("fixed") != fixed[f["cve"]]:
                     f["fixed"] = fixed[f["cve"]]
                     n += 1
         if n:

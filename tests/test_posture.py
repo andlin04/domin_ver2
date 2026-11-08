@@ -96,6 +96,7 @@ def test_changes_compare_each_scan_with_the_previous_one(settings):
         sign_in(h, "ana")
         page = h.get(f"/admin/security?domain={DOM}").text
         assert "Changes" in page and "Port opened" in page and "nginx 1.24 → nginx 1.26" in page
+        assert "−0<" not in page and "+0<" not in page   # a zero count has no sign
 
 
 def test_posture_slots_above_the_setting_take_no_scans(settings, nmap):

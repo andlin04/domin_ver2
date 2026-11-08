@@ -82,14 +82,16 @@ def parse_cpe(cpe: str) -> dict | None:
     return {"kind": "cpe", "part": part, "vendor": vendor, "product": product, "version": version}
 
 
-# nmap's CPE dictionary keeps some vendors NVD has since renamed; newer CVEs are filed under the new name only
-# (nginx 1.24.0: 0 CVEs as igor_sysoev, 2 as f5). Both names are looked up.
-VENDOR_ALIASES = {("igor_sysoev", "nginx"): "f5"}
+# nmap's CPE dictionary keeps some names NVD has since changed; newer CVEs are filed under the new name only
+# (nginx 1.24.0: 0 CVEs as igor_sysoev, 2 as f5; Dropbear 2018.76: 0 as matt_johnston:dropbear_ssh_server, 5 as
+# dropbear_ssh_project:dropbear_ssh). Both names are looked up.
+CPE_ALIASES = {("igor_sysoev", "nginx"): ("f5", "nginx"),
+               ("matt_johnston", "dropbear_ssh_server"): ("dropbear_ssh_project", "dropbear_ssh")}
 
 
 def with_aliases(target: dict) -> list[dict]:
-    alias = VENDOR_ALIASES.get((target.get("vendor"), target.get("product")))
-    return [target, {**target, "vendor": alias}] if alias else [target]
+    alias = CPE_ALIASES.get((target.get("vendor"), target.get("product")))
+    return [target, {**target, "vendor": alias[0], "product": alias[1]}] if alias else [target]
 
 
 def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int = 3,
