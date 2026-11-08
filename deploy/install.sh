@@ -294,6 +294,9 @@ systemctl enable -q domin
 systemctl restart domin
 if [ "$WORKER" = 1 ]; then systemctl enable -q domin-worker; systemctl restart domin-worker
 else systemctl disable -q --now domin-worker 2>/dev/null || true; fi
+# enable --now: a prior single-site uninstall.sh disabled+stopped nginx (empty sites-enabled); a bare
+# `reload` would then fail under `set -e` and abort the reinstall with the public site down. Start+enable first.
+systemctl enable -q --now nginx
 systemctl reload nginx
 
 if [ -n "$EMAIL" ]; then

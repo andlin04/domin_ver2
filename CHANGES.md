@@ -6,6 +6,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - `deploy/uninstall.sh` removes the services, code and nginx config (keeps the database and `/etc/domin.env`);
   `--purge` also deletes the data and the `domin` user. domin is now a clean install/uninstall package.
+- Reinstall fix: `install.sh` now starts/enables nginx (`enable --now`) before reloading it. On a host where domin
+  is nginx's only site, `uninstall.sh` stops+disables nginx, so a bare `reload` on the next install aborted the
+  script (public site down while the app ran). The uninstall → reinstall cycle now completes cleanly.
 
 ## 2026-11-08: security hardening
 
