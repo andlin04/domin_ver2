@@ -11,7 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, cve, db, posture, scanner, tools, users
+from . import admin, cve, db, posture, proxy, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -138,6 +138,12 @@ def run_job(settings: Settings, job: dict) -> None:
             progress("saving")
         except Cancelled:
             log.info("scan %s cancelled", job["domain"])
+            return
+        except proxy.ProxyError as exc:   # routed and the route can't be used: fail closed, with the reason
+            log.warning("scan %s: route: %s", job["domain"], exc)
+            conn.rollback()
+            conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
+                         (db.now(), f"route: {exc}"[:300], job["id"]))
             return
         except TimedOut:
             log.warning("scan %s timed out", job["domain"])

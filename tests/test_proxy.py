@@ -37,7 +37,7 @@ def app_client(settings):
 
 
 def form(**kw) -> dict:
-    return {"enabled": "on", "type": "socks5", "host": "192.0.2.10", "port": "1080", **kw}
+    return {"route": "custom", "posture": "on", "type": "socks5", "host": "192.0.2.10", "port": "1080", **kw}
 
 
 # ---- settings ----
@@ -45,11 +45,12 @@ def form(**kw) -> dict:
 def test_check_validates_the_form():
     for bad in (form(type="ftp"), form(host="socks5://192.0.2.10"), form(host="proxy host"), form(port="0"),
                 form(port="70000"), form(port="x"), form(host=""), form(username="a b"),
-                form(password=SECRET), form(cve="on")):
+                form(password=SECRET), form(type="socks4", cve="on"), form(type="socks4", inventory="on"),
+                form(route="tor-ish"), form(doh="http://dns.example/dns-query")):
         with pytest.raises(ValueError):
             proxy.check(bad, {})
     assert proxy.check(form(host="proxy.corp.example"), {})["host"] == "proxy.corp.example"
-    assert proxy.check(form(enabled="", host=""), {})["enabled"] is False   # off may stay blank
+    assert proxy.check(form(route="direct", host=""), {})["route"] == "direct"   # direct may leave it blank
     assert proxy.check(form(type="http", cve="on"), {})["cve"] is True
 
 
@@ -75,7 +76,7 @@ def test_only_admins_see_and_change_scan_settings(settings):
                    follow_redirects=False)
         assert r.status_code == 303
         page = h.get("/admin/security/scan-settings").text
-        assert "on: socks5 192.0.2.10:1080" in page and "saved; blank keeps it" in page and SECRET not in page
+        assert "Posture scans: socks5 192.0.2.10:1080 · Inventory jobs: direct" in page and "saved; blank keeps it" in page and SECRET not in page
         assert "Scans go through socks5 192.0.2.10:1080" in h.get(f"/admin/security?domain={DOM}").text
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **form(port="99999")})
         assert r.status_code == 422 and "Port" in r.text
@@ -253,10 +254,10 @@ def test_test_button_shows_the_result(settings, monkeypatch):
     fake_connect(monkeypatch, bytes([5, 0]))
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
-        assert "Save a proxy host first" in h.post("/admin/security/scan-settings/test", data={"csrf": csrf}).text
+        assert "nothing to test" in h.post("/admin/security/scan-settings/test", data={"csrf": csrf}).text
         h.post("/admin/security/scan-settings", data={"csrf": csrf, **form()})
         r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf})
-        assert r.status_code == 200 and "Test proxy: SOCKS5 at 192.0.2.10:1080 OK" in r.text
+        assert r.status_code == 200 and "Test route: SOCKS5 at 192.0.2.10:1080 OK" in r.text
 
 
 # ---- CVE look-ups ----
@@ -281,5 +282,7 @@ def test_cve_client_follows_the_checkbox(monkeypatch):
         assert c is made[0] and str(c.proxy.url) == "http://192.0.2.10:3128"
         assert c.proxy.auth == ("scanner", SECRET)
     assert made[0].closed
-    with proxy.cve_client({**ON, "cve": True}, default) as c:   # socks for look-ups: local database only
+    with proxy.cve_client({**ON, "cve": True}, default) as c:   # socks5 carries look-ups too (httpx[socks])
+        assert c is made[1] and str(c.proxy.url) == "socks5://192.0.2.10:1080"
+    with proxy.cve_client({**ON, "type": "socks4", "cve": True}, default) as c:   # socks4 can't: local database only
         assert c is None

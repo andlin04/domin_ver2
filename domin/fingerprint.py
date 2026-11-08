@@ -6,7 +6,8 @@ and version nmap recognises, and the CPEs it reports. No raw-socket scan and no 
 (:func:`cve.lookup`) to list the known vulnerabilities of each service version. The posture
 scope (Settings) governs which addresses a scan may probe; the caller checks it before probing.
 
-This module only speaks to the target over TCP, through the scan proxy when one is on (proxy.py).
+This module only speaks to the target over TCP, through the scan route's hop when there is one (proxy.py:
+custom proxy, Tor or a Mullvad relay).
 It never reaches the internet itself; the CVE layer it calls does, through the configured source
 and local database.
 """
@@ -104,7 +105,7 @@ def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int
 
 def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3,
              via: dict | None = None) -> str:
-    """Run a connect + service-version scan and return the XML. via: the scan proxy settings when it is on; nmap
+    """Run a connect + service-version scan and return the XML. via: the route's hop (proxy.hop) when there is one; nmap
     then runs under proxychains4 with a per-run config (mode 0600, deleted afterwards). Fails closed: a missing
     proxychains4 or an unresolvable or unreachable proxy is an NmapError, never a direct scan."""
     args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin)
@@ -178,8 +179,8 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
 
     Returns {target, ip, services, note, error, raw, params}. Each service carries its CPEs' findings
     (deduped, worst first) and a `matched` flag (did any CPE yield a cve target to look up). params is
-    the nmap command line that ran, plus the route ("via socks5 192.0.2.10:1080") when via (the scan proxy
-    settings) is on."""
+    the nmap command line that ran, plus the route ("via socks5 192.0.2.10:1080",
+    "via mullvad se-got-wg-socks5-001 (se, follow host)") when via (the hop, proxy.hop) is on."""
     via = via if via and via.get("enabled") else None
     params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
     if via:

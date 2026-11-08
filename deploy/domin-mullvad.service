@@ -1,0 +1,10 @@
+# domin: apply the Mullvad tunnel settings saved on the Scan settings page (started by domin-mullvad.path).
+# mullvad-tunnel.sh removes the request file first and writes /var/lib/domin/mullvad.status for the page.
+[Unit]
+Description=domin: apply the Mullvad tunnel settings
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/domin/app/deploy/mullvad-tunnel.sh apply

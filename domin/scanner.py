@@ -4,6 +4,10 @@ Discovery: certificate transparency (crt.sh), common host names, the domain's MX
 active) when installed. Names resolve over the old version's resolver set. Brute-forced names are dropped when the
 zone has wildcard DNS. Address owner comes from RDAP (ipwhois), cached per announced prefix and per address in the
 database; country from the DB-IP table when loaded.
+
+Routed (Scan settings: a route ticked for inventory jobs; external zones only): crt.sh and RDAP go through the hop
+as an httpx proxy, DNS goes over DoH through the same client, amass is skipped. The hop must answer first (fail
+closed: the job fails with the reason).
 """
 from __future__ import annotations
 
@@ -22,14 +26,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import dns.exception
+import dns.message
 import dns.query
+import dns.rcode
+import dns.rdatatype
 import dns.resolver
 import dns.reversename
 import dns.zone
 import httpx
 import pycountry
 
-from . import admin, db, tools
+from . import admin, db, proxy, tools
 from .config import Settings
 from .validate import is_internal, is_under, normalize_domain
 
@@ -77,6 +84,38 @@ class Paced:
         if wait > 0:
             self.sleep(wait)
         return self.inner.resolve(name, rtype)
+
+
+class DohResolver:
+    """DNS over HTTPS (RFC 8484, POST) through an httpx client, for a routed scan: UDP DNS can't go through a SOCKS
+    or http proxy, so names are resolved by the DoH server through the same proxy as the look-ups. Same interface
+    as dns.resolver.Resolver.resolve for this module: an iterable of rdata, DNSException on failure."""
+
+    def __init__(self, url: str, client: httpx.Client, timeout: float = 15.0):
+        self.url, self.client, self.timeout = url, client, timeout
+        self.nameservers = [url]
+
+    def resolve(self, name, rtype):
+        q = dns.message.make_query(str(name), rtype)
+        try:
+            r = self.client.post(self.url, content=q.to_wire(), timeout=self.timeout,
+                                 headers={"accept": "application/dns-message",
+                                          "content-type": "application/dns-message"})
+            r.raise_for_status()
+            msg = dns.message.from_wire(r.content)
+        except (httpx.HTTPError, dns.exception.DNSException, ValueError) as exc:
+            raise dns.exception.DNSException(f"DoH {self.url}: {str(exc)[:80]}") from None
+        if not q.is_response(msg):
+            raise dns.exception.DNSException(f"DoH {self.url}: the answer does not match the query")
+        if msg.rcode() == dns.rcode.NXDOMAIN:
+            raise dns.resolver.NXDOMAIN
+        if msg.rcode() != dns.rcode.NOERROR:
+            raise dns.exception.DNSException(f"DoH {self.url}: {dns.rcode.to_text(msg.rcode())}")
+        want = dns.rdatatype.from_text(rtype)
+        found = [rd for rrset in msg.answer if rrset.rdtype == want for rd in rrset]
+        if not found:
+            raise dns.resolver.NoAnswer
+        return found
 
 
 def resolve(host: str, resolver: dns.resolver.Resolver | None = None) -> list[str]:
@@ -217,6 +256,25 @@ def _rdap(ip: str) -> dict:
             "country": country_name(res.get("asn_country_code") or net.get("country"))}
 
 
+def rdap_http(ip: str, client: httpx.Client) -> dict:
+    """Address owner from rdap.org over the given client: for a routed scan (ipwhois uses urllib, DNS and whois,
+    which a SOCKS proxy can't carry). IP RDAP has no origin AS outside ARIN's extension, so asn is often blank."""
+    got = tools.get_json(client, f"https://rdap.org/ip/{ip}", timeout=30)
+    if got is None:
+        raise ValueError("not found")
+    data = got[1]
+    cidr = next(iter(data.get("cidr0_cidrs") or []), {})
+    prefix = f"{cidr.get('v4prefix') or cidr.get('v6prefix')}/{cidr['length']}" if "length" in cidr else ""
+    descr = ""
+    for ent in data.get("entities") or []:
+        if "registrant" in (ent.get("roles") or []):
+            descr = next((i[3] for i in (ent.get("vcardArray") or [None, []])[1] if i and i[0] == "fn"), "")
+            break
+    asn = next(iter(data.get("arin_originas0_originautnums") or []), "")
+    return {"asn": str(asn), "prefix": prefix, "netname": data.get("name") or "", "descr": str(descr or ""),
+            "country": country_name(data.get("country"))}
+
+
 class Enricher:
     """Owner info per address: database cache (30 days), then the scan's own prefix cache, then RDAP.
 
@@ -276,11 +334,24 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         client: httpx.Client | None = None, resolver: dns.resolver.Resolver | None = None,
         enricher: Enricher | None = None) -> list[dict]:
     internal = is_internal(domain, settings.internal_zones)
+    via = None
+    if not internal:   # internal zones never leave the LAN: always direct
+        cfg = proxy.get(conn)
+        via = proxy.hop(conn, cfg, "inventory", client=client)   # ProxyError: the job fails with the reason
+    if via:   # routed: fail closed, the hop must answer before anything goes out
+        proxy.handshake(via)
+        progress(f"route: {proxy.route(via)}")
+        log.info("scan %s via %s", domain, proxy.route(via))
+        client = tools.http_client(proxy=proxy.http_proxy(via))   # never the direct client passed in
+        own_client = True
+        resolver = DohResolver(cfg["doh"], client)
+        enricher = enricher or Enricher(conn, lookup=lambda ip: rdap_http(ip, client))
+    else:
+        own_client = client is None
+        client = client or tools.http_client()
     resolver = resolver or _resolver(settings.internal_dns if internal else None)
     if internal:
         resolver = Paced(resolver, INTERNAL_QPS)
-    own_client = client is None
-    client = client or tools.http_client()
     try:
         progress("discovering host names")
         if internal:   # internal scan: discover by DNS queries to the LAN DNS only, no crt.sh/amass egress
@@ -291,17 +362,28 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
             progress(f"reverse look-ups of {len(sweep)} addresses")
             found |= from_ptr(sweep, zone, domain, resolver, settings.scan_workers)
         else:
-            found = ({domain} | from_crtsh(domain, client) | from_dns(domain, resolver)
-                     | from_amass(domain, settings.amass))
+            found = {domain} | from_crtsh(domain, client) | from_dns(domain, resolver)
+            if via:   # amass sends its own UDP DNS, which no proxy carries: skipped, never run direct
+                log.info("amass skipped for %s: routed via %s", domain, proxy.route(via))
+                progress("amass skipped (routed scan)")
+            else:
+                found |= from_amass(domain, settings.amass)
         guessed = {f"{w}.{domain}" for w in COMMON} - found
         wildcard = wildcard_ips(domain, resolver)
+        candidates = sorted(found | guessed)[: settings.max_hosts]
+        progress(f"resolving {len(candidates)} names")
+        with ThreadPoolExecutor(settings.scan_workers) as pool:
+            resolved = dict(zip(candidates, pool.map(lambda h: resolve(h, resolver), candidates), strict=True))
+        # the client stays open: a routed scan's DNS and owner look-ups go through it
+        return _records(conn, hosts_of(resolved, guessed, wildcard, internal), progress, internal, enricher)
     finally:
         if own_client:
             client.close()
-    candidates = sorted(found | guessed)[: settings.max_hosts]
-    progress(f"resolving {len(candidates)} names")
-    with ThreadPoolExecutor(settings.scan_workers) as pool:
-        resolved = dict(zip(candidates, pool.map(lambda h: resolve(h, resolver), candidates), strict=True))
+
+
+def hosts_of(resolved: dict[str, list[str]], guessed: set[str], wildcard: set[str], internal: bool
+             ) -> dict[str, list[str]]:
+    """Resolved names to keep: guesses only when they exist outside the wildcard; LAN answers only internally."""
     hosts = {}
     for h, ips in resolved.items():
         if h in guessed and (not ips or (wildcard and set(ips) <= wildcard)):
@@ -309,6 +391,12 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         hosts[h] = ips
     if internal:   # a LAN resolver (e.g. Pi-hole) forwards what it has no local record for: keep LAN answers only
         hosts = {h: lan for h, ips in hosts.items() if (lan := [ip for ip in ips if _lan_address(ip)]) or not ips}
+    return hosts
+
+
+def _records(conn: sqlite3.Connection, hosts: dict[str, list[str]], progress: Progress, internal: bool,
+             enricher: Enricher | None) -> list[dict]:
+    """Owner info per address (Enricher), then one record per host and address."""
     unique = sorted({ip for ips in hosts.values() for ip in ips})
     progress(f"looking up owners of {len(unique)} addresses")
     enricher = enricher or Enricher(conn, internal=internal)

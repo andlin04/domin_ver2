@@ -172,7 +172,14 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     if not users.posture_ok(users.get_scope(conn), row["ip"], row["country"]):
         _finish(conn, row["id"], "failed", {"error": "outside the posture scope (Settings changed after queueing)"})
         return
-    via = proxy.get(conn)   # read per scan: a change on the Scan settings page applies to the next one
+    cfg = proxy.get(conn)   # read per scan: a change on the Scan settings page applies to the next one
+    try:
+        via = proxy.hop(conn, cfg, "posture", row["ip"], row["country"], client)
+    except proxy.ProxyError as exc:   # fail closed: never a direct scan instead
+        _finish(conn, row["id"], "failed", {"error": f"route: {exc}",
+                                            "params": f"via {proxy.describe(cfg, 'posture')}"})
+        log.info("posture %s %s: route: %s", row["domain"], row["ip"], exc)
+        return
     try:
         with proxy.cve_client(via, client) as lookups:
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],

@@ -1,0 +1,11 @@
+# domin: the Scan settings page drops /var/lib/domin/mullvad.request when Mullvad tunnel settings are saved;
+# domin-mullvad.service (root) then applies them. The web app itself never touches WireGuard.
+[Unit]
+Description=domin: watch for Mullvad tunnel requests from the Scan settings page
+
+[Path]
+PathExists=/var/lib/domin/mullvad.request
+Unit=domin-mullvad.service
+
+[Install]
+WantedBy=multi-user.target

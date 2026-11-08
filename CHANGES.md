@@ -2,6 +2,48 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: Tor and Mullvad routes for posture scans and inventory jobs
+
+- Posture · **Scan settings**: a route (direct / custom proxy / Tor / Mullvad) and tick boxes for which jobs take it
+  (posture scans, inventory jobs). A line at the top shows the state ("Posture scans: Mullvad, follow host (fallback
+  se) · Inventory jobs: direct"). Settings saved before keep working (custom proxy for posture scans).
+- **Tor**: the local tor client's SOCKS5 (default 127.0.0.1:9050). One exit for all scans, no per-host country.
+- **Mullvad**: per target a relay's SOCKS5 (socks_name:1080, reachable only inside the Mullvad tunnel), picked at
+  random among active relays. Breakout: **follow host** (the address's DB-IP country, else the fallback country, else
+  the scan fails), **fixed** (country, optional city), **automatic** (the address's country, else the fallback, else
+  any relay). Inventory jobs use the fixed or fallback country. The relay list (api.mullvad.net, public) is cached a
+  day; **Refresh relay list** fetches it now. The page shows list age and count and whether the in-tunnel SOCKS5
+  (10.64.0.1:1080) answers.
+- Mullvad tunnel credentials on the page: account number, or a WireGuard private key with its tunnel address (from
+  Mullvad's WireGuard configuration generator), optional entry country. Never shown again (blank keeps, a tick
+  clears); stored in the database. Saving changed credentials writes `/var/lib/domin/mullvad.request` (a time stamp,
+  no secrets); the root unit `domin-mullvad.path` runs `deploy/mullvad-tunnel.sh apply`, whose result the page shows.
+- `deploy/mullvad-tunnel.sh up|down|status|apply|allow` (root): WireGuard interface `mullvad` with
+  `AllowedIPs = 10.64.0.0/10` only (no DNS change, no default route). A private key is used as given; with an account
+  number only, a key is generated once and registered with Mullvad. Credentials from the database, else
+  `/etc/domin/mullvad-account` (root, 0600/0400). Writes the drop-ins
+  `/etc/systemd/system/{domin-worker,domin}.service.d/20-routes.conf` (`IPAddressAllow=10.64.0.0/10 127.0.0.1/32`)
+  and restarts those services when they change.
+- Posture scans: nmap under proxychains4 through the chosen hop; the route is kept in the scan parameters ("via mullvad
+  se-got-wg-socks5-001 (se, follow host)"), never credentials. A private address through Tor or Mullvad fails with
+  "private address can't go through Tor/Mullvad". CVE look-ups can now go through socks5 too (not socks4).
+- Inventory jobs (external zones): crt.sh and RDAP through the hop (httpx with SOCKS), DNS over DoH through the same
+  client (server on the page, default https://dns.quad9.net/dns-query), amass skipped (its UDP DNS can't be proxied).
+  Address owners come from rdap.org then (ASN often blank). Internal zones always stay direct. Fail closed: the hop
+  must answer first, else the job fails with "route: ...".
+- New dependency: `httpx[socks]` (socksio 1.0.0). `deploy/install.sh` installs wireguard-tools and tor (default
+  config) and the `domin-mullvad` path unit.
+
+Host steps:
+1. `sudo bash deploy/install.sh ...` as usual (packages, socksio, path unit). A host whose egress goes through an http
+   proxy only (e.g. Squid) needs `HTTPSProxy` in `/etc/tor/torrc` for Tor.
+2. Mullvad: save the credentials on Scan settings (or put the account number in `/etc/domin/mullvad-account`, root,
+   0600, and run `sudo bash /opt/domin/app/deploy/mullvad-tunnel.sh up`).
+3. Tor without Mullvad: `sudo bash /opt/domin/app/deploy/mullvad-tunnel.sh allow` (the worker drop-in for
+   127.0.0.1).
+
+No migration. Rollback: redeploy the previous build; `mullvad-tunnel.sh down`.
+
 ## 2026-11-08: scan proxy for posture scans
 
 - Posture · **Scan settings** (admin only): a proxy every posture scan goes through. Type socks5 / socks4 / http,

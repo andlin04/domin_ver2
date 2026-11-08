@@ -15,8 +15,10 @@ esac
 [ "$(id -u)" = 0 ] || { echo "uninstall.sh: run as root" >&2; exit 1; }
 
 # Services
-systemctl disable -q --now domin domin-worker 2>/dev/null || true
-rm -f /etc/systemd/system/domin.service /etc/systemd/system/domin-worker.service
+systemctl disable -q --now domin domin-worker domin-mullvad.path 2>/dev/null || true
+rm -f /etc/systemd/system/domin.service /etc/systemd/system/domin-worker.service \
+  /etc/systemd/system/domin-mullvad.path /etc/systemd/system/domin-mullvad.service
+# the Mullvad tunnel (wg-quick@mullvad, /etc/wireguard/mullvad.*) stays: deploy/mullvad-tunnel.sh down stops it
 rm -rf /etc/systemd/system/domin.service.d /etc/systemd/system/domin-worker.service.d
 systemctl daemon-reload
 

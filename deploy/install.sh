@@ -62,7 +62,9 @@ APP=/opt/domin DATA=/var/lib/domin
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 >/dev/null   # proxychains4: scan proxy
+# proxychains4: scan routes; wireguard-tools: the Mullvad tunnel (deploy/mullvad-tunnel.sh); tor: the Tor route
+# (its default config: SOCKS5 on 127.0.0.1:9050; a host with proxy-only egress needs HTTPSProxy in /etc/tor/torrc)
+apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 wireguard-tools tor >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
 # Automatic security updates (unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host already
 # has an apt periodic setup of its own (kept as it is).
@@ -289,7 +291,11 @@ ln -sf /etc/nginx/sites-available/domin /etc/nginx/sites-enabled/domin
 rm -f /etc/nginx/sites-enabled/default
 nginx -t -q
 
+# Mullvad tunnel settings saved on the Scan settings page: a root path unit runs mullvad-tunnel.sh apply
+install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
+
 systemctl daemon-reload
+systemctl enable -q --now domin-mullvad.path
 systemctl enable -q domin
 systemctl restart domin
 if [ "$WORKER" = 1 ]; then systemctl enable -q domin-worker; systemctl restart domin-worker
