@@ -35,7 +35,7 @@
     <button class="btn" type="submit">Show</button>
   </form>
   {% if posture_domain and user.role in ('admin', 'analyst') %}
-  <form method="post" action="{{ base }}/security/posture" class="inline posture-run">
+  <form method="post" action="{{ base }}/security/posture" class="inline posture-run" data-posture-run>
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="domain" value="{{ posture_domain }}">
     <label class="field">Scan target
@@ -58,6 +58,9 @@
 
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% with pp_base=base, pp_domain=posture_domain, pp_pending=report.kpi.pending %}
+{% include "_posture_progress.html" %}
+{% endwith %}
 
 {% with rep=report, renew_base=base, can_run=user.role in ('admin', 'analyst'), show_domain=not posture_domain %}
 {% include "_posture_report.html" %}

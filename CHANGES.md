@@ -2,6 +2,20 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: posture scans show a progress dialog
+
+- **Scan / renew** and the per-address **Renew** (Posture page and the domain page) now queue the scans in the
+  background and open a progress dialog: finished / running / queued / failed counts, a progress bar, the address
+  being scanned, the elapsed time and each finished address with its worst severity and CVE count (or its error).
+  It checks every 2 seconds while open. When all are done it offers **Show results** (reloads the report once).
+- Closing the dialog does not stop the scans; a "N posture scan(s) queued or running · show progress" pill on the
+  page opens it again. Nothing on the page reloads by itself.
+- New `GET /admin/security/posture/status?ids=…[&pending=1&domain=…]` (any signed-in user) returns the progress as
+  JSON; the scan form returns the batch (the queued row ids) as JSON when asked with `Accept: application/json`.
+  Without JavaScript the forms post and redirect as before.
+- No migration.
+- Rollback: redeploy the previous build.
+
 ## 2026-11-08: internal scans find host names by DNS queries
 
 - A scan of an internal domain now finds its host names with DNS queries to the internal DNS servers: a zone

@@ -38,6 +38,9 @@
     <h2 class="section-title">Security posture <small>latest result per address</small></h2>
     <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name }}">Open in Posture{% if user.role in ('admin', 'analyst') %} · scan / renew{% endif %}</a>
   </div>
+  {% with pp_base=admin_base, pp_domain=domain.name, pp_pending=posture_report.kpi.pending %}
+  {% include "_posture_progress.html" %}
+  {% endwith %}
   {% with rep=posture_report, renew_base=admin_base, can_run=user.role in ('admin', 'analyst'), show_domain=false %}
   {% include "_posture_report.html" %}
   {% endwith %}

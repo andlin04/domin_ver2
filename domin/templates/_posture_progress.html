@@ -1,0 +1,16 @@
+{# Posture scan progress: the reopen pill and the dialog (app.js, postureProgress). pp_base = admin base,
+   pp_domain = domain shown ("" = all), pp_pending = addresses queued or running now. Nothing reloads by itself. #}
+<p class="pp-reopen" data-pp-reopen{% if not pp_pending %} hidden{% endif %}>
+  <a class="pill running" href="{{ pp_base }}/security{% if pp_domain %}?domain={{ pp_domain }}{% endif %}">
+    <span data-pp-count>{{ pp_pending }}</span> posture scan(s) queued or running · show progress</a></p>
+<dialog class="confirm pp" id="posture-progress" aria-labelledby="pp-title"
+  data-status="{{ pp_base }}/security/posture/status" data-domain="{{ pp_domain }}">
+  <div class="pp-head"><h2 id="pp-title">Posture scans</h2><span class="muted" data-pp-elapsed></span></div>
+  <p class="pp-line" data-pp-line role="status">Starting…</p>
+  <div class="bar" role="progressbar" aria-label="Posture scans finished" aria-valuemin="0" aria-valuemax="100"><i data-pp-fill></i></div>
+  <p class="muted small-print" data-pp-now></p>
+  <ul class="pp-items" data-pp-items></ul>
+  <p class="note ok" data-pp-done hidden>All posture scans of this request have finished.</p>
+  <menu><button type="button" class="btn" data-pp-close>Close</button>
+    <button type="button" class="btn primary" data-pp-show hidden>Show results</button></menu>
+</dialog>

@@ -86,23 +86,64 @@ def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("DELETE FROM posture_profiles WHERE name = ?", (name,)).rowcount > 0
 
 
-def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict | str, requested_by: str) -> int:
+def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict | str, requested_by: str,
+            batch: list[int] | None = None) -> int:
     """Queue one posture scan per address with the profile's parameters (prof: name, ports, intensity, timing,
     timeout; a bare port list means the default knobs); an address already queued or running for the domain is
-    left alone. Returns how many were queued."""
+    left alone. Returns how many were queued. batch, when given, gets the row id per address (new or already
+    pending): the set the progress dialog follows."""
     if isinstance(prof, str):
         prof = {"name": "", "ports": prof, "intensity": 2, "timing": 3, "timeout": 120}
     n = 0
     for t in found:
-        if conn.execute("SELECT 1 FROM posture_scans WHERE domain = ? AND ip = ? AND status IN ('queued', 'running')",
-                        (domain, t["ip"])).fetchone():
+        row = conn.execute("""SELECT id FROM posture_scans WHERE domain = ? AND ip = ?
+                              AND status IN ('queued', 'running')""", (domain, t["ip"])).fetchone()
+        if row:
+            if batch is not None:
+                batch.append(row["id"])
             continue
-        conn.execute("""INSERT INTO posture_scans (domain, ip, hosts, country, ports, status, requested_by, created,
-                        profile, intensity, timing, timeout) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)""",
-                     (domain, t["ip"], ",".join(t["hosts"]), t["country"], prof["ports"], requested_by, db.now(),
-                      prof["name"], prof["intensity"], prof["timing"], prof["timeout"]))
+        cur = conn.execute("""INSERT INTO posture_scans (domain, ip, hosts, country, ports, status, requested_by,
+                              created, profile, intensity, timing, timeout) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?,
+                              ?, ?, ?)""",
+                           (domain, t["ip"], ",".join(t["hosts"]), t["country"], prof["ports"], requested_by,
+                            db.now(), prof["name"], prof["intensity"], prof["timing"], prof["timeout"]))
+        if batch is not None:
+            batch.append(cur.lastrowid)
         n += 1
     return n
+
+
+def pending_ids(conn: sqlite3.Connection, domain: str = "") -> list[int]:
+    """Ids of the queued and running rows (of one domain, or all)."""
+    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    return [r[0] for r in conn.execute(f"SELECT id FROM posture_scans WHERE status IN ('queued', 'running') {where} "
+                                       "ORDER BY id", args)]
+
+
+def _worst(services: list[dict]) -> str:
+    sevs = {f["severity"] for s in services for f in s.get("findings") or []}
+    return next((x for x in SEVERITIES if x in sevs), "none")
+
+
+def progress(conn: sqlite3.Connection, ids: list[int]) -> dict:
+    """Progress of a set of posture_scans rows (one request's batch) for the progress dialog: counts, the addresses
+    running now, seconds since the first was queued, and one item per row with its result."""
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT id, domain, ip, hosts, status, created, started, finished, services, open_ports, cves, high, error
+            FROM posture_scans WHERE id IN ({",".join("?" * len(ids))}) ORDER BY id""", ids)] if ids else []
+    count = {s: sum(1 for r in rows if r["status"] == s) for s in ("queued", "running", "done", "failed")}
+    finished = count["queued"] + count["running"] == 0
+    elapsed = 0
+    if rows:
+        start = datetime.fromisoformat(min(r["created"] for r in rows))
+        end = datetime.fromisoformat(max(r["finished"] or "" for r in rows)) if finished else datetime.now()
+        elapsed = max(0, int((end - start).total_seconds()))
+    items = [{"id": r["id"], "domain": r["domain"], "ip": r["ip"], "host": (r["hosts"] or "").split(",")[0],
+              "status": r["status"], "finished": r["finished"] or "", "open_ports": r["open_ports"], "cves": r["cves"],
+              "high": r["high"], "error": r["error"] or "",
+              "worst": _worst(json.loads(r["services"] or "[]")) if r["status"] == "done" else ""} for r in rows]
+    return {"ids": [r["id"] for r in rows], "total": len(rows), **count, "finished": finished, "elapsed": elapsed,
+            "current": [i["host"] or i["ip"] for i in items if i["status"] == "running"], "items": items}
 
 
 def claim(conn: sqlite3.Connection) -> dict | None:

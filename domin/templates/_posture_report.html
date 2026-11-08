@@ -54,7 +54,7 @@
         · {{ (p.finished or p.created)[:16].replace('T', ' ') }}{% if p.stale %} <em class="flat">stale</em>{% endif %}
         {% if p.pending %} · <em>renew {{ p.pending }}</em>{% endif %}</span>
       {% if can_run and not p.pending and p.status not in ('queued', 'running') %}
-      <form method="post" action="{{ renew_base }}/security/posture" class="inline renew">
+      <form method="post" action="{{ renew_base }}/security/posture" class="inline renew" data-posture-run>
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ p.domain }}">
         <input type="hidden" name="ip" value="{{ p.ip }}"><input type="hidden" name="profile" value="{{ p.profile or 'default' }}">
         <input type="hidden" name="ports" value="{{ p.ports }}">

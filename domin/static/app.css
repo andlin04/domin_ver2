@@ -260,6 +260,26 @@ dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius); 
 dialog.confirm::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
 dialog.confirm p { margin: 0 0 1.1rem; line-height: 1.45; }
 dialog.confirm menu { display: flex; gap: .6rem; justify-content: flex-end; margin: 0; padding: 0; }
+/* posture scan progress dialog (shell: dialog.confirm) */
+dialog.pp { width: min(36rem, calc(100vw - 2rem)); max-width: none; }
+dialog.pp .pp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+dialog.pp h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
+dialog.pp p.pp-line { margin: 0 0 .5rem; font-weight: 600; }
+dialog.pp p.small-print { text-align: left; margin: .45rem 0 .6rem; min-height: 1em; }
+dialog.pp p.note { margin: 0 0 .8rem; }
+dialog.pp .bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width .4s; }
+.pp-items { list-style: none; margin: 0 0 .9rem; padding: 0; max-height: 45vh; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--r-ctl); }
+.pp-items:empty { display: none; }
+.pp-items li { display: flex; align-items: baseline; gap: .5rem; padding: .35rem .6rem; border-bottom: 1px solid var(--border); }
+.pp-items li:last-child { border-bottom: 0; }
+.pp-items li .pill { flex: none; min-width: 4.8rem; text-align: center; }
+.pp-items li span.what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-items li small { color: var(--muted); white-space: nowrap; }
+.pp-items li small.bad-text { color: var(--down); white-space: normal; }
+.pp-reopen { margin: 0 0 1rem; }
+.pp-reopen .pill { text-transform: none; letter-spacing: 0; font-size: .8rem; padding: .25rem .7rem; }
 .notice-banner { position: relative; }
 .notice-banner form.dismiss { position: absolute; top: .8rem; right: 1rem; margin: 0; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }

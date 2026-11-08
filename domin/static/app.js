@@ -379,6 +379,113 @@ document.querySelectorAll("select[data-autosubmit]").forEach((s) => s.addEventLi
   s.form.submit();
 }));
 
+// posture scan progress: the scan forms post in the background and a dialog follows that batch (posture_scans row
+// ids) by polling the status endpoint every 2 s while open. Closing it leaves the scans running; the pill reopens it.
+// Nothing reloads by itself: "Show results" reloads once. Without the dialog markup the forms post as usual.
+function postureProgress() {
+  const dlg = $("#posture-progress");
+  if (!dlg) return;
+  const KEY = "domin-posture-batch";
+  const reopen = $("[data-pp-reopen]"), fill = $("[data-pp-fill]", dlg), bar = $(".bar", dlg);
+  const st = { ids: [], last: null, at: 0, timer: 0, tick: 0, error: "" };
+  const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || []; } catch (e) { return []; } };
+  const keep = (ids) => { try { if (ids.length) sessionStorage.setItem(KEY, JSON.stringify(ids)); else sessionStorage.removeItem(KEY); } catch (e) { /* not kept */ } };
+  const secs = (s) => (s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`);
+  const result = (it) => {
+    if (it.status === "failed") return `<small class="bad-text">${esc(it.error || "failed")}</small>`;
+    if (it.status !== "done") return "";
+    return `<small>${it.open_ports} port(s) · ${it.cves} CVE(s)${it.high ? ` · ${it.high} high+` : ""}</small>`;
+  };
+  const pill = (it) => {
+    if (it.status === "done") return `<span class="pill sev-${["critical", "high", "medium", "low"].includes(it.worst) ? it.worst : "unknown"}">${esc(it.worst)}</span>`;
+    return `<span class="pill ${esc(it.status)}">${esc(it.status)}</span>`;
+  };
+  function clock() {   // between polls only the elapsed time moves
+    const d = st.last;
+    if (!d) return;
+    const elapsed = d.elapsed + (d.finished ? 0 : Math.round((Date.now() - st.at) / 1000));
+    $("[data-pp-elapsed]", dlg).textContent = d.total ? secs(elapsed) : "";
+  }
+  function paint() {
+    const d = st.last;
+    if (st.error) { $("[data-pp-line]", dlg).textContent = st.error; }
+    if (!d) return;
+    const end = d.done + d.failed, pct = d.total ? Math.round(100 * end / d.total) : 0;
+    clock();
+    if (!st.error) {
+      $("[data-pp-line]", dlg).textContent = d.total
+        ? `${end}/${d.total} finished · ${d.running} running · ${d.queued} queued${d.failed ? ` · ${d.failed} failed` : ""}`
+        : "No posture scans to follow.";
+    }
+    fill.style.width = `${pct}%`;
+    bar.setAttribute("aria-valuenow", pct);
+    $("[data-pp-now]", dlg).textContent = d.current.length ? `Scanning: ${d.current.join(", ")}` : "";
+    const shown = [...d.items.filter((i) => i.status === "running"),
+                   ...d.items.filter((i) => i.status === "done" || i.status === "failed")
+                     .sort((a, b) => (a.finished < b.finished ? 1 : -1))];
+    $("[data-pp-items]", dlg).innerHTML = shown.map((it) => `<li>${pill(it)}<span class="what"><b>${esc(it.ip)}</b>` +
+      `${it.host ? ` <span class="muted">${esc(it.host)}</span>` : ""}</span>${result(it)}</li>`).join("");
+    $("[data-pp-done]", dlg).hidden = !(d.finished && d.total);
+    $("[data-pp-show]", dlg).hidden = !(d.finished && d.total);
+    const left = d.queued + d.running;
+    if (reopen) { reopen.hidden = !left; $("[data-pp-count]", reopen).textContent = left; }
+  }
+  async function poll(extra = "") {
+    clearTimeout(st.timer);
+    try {
+      const r = await fetch(`${dlg.dataset.status}?ids=${st.ids.join(",")}${extra}`, { headers: { Accept: "application/json" } });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      st.last = d; st.at = Date.now(); st.error = "";
+      st.ids = d.ids;
+      keep(d.finished ? [] : d.ids);
+    } catch (e) {
+      st.error = `Lost contact with the server (${e.message}), retrying…`;
+    }
+    paint();
+    if (dlg.open && !(st.last?.finished && !st.error)) st.timer = setTimeout(poll, 2000);
+  }
+  function open(ids, extra = "", error = "") {
+    st.ids = [...new Set([...load(), ...ids])];
+    st.last = null; st.error = error;
+    $("[data-pp-line]", dlg).textContent = error || "Loading…";
+    $("[data-pp-now]", dlg).textContent = $("[data-pp-elapsed]", dlg).textContent = "";
+    $("[data-pp-items]", dlg).innerHTML = "";
+    fill.style.width = "0";
+    $("[data-pp-done]", dlg).hidden = $("[data-pp-show]", dlg).hidden = true;
+    if (!dlg.open) dlg.showModal();
+    clearInterval(st.tick);
+    if (error) return;   // the request was refused: show why, nothing to follow
+    st.tick = setInterval(clock, 1000);
+    poll(extra);
+  }
+  dlg.addEventListener("close", () => { clearTimeout(st.timer); clearInterval(st.tick); });
+  $$("[data-pp-close]", dlg).forEach((b) => b.addEventListener("click", () => dlg.close()));
+  $("[data-pp-show]", dlg).addEventListener("click", () => { keep([]); location.reload(); });
+  reopen?.querySelector("a").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    open([], `&pending=1&domain=${encodeURIComponent(dlg.dataset.domain || "")}`);
+  });
+  $$("form[data-posture-run]").forEach((f) => f.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const btn = ev.submitter || $("button", f);
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(f.action, { method: "POST", body: new URLSearchParams(new FormData(f)),
+                                        headers: { Accept: "application/json" } });
+      let d = {};
+      try { d = await r.json(); } catch (e) { /* an HTML error page */ }
+      if (!r.ok) throw new Error(d.error || (r.status === 403 ? "The form expired; reload the page and try again." : `HTTP ${r.status}`));
+      open(d.batch || []);
+    } catch (e) {
+      open([], "", e.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }));
+}
+postureProgress();
+
 // posture report pies: severity colours follow the pills
 function posturePies() {
   const el = document.getElementById("posture-data");

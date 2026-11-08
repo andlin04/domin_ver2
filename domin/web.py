@@ -529,7 +529,7 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
-           "posture-queued": "Posture scan queued; reload the page to see progress.",
+           "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running."}
 PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
@@ -941,18 +941,22 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     @app.post(base + "/security/posture", include_in_schema=False)
     async def security_posture(request: Request):
         """Stage 2: queue posture scans for a whole domain (its in-scope addresses), one host name or one address
-        (Renew). Analyst or admin; the worker runs them."""
+        (Renew). Analyst or admin; the worker runs them. With `Accept: application/json` (the page's script) the
+        answer is JSON: the batch (row ids) for the progress dialog, or the error."""
         data = await form(request)
+        as_json = "application/json" in request.headers.get("accept", "")
         with conn() as c:
             s, u = current(request, c, data)
             if not u:
-                return back()
+                return priv(JSONResponse({"error": "Sign in again."}, status_code=401)) if as_json else back()
             dom = (data.get("domain") or "").strip().lower()
             host = (data.get("host") or "").strip().lower()
             ip = (data.get("ip") or "").strip()
             prof = posture.profile(c, (data.get("profile") or "").strip() or posture.DEFAULT_PROFILE)
 
             def refuse(status: int, error: str):
+                if as_json:
+                    return priv(JSONResponse({"error": error}, status_code=status))
                 return security_view(request, u, s, security_ctx(status, error=error, form=data) | {
                     "posture_domain": dom})
             if not users.can(u["role"], "analyst"):
@@ -970,8 +974,26 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 what = host or ip or dom
                 why = f" ({skipped} address(es) outside the posture scope; see Settings)" if skipped else ""
                 return refuse(422, f"No address of {what} to scan{why}.")
-            n = posture.enqueue(c, dom, found, prof, u["name"])
-        return back(f"{base}/security?domain={dom}", "posture-queued" if n else "posture-pending")
+            batch: list[int] = []
+            n = posture.enqueue(c, dom, found, prof, u["name"], batch)
+        notice = "posture-queued" if n else "posture-pending"
+        if as_json:
+            return priv(JSONResponse({"batch": batch, "queued": n, "domain": dom, "notice": NOTICES[notice]}))
+        return back(f"{base}/security?domain={dom}", notice)
+
+    @app.get(base + "/security/posture/status", include_in_schema=False)
+    def security_posture_status(request: Request):
+        """Progress of posture scans for the progress dialog (any signed-in user): ids=1,2,3 (a batch), plus with
+        pending=1 the queued and running rows of `domain` (all domains when empty)."""
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return priv(JSONResponse({"error": "Sign in again."}, status_code=401))
+            q = request.query_params
+            ids = {int(x) for x in q.get("ids", "").split(",")[:5000] if x.strip().isdigit()}
+            if q.get("pending"):
+                ids.update(posture.pending_ids(c, (q.get("domain") or "").strip().lower()))
+            return priv(JSONResponse(posture.progress(c, sorted(ids))))
 
     @app.post(base + "/tags", include_in_schema=False)
     async def host_tag(request: Request):

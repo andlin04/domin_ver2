@@ -192,6 +192,62 @@ def test_posture_refuses_unknown_domain_and_out_of_scope_host(settings):
         assert r.status_code == 422 and "Ports" in r.text
 
 
+JSON = {"Accept": "application/json"}
+STATUS = "/admin/security/posture/status"
+
+
+def test_json_post_returns_the_batch_and_status_follows_it(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM}, headers=JSON)
+        assert r.status_code == 200
+        batch = r.json()["batch"]
+        assert len(batch) == 2 and r.json()["queued"] == 2
+        ids = ",".join(map(str, batch))
+        d = h.get(f"{STATUS}?ids={ids}").json()
+        assert (d["total"], d["queued"], d["done"], d["finished"]) == (2, 2, 0, False)
+        assert {i["ip"] for i in d["items"]} == {"172.20.4.50", "172.20.4.60"}
+        # asking again while they wait: the same rows, nothing new queued
+        again = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM}, headers=JSON).json()
+        assert sorted(again["batch"]) == sorted(batch) and again["queued"] == 0
+        assert sorted(h.get(f"{STATUS}?pending=1&domain={DOM}").json()["ids"]) == sorted(batch)
+        run_queue(settings)
+        d = h.get(f"{STATUS}?ids={ids}").json()
+        assert (d["total"], d["done"], d["queued"], d["running"], d["finished"]) == (2, 2, 0, 0, True)
+        assert d["current"] == [] and d["elapsed"] >= 0
+        item = d["items"][0]
+        assert item["status"] == "done" and item["worst"] == "critical" and item["cves"] == 1 and item["host"]
+        assert h.get(f"{STATUS}?pending=1&domain={DOM}").json()["total"] == 0
+        r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": "nope.example"}, headers=JSON)
+        assert r.status_code == 422 and "finished inventory scan" in r.json()["error"]
+
+
+def test_status_needs_sign_in_and_viewer_may_read(settings):
+    with db.connect(settings.db_path) as c:
+        batch: list[int] = []
+        posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana", batch)
+    ids = ",".join(map(str, batch))
+    with app_client(settings) as h:
+        assert h.get(f"{STATUS}?ids={ids}", follow_redirects=False).status_code == 401
+        sign_in(h, "vee")
+        assert h.get(f"{STATUS}?ids={ids}").json()["total"] == 2
+        assert h.get(f"{STATUS}?ids=x,,9999").json()["total"] == 0
+
+
+def test_posture_page_has_progress_dialog_and_no_auto_reload(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert 'id="posture-progress"' in page and "data-posture-run" in page and "data-pp-reopen hidden" in page
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert "data-pp-reopen>" in page and "show progress" in page
+        dom_page = h.get(f"/d/{DOM}").text
+    for html in (page, dom_page):
+        assert 'id="posture-progress"' in html
+        assert "http-equiv" not in html.lower() and "reload the page to see progress" not in html
+
+
 def test_posture_needs_csrf(settings):
     with app_client(settings) as h:
         sign_in(h, "ana")
