@@ -18,7 +18,20 @@
       <a href="/" class="{{ 'active' if self.page() == 'overview' }}">Overview</a>
       <a href="/all" class="{{ 'active' if self.page() == 'all' }}">Drilldown (All)</a>
       <a href="/tools" class="{{ 'active' if self.page() == 'tools' }}">Tools</a>
-      {% if show_admin %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Admin</a>{% endif %}
+      {% if user %}
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a href="/admin/security" class="{{ 'active' if self.page() == 'security' }}">Security</a>
+      {% if user.role in ('admin', 'analyst') %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Dashboard</a>{% endif %}
+      {% if user.role == 'admin' %}<a href="/admin/settings" class="{{ 'active' if self.page() == 'settings' }}">Settings</a>
+      <a href="/admin/users" class="{{ 'active' if self.page() == 'users' }}">Users</a>{% endif %}
+      <a href="/admin/account" class="{{ 'active' if self.page() == 'account' }}">{{ user.name }}</a>
+      {% elif signed_in_hint %}
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a href="/admin/account">Account</a>
+      {% elif net_ok %}
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a href="/admin" class="{{ 'active' if self.page() == 'login' }}">Sign in</a>
+      {% endif %}
     </nav>
     <form class="jump" action="/d/" data-jump role="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>

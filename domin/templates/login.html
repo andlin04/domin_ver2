@@ -3,14 +3,17 @@
 {% block page %}login{% endblock %}
 {% block content %}
 <section class="card narrow">
-  <h1>Admin sign-in</h1>
-  {% if not has_password %}
-  <p class="muted">No admin password is set. On the server run <code>python -m domin admin-password</code> as the
-    domin user.</p>
+  <h1>Sign in</h1>
+  {% if not any_user %}
+  <p class="muted">No users exist yet. On the server create the first admin as the domin user:</p>
+  <pre class="codeblock">python -m domin user-add &lt;name&gt; --role admin</pre>
+  <p class="muted">It prints a one-time link to set the password.</p>
   {% else %}
   <form method="post" action="{{ base }}/login" class="stack">
+    <input type="text" name="name" placeholder="User name" autocomplete="username" required
+           aria-label="User name" autofocus>
     <input type="password" name="password" placeholder="Password" autocomplete="current-password" required
-           aria-label="Password" autofocus>
+           aria-label="Password">
     <button class="btn primary" type="submit">Sign in</button>
     {% if error %}<p class="bad-text" role="alert">{{ error }}</p>{% endif %}
   </form>

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Set password · domin{% endblock %}
+{% block page %}login{% endblock %}
+{% block content %}
+<section class="card narrow">
+  {% if not user_name %}
+  <h1>Link not valid</h1>
+  <p class="muted">This set-password link is wrong or has expired. Ask an administrator for a new one.</p>
+  <p><a class="btn" href="{{ base }}">Back to sign in</a></p>
+  {% else %}
+  <h1>Set a password</h1>
+  <p class="muted">For <b>{{ user_name }}</b>. Use at least 12 characters.</p>
+  <form method="post" action="{{ base }}/set-password" class="stack">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="password" name="password" placeholder="New password" autocomplete="new-password" required
+           minlength="12" aria-label="New password" autofocus>
+    <input type="password" name="confirm" placeholder="Repeat password" autocomplete="new-password" required
+           minlength="12" aria-label="Repeat password">
+    <button class="btn primary" type="submit">Set password</button>
+    {% if error %}<p class="bad-text" role="alert">{{ error }}</p>{% endif %}
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

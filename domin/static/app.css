@@ -218,3 +218,20 @@ td.path { white-space: normal; min-width: 320px; }
   td.host { min-width: 8rem; max-width: 44vw; }
   td.text { min-width: 7rem; max-width: 60vw; }
 }
+
+/* signed-in area: users, account, settings, security */
+.nav-sep { align-self: center; width: 1px; height: 1.1rem; background: var(--border); margin: 0 .35rem; }
+form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 0; }
+.row-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.codeblock { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: .6rem .8rem;
+  font-family: ui-monospace, Consolas, monospace; font-size: .82rem; white-space: pre-wrap; word-break: break-all; }
+.codes { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .3rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.codes li { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: .3rem .55rem;
+  text-align: center; letter-spacing: .03em; }
+.field { display: grid; gap: .3rem; margin-bottom: .6rem; }
+.field textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: .5rem .7rem; width: 100%; resize: vertical; font-family: ui-monospace, Consolas, monospace; }
+.kpi-line { font-size: 1.05rem; } .kpi-line b { font-size: 1.4rem; }
+.warn-card { border-color: var(--flat); background: color-mix(in srgb, var(--flat) 9%, var(--surface)); }
+.bullets { margin: .3rem 0 0; padding-left: 1.1rem; display: grid; gap: .3rem; }

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Users · domin{% endblock %}
+{% block page %}users{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Users</h1>
+  <p class="muted">Roles: viewer reads the signed-in reports, analyst also runs scans, admin also manages users and
+    settings.</p></div></section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% if link %}<p class="note ok">One-time set-password link (valid 24 h, opens once the recipient is on the
+  allowlist): <code class="mono">{{ link }}</code></p>{% endif %}
+
+<section class="card">
+  <h2>Add a user</h2>
+  <form method="post" action="{{ base }}/users/add" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="text" name="name" placeholder="User name" required aria-label="User name">
+    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+    <button class="btn primary" type="submit">Create</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>All users <small>{{ users|length }}</small></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Role</th><th>2FA</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead>
+    <tbody>{% for us in users %}<tr>
+      <td>{{ us.name }}</td>
+      <td>
+        <form method="post" action="{{ base }}/users/{{ us.id }}/role" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <select name="role" onchange="this.form.submit()" aria-label="Role for {{ us.name }}"
+                  {% if last_admin[us.id] %}disabled title="The last admin's role is locked"{% endif %}>
+            {% for r in roles %}<option value="{{ r }}"{% if r == us.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+          </select></form>
+      </td>
+      <td>{{ 'on' if us.has_totp else '–' }}</td>
+      <td>{{ 'disabled' if us.disabled else 'active' }}</td>
+      <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
+      <td class="row-actions">
+        <form method="post" action="{{ base }}/users/{{ us.id }}/reset-password" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Set-pw link</button></form>
+        {% if us.has_totp %}
+        <form method="post" action="{{ base }}/users/{{ us.id }}/reset-2fa" class="inline"
+              data-confirm="Reset two-factor for {{ us.name }}?">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Reset 2FA</button></form>
+        {% endif %}
+        {% if not last_admin[us.id] %}
+        <form method="post" action="{{ base }}/users/{{ us.id }}/disable" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="disabled" value="{{ '' if us.disabled else 'on' }}">
+          <button class="btn small" type="submit">{{ 'Enable' if us.disabled else 'Disable' }}</button></form>
+        <form method="post" action="{{ base }}/users/{{ us.id }}/delete" class="inline"
+              data-confirm="Delete {{ us.name }}? This cannot be undone.">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Delete</button></form>
+        {% endif %}
+      </td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

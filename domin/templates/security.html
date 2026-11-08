@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Security · domin{% endblock %}
+{% block page %}security{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Security portal</h1>
+  <p class="muted">Fingerprinting and CVE reports for inventoried hosts arrive in a later phase.</p></div></section>
+
+<section class="card warn-card">
+  <h2>Authorized use only</h2>
+  <p>This area is for authorised vulnerability management of infrastructure you own or are explicitly permitted to
+    assess. Scanning or fingerprinting systems without authorisation may be unlawful. Keep the scope limited to
+    domains and address ranges you control (Settings), and keep a record of your authorisation for each assessment.</p>
+</section>
+
+<section class="card">
+  <h2>Coming next</h2>
+  <ul class="bullets">
+    <li>Host fingerprinting: open ports, service and TLS versions (connect probes, no raw-socket OS probing).</li>
+    <li>Offline CVE matching per host and per domain, from a locally mirrored vulnerability feed.</li>
+    <li>An exposure overview per domain, limited to the scope set in Settings.</li>
+  </ul>
+  <p class="muted">Nothing is probed yet; this is the signed-in landing page for the planned tools.</p>
+</section>
+{% endblock %}

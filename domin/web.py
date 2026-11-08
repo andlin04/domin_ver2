@@ -10,10 +10,12 @@ import io
 import ipaddress
 import json
 import logging
+import secrets
 import threading
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -28,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, db, jobs, tools
+from . import admin, db, jobs, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -103,8 +105,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return False
         return any(ip in n for n in nets)
 
-    def admin_allowed(request: Request) -> bool:
-        return peer_in(request, admin_nets)
+    def net_ok(request: Request) -> bool:
+        """Optional network allowlist in front of the whole signed-in area; open when DOMIN_ADMIN_IPS is empty, in
+        which case the sign-in alone governs access."""
+        return not admin_nets or peer_in(request, admin_nets)
 
     def live() -> Settings:
         with conn() as c:
@@ -124,8 +128,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 del lookups[k]
 
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
-        return templates.TemplateResponse(request, name, {"show_admin": admin_allowed(request), **ctx},
-                                          status_code=status)
+        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": None, **ctx}
+        return templates.TemplateResponse(request, name, ctx, status_code=status)
 
     def domain_or_404(c, name: str) -> dict:
         d = db.domain(c, name)
@@ -161,7 +165,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     @app.middleware("http")
     async def headers(request: Request, call_next):
         path = request.url.path
-        if (path == ADMIN or path.startswith(ADMIN + "/")) and not admin_allowed(request):
+        if (path == ADMIN or path.startswith(ADMIN + "/")) and not net_ok(request):
             resp = JSONResponse({"detail": "Not Found"}, status_code=404)   # same answer as a path that doesn't exist
         else:
             resp = await call_next(request)
@@ -483,14 +487,18 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
 
 NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
-           "gone": "That job had already finished."}
+           "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
+           "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
+           "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now."}
+PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
+PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
+PENDING_MIN = 5
 
 
 def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
-    """The admin page at /admin, for DOMIN_ADMIN_IPS only (anyone else gets the same 404 as an unknown path): one
-    password (python -m domin admin-password), a session cookie, a CSRF token per session on every form."""
+    """The signed-in area under /admin (behind the optional DOMIN_ADMIN_IPS network allowlist). User accounts with
+    roles (viewer/analyst/admin), optional TOTP second factor, a session cookie and a CSRF token per form."""
     base = ADMIN
-    private = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 
     async def form(request: Request) -> dict[str, str]:
         body = await request.body()
@@ -498,34 +506,55 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
             raise HTTPException(413, "Form too large")
         return {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace")).items()}
 
-    def signed_in(request: Request, c, data: dict[str, str] | None = None) -> dict | None:
-        """The session, or None; with form data, the form's CSRF token must match the session's."""
+    def conn_del(c, key: str):
+        c.execute("DELETE FROM kv WHERE key = ?", (key,))
+
+    def current(request: Request, c, data: dict[str, str] | None = None) -> tuple[dict | None, dict | None]:
+        """(session, user) for a valid, enabled session, else (None, None); checks CSRF when data is given."""
         s = admin.session(c, request.cookies.get(COOKIE))
-        if s and data is not None and not hmac.compare_digest(data.get("csrf", ""), s["csrf"]):
+        if not s:
+            return None, None
+        if data is not None and not hmac.compare_digest(data.get("csrf", ""), s["csrf"]):
             raise HTTPException(403, "The form expired; reload the page and try again")
-        return s
+        u = users.get(c, s["user_id"]) if s["user_id"] else None
+        if not u or u["disabled"]:
+            return None, None
+        return s, u
 
-    def back(notice: str = "") -> RedirectResponse:
-        return RedirectResponse(f"{base}?ok={notice}" if notice else base, status_code=303, headers=private)
-
-    def dashboard(request: Request, c, s: dict, error: str = "", status: int = 200) -> HTMLResponse:
-        live = admin.effective(settings, c)
-        resp = page(request, "admin.html", status, base=base, csrf=s["csrf"], stats=admin.report(c),
-                    jobs=jobs.admin_list(c), tunable=[(k, *v, getattr(live, k)) for k, v in admin.TUNABLE.items()],
-                    notice=NOTICES.get(request.query_params.get("ok", ""), ""), error=error)
-        resp.headers.update(private)
+    def priv(resp):
+        resp.headers.update(PRIVATE)
         return resp
+
+    def back(path: str = base, notice: str = "") -> RedirectResponse:
+        if notice:
+            path = f"{path}{'&' if '?' in path else '?'}ok={notice}"
+        return priv(RedirectResponse(path, status_code=303))
+
+    def shell(request: Request, name: str, u: dict, s: dict, status: int = 200, **ctx) -> HTMLResponse:
+        notice = NOTICES.get(request.query_params.get("ok", ""), "")
+        return priv(page(request, name, status, base=base, user=u, csrf=s["csrf"], notice=notice, **ctx))
+
+    def set_session(resp, c, user_id: int):
+        resp.set_cookie(COOKIE, admin.new_session(c, user_id), max_age=admin.SESSION_HOURS * 3600, path="/",
+                        secure=True, httponly=True, samesite="strict")
+
+    # --- dashboard and sign-in -----------------------------------------------------------------------------------
+
+    def dashboard(request: Request, c, u: dict, s: dict, error: str = "", status: int = 200) -> HTMLResponse:
+        live = admin.effective(settings, c)
+        return shell(request, "admin.html", u, s, status, stats=admin.report(c), jobs=jobs.admin_list(c),
+                     tunable=[(k, *v, getattr(live, k)) for k, v in admin.TUNABLE.items()], error=error)
 
     @app.get(base, response_class=HTMLResponse, include_in_schema=False)
     def admin_page(request: Request):
         with conn() as c:
-            s = signed_in(request, c)
-            if s:
-                return dashboard(request, c, s)
-            has_password = admin.kv_get(c, "admin_password") is not None
-        resp = page(request, "login.html", base=base, has_password=has_password, error="")
-        resp.headers.update(private)
-        return resp
+            s, u = current(request, c)
+            if u:
+                if users.can(u["role"], "analyst"):
+                    return dashboard(request, c, u, s)
+                return back(base + "/security")
+            any_user = users.count(c) > 0
+        return priv(page(request, "login.html", base=base, any_user=any_user, error=""))
 
     @app.post(base + "/login", include_in_schema=False)
     async def admin_login(request: Request):
@@ -533,55 +562,304 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
         with conn() as c:
             who = admin.client_key(c, client_ip(request))
             if admin.login_blocked(c, who):
-                error, status = "Too many failed sign-ins; wait 15 minutes.", 429
-            elif admin.check_password(c, data.get("password", "")):
-                resp = back()
-                resp.set_cookie(COOKIE, admin.new_session(c), max_age=admin.SESSION_HOURS * 3600, path="/",
-                                secure=True, httponly=True, samesite="strict")
-                return resp
-            else:
+                return priv(page(request, "login.html", 429, base=base, any_user=users.count(c) > 0,
+                                 error="Too many failed sign-ins; wait 15 minutes."))
+            u = users.verify_password(c, data.get("name", ""), data.get("password", ""))
+            if not u:
                 admin.login_failed(c, who)
-                error, status = "Wrong password.", 401
-            has_password = admin.kv_get(c, "admin_password") is not None
-        resp = page(request, "login.html", status, base=base, has_password=has_password, error=error)
-        resp.headers.update(private)
-        return resp
+                return priv(page(request, "login.html", 401, base=base, any_user=users.count(c) > 0,
+                                 error="Wrong user name or password."))
+            if u["has_totp"]:
+                token = secrets.token_urlsafe(24)
+                expires = (datetime.now() + timedelta(minutes=PENDING_MIN)).isoformat(timespec="seconds")
+                admin.kv_set(c, f"login2fa:{admin._token_hash(token)}",
+                             json.dumps({"user_id": u["id"], "expires": expires}))
+                resp = priv(page(request, "totp.html", base=base, error=""))
+                resp.set_cookie(PENDING, token, max_age=PENDING_MIN * 60, path=base, secure=True, httponly=True,
+                                samesite="strict")
+                return resp
+            users.record_login(c, u["id"])
+            resp = back()
+            set_session(resp, c, u["id"])
+            return resp
+
+    def _pending_user(c, token: str | None) -> dict | None:
+        raw = admin.kv_get(c, f"login2fa:{admin._token_hash(token)}") if token else None
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if data["expires"] < db.now():
+            return None
+        return users.get(c, data["user_id"])
+
+    @app.post(base + "/login/totp", include_in_schema=False)
+    async def admin_login_totp(request: Request):
+        data = await form(request)
+        token = request.cookies.get(PENDING)
+        with conn() as c:
+            who = admin.client_key(c, client_ip(request))
+            if admin.login_blocked(c, who):
+                return priv(page(request, "totp.html", 429, base=base, error="Too many tries; wait 15 minutes."))
+            u = _pending_user(c, token)
+            if not u or u["disabled"]:
+                return back()   # expired: start again
+            if not users.verify_second_factor(c, u["id"], data.get("code", "")):
+                admin.login_failed(c, who)
+                return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
+            conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
+            users.record_login(c, u["id"])
+            resp = back()
+            set_session(resp, c, u["id"])
+            resp.delete_cookie(PENDING, path=base, secure=True, httponly=True, samesite="strict")
+            return resp
 
     @app.post(base + "/logout", include_in_schema=False)
     async def admin_logout(request: Request):
         data = await form(request)
         with conn() as c:
-            if signed_in(request, c, data):
+            s, u = current(request, c, data)
+            if s:
                 admin.end_session(c, request.cookies.get(COOKIE))
         resp = back()
         resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return resp
 
+    # --- set a password from a one-time link (invite or admin reset) ----------------------------------------------
+
+    @app.get(base + "/set-password", response_class=HTMLResponse, include_in_schema=False)
+    def set_password_page(request: Request, token: str = ""):
+        with conn() as c:
+            u = users.setpw_user(c, token)
+        if not u:
+            return priv(page(request, "setpw.html", 404, base=base, user_name=None, token="", error=""))
+        return priv(page(request, "setpw.html", base=base, user_name=u["name"], token=token, error=""))
+
+    @app.post(base + "/set-password", include_in_schema=False)
+    async def set_password_submit(request: Request):
+        data = await form(request)
+        token = data.get("token", "")
+        with conn() as c:
+            u = users.setpw_user(c, token)
+            if not u:
+                return priv(page(request, "setpw.html", 404, base=base, user_name=None, token="", error=""))
+            pw = data.get("password", "")
+            if pw != data.get("confirm", "") or len(pw) < 12:
+                return priv(page(request, "setpw.html", 422, base=base, user_name=u["name"], token=token,
+                                 error="Use at least 12 characters and type the same password twice."))
+            users.use_setpw_token(c, token, pw)
+        return back(base, "pw-set")
+
+    # --- account (any signed-in user) ----------------------------------------------------------------------------
+
+    @app.get(base + "/account", response_class=HTMLResponse, include_in_schema=False)
+    def account_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            pending = users.enrol_pending(c, u["id"])
+            uri = totp.provisioning_uri(pending["secret"], u["name"]) if pending else ""
+            must_setup = users.needs_totp_setup(c, u)
+        return shell(request, "account.html", u, s, enrol=pending, otpauth=uri, must_setup=must_setup, error="")
+
+    @app.post(base + "/account/password", include_in_schema=False)
+    async def account_password(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not users.verify_password(c, u["name"], data.get("current", "")):
+                return shell(request, "account.html", u, s, 401, enrol=None, otpauth="", must_setup=False,
+                             error="The current password is wrong.")
+            new = data.get("new", "")
+            if new != data.get("confirm", "") or len(new) < 12:
+                return shell(request, "account.html", u, s, 422, enrol=None, otpauth="", must_setup=False,
+                             error="Use at least 12 characters and type the same new password twice.")
+            users.set_password(c, u["id"], new)   # signs this browser out too
+        return back(base + "/account", "pw-changed")
+
+    @app.post(base + "/account/2fa/start", include_in_schema=False)
+    async def account_2fa_start(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            users.start_enrol(c, u["id"])
+        return back(base + "/account")
+
+    @app.post(base + "/account/2fa/confirm", include_in_schema=False)
+    async def account_2fa_confirm(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            codes = users.confirm_enrol(c, u["id"], data.get("code", ""))
+            if codes is None:
+                pending = users.enrol_pending(c, u["id"])
+                uri = totp.provisioning_uri(pending["secret"], u["name"]) if pending else ""
+                return shell(request, "account.html", u, s, 422, enrol=pending, otpauth=uri,
+                             must_setup=users.needs_totp_setup(c, u), error="Wrong code; try the current one.")
+            u = users.get(c, u["id"])
+        return shell(request, "account.html", u, s, enrol=None, otpauth="", must_setup=False, error="",
+                     recovery=codes)
+
+    @app.post(base + "/account/2fa/disable", include_in_schema=False)
+    async def account_2fa_disable(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if users.required_for(c, u["role"]):
+                return shell(request, "account.html", u, s, 403, enrol=None, otpauth="", must_setup=False,
+                             error="Two-factor is required for your role and cannot be turned off.")
+            users.disable_totp(c, u["id"])
+        return back(base + "/account", "2fa-off")
+
+    # --- users (admin only) --------------------------------------------------------------------------------------
+
+    def admin_only(request: Request, c, data=None):
+        s, u = current(request, c, data)
+        if not u:
+            return None, None, back()
+        if u["role"] != "admin":
+            raise HTTPException(404, "Not Found")
+        return s, u, None
+
+    @app.get(base + "/users", response_class=HTMLResponse, include_in_schema=False)
+    def users_page(request: Request):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            rows = users.listing(c)
+            last_admin = {r["id"]: users.is_last_admin(c, r["id"]) for r in rows}
+        return shell(request, "users.html", u, s, users=rows, roles=users.ROLES, last_admin=last_admin,
+                     link=request.query_params.get("link", ""), error="")
+
+    @app.post(base + "/users/add", include_in_schema=False)
+    async def users_add(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                uid = users.create(c, data.get("name", ""), data.get("role", ""))
+            except ValueError as exc:
+                rows = users.listing(c)
+                return shell(request, "users.html", u, s, 422, users=rows, roles=users.ROLES,
+                             last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows}, link="",
+                             error=str(exc))
+            token = users.new_setpw_token(c, uid)
+        return back(f"{base}/users?link={base}/set-password?token={token}", "user-added")
+
+    @app.post(base + "/users/{user_id}/{action}", include_in_schema=False)
+    async def users_action(request: Request, user_id: PathId, action: str):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            target = users.get(c, user_id)
+            if not target:
+                raise HTTPException(404, "No such user")
+            if action == "role":
+                if users.is_last_admin(c, user_id) and data.get("role") != "admin":
+                    raise HTTPException(409, "This is the last admin; make another user an admin first")
+                try:
+                    users.set_role(c, user_id, data.get("role", ""))
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from None
+                return back(base + "/users", "user-saved")
+            if action == "disable":
+                want = data.get("disabled") == "on"
+                if want and users.is_last_admin(c, user_id):
+                    raise HTTPException(409, "This is the last admin; cannot disable it")
+                users.set_disabled(c, user_id, want)
+                return back(base + "/users", "user-saved")
+            if action == "reset-2fa":
+                users.disable_totp(c, user_id)
+                return back(base + "/users", "user-saved")
+            if action == "reset-password":
+                token = users.new_setpw_token(c, user_id)
+                return back(f"{base}/users?link={base}/set-password?token={token}", "user-saved")
+            if action == "delete":
+                if users.is_last_admin(c, user_id):
+                    raise HTTPException(409, "This is the last admin; cannot delete it")
+                users.delete(c, user_id)
+                return back(base + "/users", "user-deleted")
+        raise HTTPException(404, "Unknown action")
+
+    # --- settings / scope (admin only) ---------------------------------------------------------------------------
+
+    @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
+    def settings_page(request: Request):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            scope = users.get_scope(c)
+            counts = users.hosts_in_scope(c, scope)
+        return shell(request, "settings.html", u, s, scope=scope, counts=counts, roles=users.ROLES, error="")
+
+    @app.post(base + "/settings", include_in_schema=False)
+    async def settings_save(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                scope = users.parse_scope(data)
+            except ValueError as exc:
+                cur = users.get_scope(c)
+                return shell(request, "settings.html", u, s, 422, scope=cur,
+                             counts=users.hosts_in_scope(c, cur), roles=users.ROLES, error=str(exc))
+            users.save_scope(c, scope)
+        return back(base + "/settings", "saved")
+
+    # --- security portal placeholder (any signed-in user) --------------------------------------------------------
+
+    @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
+    def security_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+        return shell(request, "security.html", u, s)
+
+    # --- tuning and jobs (admin or analyst) ----------------------------------------------------------------------
+
     @app.post(base + "/tune", include_in_schema=False)
     async def admin_tune(request: Request):
         data = await form(request)
         with conn() as c:
-            s = signed_in(request, c, data)
-            if not s:
+            s, u = current(request, c, data)
+            if not u or not users.can(u["role"], "analyst"):
                 return back()
             try:
                 admin.save_tuning(c, data)
             except ValueError as exc:
-                return dashboard(request, c, s, error=str(exc), status=422)
-        return back("tuned")
+                return dashboard(request, c, u, s, error=str(exc), status=422)
+        return back(base, "tuned")
 
     @app.post(base + "/jobs/{job_id}/{action}", include_in_schema=False)
     async def admin_job(request: Request, job_id: PathId, action: str):
         data = await form(request)
         with conn() as c:
-            if not signed_in(request, c, data):
+            s, u = current(request, c, data)
+            if not u or not users.can(u["role"], "analyst"):
                 return back()
             if action == "cancel":
-                return back("cancelled" if jobs.cancel(c, job_id) else "gone")
+                return back(base, "cancelled" if jobs.cancel(c, job_id) else "gone")
             if action == "retry":
                 job = jobs.get(c, job_id)
                 if not job:
                     raise HTTPException(404, "No such job")
                 jobs.enqueue(c, job["domain"], client="admin")
-                return back("retried")
+                return back(base, "retried")
         raise HTTPException(404, "Unknown action")

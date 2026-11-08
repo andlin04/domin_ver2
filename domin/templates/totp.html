@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Two-factor · domin{% endblock %}
+{% block page %}login{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Two-factor code</h1>
+  <p class="muted">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+  <form method="post" action="{{ base }}/login/totp" class="stack">
+    <input type="text" name="code" placeholder="123456" inputmode="numeric" autocomplete="one-time-code"
+           required aria-label="Authentication code" autofocus>
+    <button class="btn primary" type="submit">Verify</button>
+    {% if error %}<p class="bad-text" role="alert">{{ error }}</p>{% endif %}
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Account · domin{% endblock %}
+{% block page %}account{% endblock %}
+{% block content %}
+<section class="hero">
+  <div><h1>{{ user.name }}</h1><p class="muted">Role: {{ user.role }}</p></div>
+  <form method="post" action="{{ base }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Sign out</button></form>
+</section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% if must_setup %}<p class="note bad" role="alert">Two-factor is required for your role. Set it up below.</p>{% endif %}
+
+{% if recovery %}
+<section class="card">
+  <h2>Recovery codes</h2>
+  <p class="muted">Save these now — each works once, and they are shown only this time. Use one in place of a code if
+    you lose your authenticator.</p>
+  <ul class="codes">{% for c in recovery %}<li class="mono">{{ c }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="grid g2">
+  <div class="card">
+    <h2>Change password</h2>
+    <form method="post" action="{{ base }}/account/password" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="password" name="current" placeholder="Current password" autocomplete="current-password" required
+             aria-label="Current password">
+      <input type="password" name="new" placeholder="New password" autocomplete="new-password" required
+             minlength="12" aria-label="New password">
+      <input type="password" name="confirm" placeholder="Repeat new password" autocomplete="new-password" required
+             minlength="12" aria-label="Repeat new password">
+      <button class="btn primary" type="submit">Change password</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Two-factor</h2>
+    {% if user.has_totp %}
+    <p class="note ok">Two-factor is on. {{ user.recovery|length }} recovery code(s) left.</p>
+    <form method="post" action="{{ base }}/account/2fa/start" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn" type="submit">Replace authenticator</button></form>
+    <form method="post" action="{{ base }}/account/2fa/disable" class="inline"
+          data-confirm="Turn two-factor off?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn" type="submit">Turn off</button></form>
+    {% elif enrol %}
+    <p class="muted">Add this secret to your authenticator app, then enter a code to confirm.</p>
+    <p>Secret: <code class="mono">{{ enrol.secret }}</code></p>
+    <p class="muted small-print">Or paste this into the app:</p>
+    <pre class="codeblock">{{ otpauth }}</pre>
+    <form method="post" action="{{ base }}/account/2fa/confirm" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="text" name="code" placeholder="123456" inputmode="numeric" autocomplete="one-time-code" required
+             aria-label="Authentication code">
+      <button class="btn primary" type="submit">Confirm and turn on</button>
+    </form>
+    {% else %}
+    <p class="muted">Protect your sign-in with a time-based code from an authenticator app.</p>
+    <form method="post" action="{{ base }}/account/2fa/start" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn primary" type="submit">Set up two-factor</button></form>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

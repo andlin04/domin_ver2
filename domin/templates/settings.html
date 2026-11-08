@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Settings · domin{% endblock %}
+{% block page %}settings{% endblock %}
+{% macro area(name, label, items) %}
+<label class="field">{{ label }}
+  <textarea name="{{ name }}" rows="4" spellcheck="false">{{ items|join('\n') }}</textarea></label>
+{% endmacro %}
+{% block content %}
+<section class="hero"><div><h1>Settings</h1>
+  <p class="muted">Scope limits which inventoried hosts the security tools may analyse, and which roles must use
+    two-factor. Saved now; the scan tools in a later phase read these rules.</p></div></section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>In scope now <small>by IP range and domain rules</small></h2>
+  <p class="kpi-line"><b>{{ counts.in_scope }}</b> of {{ counts.total }} inventoried host names are in scope.
+    <span class="muted">Country rules are stored and applied when scans run.</span></p>
+</section>
+
+<form method="post" action="{{ base }}/settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <section class="grid g2">
+    <div class="card">
+      <h2>IP ranges <small>CIDR or address, one per line; empty allow = all</small></h2>
+      {{ area("ip_allow", "Allow", scope.ip_allow) }}
+      {{ area("ip_deny", "Deny", scope.ip_deny) }}
+    </div>
+    <div class="card">
+      <h2>Countries <small>two-letter codes</small></h2>
+      {{ area("countries_allow", "Allow", scope.countries_allow) }}
+      {{ area("countries_deny", "Deny", scope.countries_deny) }}
+    </div>
+    <div class="card">
+      <h2>Domains <small>a suffix matches its subdomains</small></h2>
+      {{ area("domains_allow", "Allow", scope.domains_allow) }}
+      {{ area("domains_deny", "Deny", scope.domains_deny) }}
+    </div>
+    <div class="card">
+      <h2>Require two-factor</h2>
+      <p class="muted">Users in a ticked role must set up a second factor.</p>
+      {% for r in roles %}
+      <label class="tick"><input type="checkbox" name="require_2fa_{{ r }}"
+        {% if scope.require_2fa[r] %}checked{% endif %}> {{ r }}</label>
+      {% endfor %}
+    </div>
+  </section>
+  <p><button class="btn primary" type="submit">Save settings</button></p>
+</form>
+{% endblock %}
