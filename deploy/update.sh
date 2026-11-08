@@ -20,7 +20,7 @@ if [ -z "$changed" ]; then
   exit 0
 fi
 printf 'changed: %s\n' $changed
-cp -a "$NEW"/. "$APP"/
+cp -a "$NEW"/* "$APP"/   # the entries, not "$NEW"/. : that would give $APP the temp dir's mode 700
 
 web=$(printf '%s\n' "$changed" | grep '^domin/' || true)
 worker=$(printf '%s\n' "$web" | grep -Ev '^domin/(templates|static)/|^domin/web\.py$' || true)
