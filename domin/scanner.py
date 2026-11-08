@@ -188,6 +188,18 @@ class Enricher:
         return info
 
 
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _lan_address(ip: str) -> bool:
+    """A usable internal address: private (RFC 1918, ULA, CGNAT), not loopback or link-local."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return (a.is_private or a in _CGNAT) and not (a.is_loopback or a.is_link_local)
+
+
 def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Progress = lambda _: None,
         client: httpx.Client | None = None, resolver: dns.resolver.Resolver | None = None,
         enricher: Enricher | None = None) -> list[dict]:
@@ -216,6 +228,8 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         if h in guessed and (not ips or (wildcard and set(ips) <= wildcard)):
             continue  # a guess that doesn't exist, or only matches the wildcard
         hosts[h] = ips
+    if internal:   # a LAN resolver (e.g. Pi-hole) forwards what it has no local record for: keep LAN answers only
+        hosts = {h: lan for h, ips in hosts.items() if (lan := [ip for ip in ips if _lan_address(ip)]) or not ips}
     unique = sorted({ip for ips in hosts.values() for ip in ips})
     progress(f"looking up owners of {len(unique)} addresses")
     enricher = enricher or Enricher(conn, internal=internal)

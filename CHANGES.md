@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: internal scans keep LAN addresses only
+
+- A LAN resolver such as Pi-hole answers only the names in its local list and forwards everything else (AAAA
+  questions, unknown names) to public DNS, so an internal scan also listed the zone's public addresses. A scan of an
+  internal domain now keeps only private addresses (RFC 1918, ULA, CGNAT) and drops public, link-local (`fe80::`)
+  and loopback answers; a name with only public addresses is left out. Names that do not resolve are kept as before.
+- No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: internal domains on the Settings page
 
 - **Settings → Internal domains**: list your own domains (e.g. `corp.example`, `home.arpa`; subdomains included) and the

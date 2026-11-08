@@ -38,7 +38,8 @@
     <h2>Internal domains <small>looked up over your own DNS only</small></h2>
     <p class="muted">A scan of a name under one of these domains asks only the internal DNS servers below: no public
       resolvers, no certificate logs (crt.sh), no amass and no RDAP owner look-up. You get your own addresses and no
-      internal name leaves the network. Applies to the next scan, no restart.</p>
+      internal name leaves the network. Only LAN addresses are kept (private ranges; public, link-local and loopback
+      answers your DNS forwarded upstream are dropped). Applies to the next scan, no restart.</p>
     <div class="grid g2">
       <label class="field">Internal domains <small>one per line, e.g. corp.example, home.arpa; covers subdomains</small>
         <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>

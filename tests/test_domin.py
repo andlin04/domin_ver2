@@ -564,6 +564,39 @@ def test_internal_scan_resolves_privately_without_external_egress(settings):
     assert by_host["www.srv.home.arpa"]["ip"] == "172.20.0.9"   # a common-name guess resolved on the LAN
 
 
+def test_internal_scan_keeps_lan_addresses_only(settings):
+    """A LAN resolver forwards AAAA and unknown names upstream: public, link-local and loopback answers drop."""
+    import dns.resolver
+
+    class R:
+        def __init__(self, ip):
+            self.ip = ip
+
+        def to_text(self):
+            return self.ip
+
+    zone = {("lan.example", "A"): ["172.20.0.1"],
+            ("dns.lan.example", "A"): ["172.20.0.252"], ("dns.lan.example", "AAAA"): ["2620:fe::fe", "::1"],
+            ("ftp.lan.example", "A"): ["172.20.0.1"], ("ftp.lan.example", "AAAA"): ["fe80::1"],
+            ("gitlab.lan.example", "A"): ["9.9.9.9"], ("gitlab.lan.example", "AAAA"): ["2620:fe::9"]}
+
+    class FakeRes:
+        nameservers = ["172.20.0.252"]
+
+        def resolve(self, name, rtype):
+            recs = zone.get((name, rtype))
+            if recs:
+                return [R(x) for x in recs]
+            raise dns.resolver.NXDOMAIN
+
+    s = replace(settings, internal_zones=("lan.example",), internal_dns=("172.20.0.252",))
+    with db.connect(s.db_path) as c, httpx.Client(transport=httpx.MockTransport(lambda r: 1 / 0)) as client:
+        records = scanner.run(c, "lan.example", s, client=client, resolver=FakeRes())
+    got = sorted((r["host"], r["ip"]) for r in records)
+    assert got == [("dns.lan.example", "172.20.0.252"), ("ftp.lan.example", "172.20.0.1"),
+                   ("lan.example", "172.20.0.1")]   # gitlab (public only) is gone
+
+
 def test_api_scan_accepts_an_internal_zone_only_when_configured(settings):
     with TestClient(create_app(replace(settings, internal_zones=("home.arpa",)))) as h:
         assert h.post("/api/scan", json={"domain": "srv.home.arpa"}).status_code == 200
