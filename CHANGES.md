@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: "Today" look
+
+- New colours and type: blue-violet accent, system font, 12 px cards and 8 px controls. Dark by default, light when
+  the device asks for a light theme. Charts follow the theme. Primary, chip and danger buttons use dark text on the
+  accent in dark mode.
+- No migration. Rollback: redeploy the previous build (browsers may need a reload to drop the cached stylesheet).
+
 ## 2026-11-08: internal scans keep LAN addresses only
 
 - A LAN resolver such as Pi-hole answers only the names in its local list and forwards everything else (AAAA
