@@ -35,6 +35,19 @@
   </section>
 
   <section class="card">
+    <h2>Internal domains <small>looked up over your own DNS only</small></h2>
+    <p class="muted">A scan of a name under one of these domains asks only the internal DNS servers below: no public
+      resolvers, no certificate logs (crt.sh), no amass and no RDAP owner look-up. You get your own addresses and no
+      internal name leaves the network. Applies to the next scan, no restart.</p>
+    <div class="grid g2">
+      <label class="field">Internal domains <small>one per line, e.g. corp.example, home.arpa; covers subdomains</small>
+        <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>
+      <label class="field">Internal DNS servers <small>IP addresses, one per line</small>
+        <textarea name="internal_dns" rows="4" spellcheck="false" autocapitalize="off">{{ internal_dns|join('\n') }}</textarea></label>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Security posture scope <small>governs the Host fingerprint tool on the Security page</small></h2>
     <p class="kpi-line"><b>{{ posture_counts.in_scope }}</b> of {{ posture_counts.total }} inventoried host names,
       and {{ posture_counts.countries_in_scope }} of {{ posture_counts.countries }} countries, are in scope.</p>

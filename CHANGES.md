@@ -2,6 +2,17 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: internal domains on the Settings page
+
+- **Settings → Internal domains**: list your own domains (e.g. `corp.example`, `home.arpa`; subdomains included) and the
+  internal DNS servers that answer for them. A scan of such a name asks only those servers (no public resolvers,
+  crt.sh, amass or RDAP), so it returns your own addresses and leaks no internal names.
+- Stored in the database; once saved it overrides `DOMIN_INTERNAL_ZONES` / `DOMIN_INTERNAL_DNS` (which still prefill
+  the form). Applies to the next scan without a restart: web, worker, scheduled refresh and the CLI read it live.
+- Zones without a DNS server are refused (they would fall back to public DNS); DNS servers must be IP addresses.
+- No migration. Clearing both fields and saving turns internal mode off (it does not fall back to the environment).
+  Rollback: redeploy the previous build (the stored setting is then ignored).
+
 ## 2026-11-08: posture report first; clearer navigation
 
 - **Posture page** (was Security) is ordered for a security administrator: controls on top (domain, host, scan

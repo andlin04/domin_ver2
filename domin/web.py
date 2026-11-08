@@ -433,7 +433,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         # JSON only: a cross-site form or no-cors fetch can't send it without a CORS preflight (which fails)
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
             raise HTTPException(415, "Send the request as application/json")
-        name = normalize_domain(body.domain, settings.internal_zones)
+        name = normalize_domain(body.domain, live().internal_zones)
         if not name:
             raise HTTPException(422, "Not a valid domain name")
         request.state.domain = name
@@ -843,7 +843,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c, data)
             if redirect:
                 return redirect
-            d = normalize_domain(name, settings.internal_zones)
+            d = normalize_domain(name, admin.effective(settings, c).internal_zones)
             if not d or not db.delete_domain(c, d):
                 raise HTTPException(404, "No such domain")
         return back("/")   # the domain is gone from the overview
@@ -853,9 +853,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def settings_view(request, c, u, s, scope, status=200, error=""):
         countries = sorted(set(users.inventory_countries(c)) | set(scope["countries_allow"])
                            | set(scope["countries_deny"]))
+        eff = admin.effective(settings, c)
         return shell(request, "settings.html", u, s, status, scope=scope,
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
-                     countries=countries, roles=users.ROLES, error=error)
+                     countries=countries, roles=users.ROLES, error=error,
+                     internal_zones=eff.internal_zones, internal_dns=eff.internal_dns)
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):
@@ -874,6 +876,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
             try:
                 scope = users.parse_scope(c, data)
+                if "internal_zones" in data:
+                    admin.save_internal_dns(c, data.get("internal_zones", ""), data.get("internal_dns", ""))
             except ValueError as exc:
                 return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
             users.save_scope(c, scope)

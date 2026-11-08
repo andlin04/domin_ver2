@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import re
 import secrets
 import sqlite3
 from dataclasses import fields, replace
@@ -56,10 +57,36 @@ def kv_set(conn: sqlite3.Connection, key: str, value: str) -> None:
 def effective(settings: Settings, conn: sqlite3.Connection) -> Settings:
     """Environment values with the admin's overrides from the tuning form on top."""
     raw = kv_get(conn, "tuning")
-    if not raw:
-        return settings
-    names = {f.name for f in fields(Settings)}
-    return replace(settings, **{k: v for k, v in json.loads(raw).items() if k in TUNABLE and k in names})
+    if raw:
+        names = {f.name for f in fields(Settings)}
+        settings = replace(settings, **{k: v for k, v in json.loads(raw).items() if k in TUNABLE and k in names})
+    if internal := kv_get(conn, "internal_dns"):   # Settings page: internal zones + their DNS servers
+        cfg = json.loads(internal)
+        settings = replace(settings, internal_zones=tuple(cfg["zones"]), internal_dns=tuple(cfg["dns"]))
+    return settings
+
+
+_ZONE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def save_internal_dns(conn: sqlite3.Connection, zones_text: str, dns_text: str) -> dict:
+    """Validate and store the internal zones (domain suffixes) and the DNS servers that answer for them. Zones without
+    a DNS server are refused: they would fall back to public resolvers."""
+    zones = sorted({z.strip().lower().strip(".") for z in re.split(r"[\s,]+", zones_text or "") if z.strip()})
+    dns = list(dict.fromkeys(d.strip() for d in re.split(r"[\s,]+", dns_text or "") if d.strip()))
+    bad = [z for z in zones if not _ZONE.match(z)]
+    if bad:
+        raise ValueError(f"Not a domain name: {', '.join(bad)}")
+    for d in dns:
+        try:
+            ipaddress.ip_address(d)
+        except ValueError:
+            raise ValueError(f"DNS server must be an IP address: {d}") from None
+    if zones and not dns:
+        raise ValueError("Internal zones need at least one internal DNS server.")
+    cfg = {"zones": zones, "dns": dns}
+    kv_set(conn, "internal_dns", json.dumps(cfg))
+    return cfg
 
 
 def save_tuning(conn: sqlite3.Connection, form: dict[str, str]) -> dict:

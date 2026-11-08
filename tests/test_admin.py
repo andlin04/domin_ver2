@@ -232,3 +232,35 @@ def test_day_salt_rotates(settings, monkeypatch):
         monkeypatch.setattr(db, "now", lambda: "2099-01-02T00:00:00")
         b = admin.visitor(c, "192.0.2.1", "ua")
         assert a != b and len([r for r in c.execute("SELECT key FROM kv WHERE key LIKE 'day_salt:%'")]) == 1
+
+
+def test_internal_domains_setting_overrides_env_and_validates(settings):
+    from domin import admin as adm
+    with db.connect(settings.db_path) as c:
+        assert adm.effective(settings, c).internal_zones == settings.internal_zones
+        cfg = adm.save_internal_dns(c, "Corp.example., home.arpa", "172.20.0.252")
+        assert cfg == {"zones": ["corp.example", "home.arpa"], "dns": ["172.20.0.252"]}
+        live = adm.effective(settings, c)
+        assert live.internal_zones == ("corp.example", "home.arpa") and live.internal_dns == ("172.20.0.252",)
+        for zones, dns in (("bad_name!", "172.20.0.252"), ("corp.example", "ns1"), ("corp.example", "")):
+            try:
+                adm.save_internal_dns(c, zones, dns)
+                raise AssertionError("accepted " + zones + " / " + dns)
+            except ValueError:
+                pass
+        adm.save_internal_dns(c, "", "")
+        assert adm.effective(settings, c).internal_zones == ()
+
+
+def test_admin_sets_internal_domains_on_the_settings_page(settings):
+    with client(settings) as h:
+        csrf = sign_in(h)
+        page = h.get("/admin/settings").text
+        assert "Internal domains" in page
+        form = {"csrf": csrf, "internal_zones": "corp.example", "internal_dns": "172.20.0.252"}
+        r = h.post("/admin/settings", data=form, follow_redirects=False)
+        assert r.status_code == 303
+        page = h.get("/admin/settings").text
+        assert "corp.example" in page and "172.20.0.252" in page
+        r = h.post("/admin/settings", data={**form, "internal_dns": ""})
+        assert r.status_code == 422 and "need at least one internal DNS server" in r.text
