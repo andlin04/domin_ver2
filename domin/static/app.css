@@ -258,6 +258,27 @@ dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius); 
 dialog.confirm::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
 dialog.confirm p { margin: 0 0 1.1rem; line-height: 1.45; }
 dialog.confirm menu { display: flex; gap: .6rem; justify-content: flex-end; margin: 0; padding: 0; }
+.notice-banner { position: relative; }
+.notice-banner form.dismiss { position: absolute; top: .8rem; right: 1rem; margin: 0; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }
+.subnav { display: flex; gap: .3rem; margin: 0 0 1rem; border-bottom: 1px solid var(--border); }
+.subnav a { padding: .45rem .9rem; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; }
+.subnav a.active { color: var(--text, inherit); border-bottom-color: var(--accent); font-weight: 600; }
+.card.controls { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; align-items: flex-end; }
+.card.controls form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-end; margin: 0; }
+.card.controls .field { margin: 0; }
+.posture-kpis { margin-bottom: 1rem; }
+.kpi.alarm { border-color: var(--down); }
+.kpi.alarm b { color: var(--down); }
+.kpi.warn b { color: var(--flat); }
+.kpi b i { font-size: .8rem; font-style: normal; color: var(--muted); font-weight: 400; }
+.posture-charts { margin-bottom: 1rem; }
+.chart.pie { height: 210px; }
+.posture-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; cursor: pointer; padding: .35rem 0; }
+.posture-head .hosts { color: var(--muted); }
+.posture-head form.renew { margin-left: auto; }
+details.posture-detail { border-bottom: 1px solid var(--border); padding: .2rem 0; }
+.section-title { margin: 1.2rem 0 .6rem; }
 td.tags { white-space: normal; min-width: 10rem; }
 form.tag { display: inline-flex; align-items: center; margin: 0 .2rem .2rem 0; }
 form.tag .pill { text-transform: none; text-decoration: none; }

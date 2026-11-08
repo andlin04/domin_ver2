@@ -271,7 +271,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
-                    posture_rows=posture_rows, host_tags=host_tags, suggested=suggested,
+                    posture_report=posture.report(posture_rows), host_tags=host_tags, suggested=suggested,
                     tag_counts=dict(sorted(tag_counts.items())), tag=tag)
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -892,12 +892,38 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         dom = ctx.pop("posture_domain", None)
         if dom is None:
             dom = request.query_params.get("domain", "")
+        host = request.query_params.get("host", "")
         with conn() as c:
             known = posture.domains(c)
             dom = dom if dom in known else ""
-            ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=posture.hosts(c, dom) if dom else [],
-                       posture_rows=posture.current(c, dom), profiles=posture.profiles(c))
+            hosts = posture.hosts(c, dom) if dom else []
+            host = host if host in hosts else ""
+            ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
+                       report=posture.report(posture.current(c, dom), host), profiles=posture.profiles(c),
+                       show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
+
+    @app.post(base + "/security/dismiss-notice", include_in_schema=False)
+    async def dismiss_notice(request: Request):
+        """Hide the authorised-use banner for this user, for good."""
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            admin.kv_set(c, f"dismiss:auth-notice:{u['id']}", db.now())
+        return back(f"{base}/security")
+
+    def lookup_view(request, u, s, ctx):
+        return shell(request, "lookup.html", u, s, ctx.pop("status", 200), **ctx)
+
+    @app.get(base + "/security/lookup", response_class=HTMLResponse, include_in_schema=False)
+    def lookup_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+        return lookup_view(request, u, s, security_ctx())
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
     def security_page(request: Request):
@@ -1021,22 +1047,22 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
             if not users.can(u["role"], "analyst"):
-                return security_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
+                return lookup_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
             if data.get("kind") == "host":
                 tgt = (data.get("target") or "").strip()
                 ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
                 if not fingerprint.valid_target(tgt):
-                    return security_view(request, u, s, security_ctx(
+                    return lookup_view(request, u, s, security_ctx(
                         422, form=data, error="Enter one host name or IPv4 address to fingerprint."))
                 if not fingerprint.valid_ports(ports):
-                    return security_view(request, u, s, security_ctx(
+                    return lookup_view(request, u, s, security_ctx(
                         422, form=data, error="Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024)."))
                 name, ips = fingerprint.resolve(tgt)
                 if not ips:
-                    return security_view(request, u, s, security_ctx(
+                    return lookup_view(request, u, s, security_ctx(
                         422, form=data, error=f"Could not resolve {tgt}."))
                 if not all(users.posture_ip_in_scope(c, ip) for ip in ips):
-                    return security_view(request, u, s, security_ctx(
+                    return lookup_view(request, u, s, security_ctx(
                         403, form=data,
                         error=f"{name} ({', '.join(ips)}) is outside the posture scope. Add it under Settings first."))
                 host_params = (ips[0], name, ports)
@@ -1044,16 +1070,16 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 try:
                     target = cve.parse_target(data)
                 except ValueError as exc:
-                    return security_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
+                    return lookup_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
         if host_params is not None:
             ip0, name, ports = host_params
             scan = await run_in_threadpool(
                 fingerprint.scan, ip0, cve_db=cve_db, client=http, api_key=settings.nvd_api_key,
                 ports=ports, display=name)
-            return security_view(request, u, s, security_ctx(host_result=scan, form=data))
+            return lookup_view(request, u, s, security_ctx(host_result=scan, form=data))
         result = await run_in_threadpool(cve.lookup, cve_db, target, http, settings.nvd_api_key)
         result["label"] = cve.target_label(target)
-        return security_view(request, u, s, security_ctx(result=result, form=data))
+        return lookup_view(request, u, s, security_ctx(result=result, form=data))
 
     # --- tuning and jobs (admin or analyst) ----------------------------------------------------------------------
 

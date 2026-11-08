@@ -6,25 +6,8 @@
   <p class="muted">Named parameter sets for posture scans. Pick one on the <a href="{{ base }}/security#posture">Posture</a>
     form; each scan keeps the parameters it ran with. Connect scan only (nmap -sT -sV, no OS detection).</p></div></section>
 
+{% set sub = "profiles" %}{% include "_posture_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-
-<section class="card">
-  <h2>Profiles <small>{{ profiles|length }}</small></h2>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Ports</th><th class="num">Version intensity</th><th class="num">Timing</th>
-      <th class="num">Timeout (s)</th><th>Note</th><th>Updated</th><th></th></tr></thead>
-    <tbody>{% for p in profiles %}<tr>
-      <td><b>{{ p.name }}</b></td><td class="mono"><div class="lines2" title="{{ p.ports }}">{{ p.ports }}</div></td>
-      <td class="num">{{ p.intensity }}</td><td class="num">T{{ p.timing }}</td><td class="num">{{ p.timeout }}</td>
-      <td>{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
-      <td>{% if user.role in ('admin', 'analyst') and p.name != 'default' %}
-        <form method="post" action="{{ base }}/security/profiles/{{ p.name }}/delete" class="inline"
-              data-confirm="Delete scan profile {{ p.name }}? Past scans keep their parameters.">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="btn small" type="submit">Delete</button></form>{% endif %}</td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-</section>
 
 {% if user.role in ('admin', 'analyst') %}
 <section class="card">
@@ -50,4 +33,23 @@
   </form>
 </section>
 {% endif %}
+
+<section class="card">
+  <h2>Profiles <small>{{ profiles|length }}</small></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Ports</th><th class="num">Version intensity</th><th class="num">Timing</th>
+      <th class="num">Timeout (s)</th><th>Note</th><th>Updated</th><th></th></tr></thead>
+    <tbody>{% for p in profiles %}<tr>
+      <td><b>{{ p.name }}</b></td><td class="mono"><div class="lines2" title="{{ p.ports }}">{{ p.ports }}</div></td>
+      <td class="num">{{ p.intensity }}</td><td class="num">T{{ p.timing }}</td><td class="num">{{ p.timeout }}</td>
+      <td>{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
+      <td>{% if user.role in ('admin', 'analyst') and p.name != 'default' %}
+        <form method="post" action="{{ base }}/security/profiles/{{ p.name }}/delete" class="inline"
+              data-confirm="Delete scan profile {{ p.name }}? Past scans keep their parameters.">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="btn small" type="submit">Delete</button></form>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
 {% endblock %}

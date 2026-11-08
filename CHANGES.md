@@ -2,6 +2,23 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: posture report first; clearer navigation
+
+- **Posture page** (was Security) is ordered for a security administrator: controls on top (domain, host, scan
+  target, profile, *Scan / renew*), then the risk summary (critical and high CVEs, addresses with high+, distinct
+  CVEs, open ports, stale > 30 days and failed scans), three pie charts (CVEs by severity, addresses by worst
+  finding, exposed services), one **Vulnerabilities** table (each CVE once, worst first, with the affected product,
+  where it is (host:port, linked) and the fixed-in version), then the addresses as expandable headlines, worst first,
+  with *Renew* in the headline and the services, CVEs, parameters and raw output inside.
+- A **Host** pick narrows the report to one host name.
+- A domain's page shows signed-in users the same report at the top, above the inventory.
+- Sub-tabs: Posture · Scan profiles · **CVE look-up** (the product/package look-up and ad-hoc host fingerprint moved
+  to their own page). On Scan profiles the add/change form comes first.
+- Menu renamed: Overview → **Inventory**, Drilldown (All) → **All records**, Tools → **Whois & e-mail**, Security →
+  **Posture**, Dashboard → **Operations**. URLs are unchanged.
+- The **Authorized use only** banner has a *Dismiss* link that hides it for that user for good (stored per user).
+- No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: host tags with suggested classification
 
 - Signed-in users see a **Tags** column on a domain's records; analysts and admins add a tag (type it, Enter),

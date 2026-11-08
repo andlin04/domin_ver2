@@ -1,0 +1,81 @@
+{# Posture report: rep = posture.report(...); renew_base = admin base; can_run = analyst or admin; csrf #}
+{% set k = rep.kpi %}
+{% if not rep.rows %}
+<p class="muted card">No posture scans yet.</p>
+{% else %}
+<section class="kpis posture-kpis">
+  <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
+  <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
+  <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
+  <div class="kpi"><span>Distinct CVEs</span><b>{{ k.cves }}</b></div>
+  <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
+  <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
+  {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
+</section>
+
+<section class="grid g3 posture-charts">
+  <div class="card"><h2>CVEs by severity <small>distinct CVEs</small></h2><div class="chart pie"><canvas id="pc-sev"></canvas></div></div>
+  <div class="card"><h2>Addresses by worst finding</h2><div class="chart pie"><canvas id="pc-worst"></canvas></div></div>
+  <div class="card"><h2>Exposed services <small>open ports by service</small></h2><div class="chart pie"><canvas id="pc-services"></canvas></div></div>
+</section>
+<script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Vulnerabilities <small>{{ rep.vulns|length }} distinct, worst first</small></h2>
+    {% if rep.vulns|length > 8 %}<input class="filter" placeholder="Filter CVE, product, host…" data-filter="#vulns" aria-label="Filter vulnerabilities">{% endif %}
+  </div>
+  {% if rep.vulns %}
+  <div class="table-wrap"><table id="vulns" class="sortable">
+    <thead><tr><th data-sort="text">Severity</th><th data-sort="num" class="num">CVSS</th><th data-sort="text">CVE</th>
+      <th data-sort="text">Affected product</th><th data-sort="text">Where</th><th data-sort="text">Fixed in</th><th>Summary</th></tr></thead>
+    <tbody>{% for v in rep.vulns %}<tr>
+      <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
+      <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '—' }}</td>
+      <td><a href="{{ v.url }}" rel="noopener noreferrer" target="_blank">{{ v.cve }}</a></td>
+      <td>{{ v.products|join(', ') }}</td>
+      <td class="small-print">{% for ip, h, port in v.targets %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}">{{ h or ip }}:{{ port }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td>{{ v.fixed or '—' }}</td>
+      <td><div class="lines2" title="{{ v.summary }}">{{ v.summary }}</div></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">No known CVEs on the scanned services.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Addresses <small>{{ rep.rows|length }}, worst first — open one for its services, CVEs and scan details</small></h2>
+  {% for p in rep.rows %}
+  <details class="svc posture-detail" id="pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}" {% if rep.rows|length == 1 %}open{% endif %}>
+    <summary class="posture-head">
+      <span class="pill sev-{{ p.worst if p.worst in ('critical','high','medium','low') else 'unknown' }}">{{ p.worst or p.status }}</span>
+      <b>{{ p.ip }}</b> <span class="hosts">{{ p.hosts.replace(',', ', ') }}</span>
+      {% if show_domain %}<small class="muted">{{ p.domain }}</small>{% endif %}
+      <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% if p.high %} · {{ p.high }} high+{% endif %}{% endif %}
+        · {{ (p.finished or p.created)[:16].replace('T', ' ') }}{% if p.stale %} <em class="flat">stale</em>{% endif %}
+        {% if p.pending %} · <em>renew {{ p.pending }}</em>{% endif %}</span>
+      {% if can_run and not p.pending and p.status not in ('queued', 'running') %}
+      <form method="post" action="{{ renew_base }}/security/posture" class="inline renew">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ p.domain }}">
+        <input type="hidden" name="ip" value="{{ p.ip }}"><input type="hidden" name="profile" value="{{ p.profile or 'default' }}">
+        <input type="hidden" name="ports" value="{{ p.ports }}">
+        <button class="btn small" type="submit">Renew</button></form>{% endif %}
+    </summary>
+    {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
+    {% if p.note %}<p class="note" role="status">{{ p.note }}</p>{% endif %}
+    {% if p.services %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Port</th><th>Service</th><th>Product / version</th><th>CVEs</th><th>Worst</th></tr></thead>
+      <tbody>{% for svc in p.services %}{% set f0 = svc.findings[0] if svc.findings else none %}<tr>
+        <td class="mono">{{ svc.port }}/{{ svc.proto }}</td><td>{{ svc.service or 'unknown' }}</td>
+        <td>{{ svc.product }} {{ svc.version }}</td>
+        <td>{% if svc.findings %}{% for f in svc.findings %}<a href="{{ f.url }}" rel="noopener noreferrer" target="_blank" title="{{ f.summary }}">{{ f.cve }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+          {% elif svc.matched %}<span class="muted">none known</span>{% else %}<span class="muted">no CPE to match</span>{% endif %}</td>
+        <td>{% if f0 %}<span class="pill sev-{{ f0.severity }}">{{ f0.severity }}{% if f0.score is not none %} {{ '%.1f'|format(f0.score) }}{% endif %}</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% include "_posture_raw.html" %}
+  </details>
+  {% endfor %}
+</section>
+{% endif %}

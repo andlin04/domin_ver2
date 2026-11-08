@@ -302,3 +302,54 @@ def test_dropping_a_domain_drops_its_host_tags(settings):
         tags.add(c, "www.other.example", "webserver", "ana")
         assert db.delete_domain(c, DOM)
         assert tags.for_hosts(c, ["nas.corp.example", "www.other.example"]) == {"www.other.example": ["webserver"]}
+
+
+# ---- posture report layout, look-up page, notice ----
+
+def test_report_summarises_worst_first():
+    rows = [{"ip": "172.20.4.60", "hosts": "nas.corp.example", "status": "done", "high": 0, "cves": 0,
+             "open_ports": 1, "finished": "2000-01-01T00:00:00", "pending": None,
+             "services": [{"port": 22, "service": "ssh", "findings": []}]},
+            {"ip": "172.20.4.50", "hosts": "www.corp.example", "status": "done", "high": 1, "cves": 1,
+             "open_ports": 1, "finished": "2999-01-01T00:00:00", "pending": None,
+             "services": [{"port": 80, "service": "http", "product": "nginx", "version": "1.24.0",
+                           "findings": [{"cve": "CVE-2024-9999", "severity": "high", "score": 7.5, "summary": "x",
+                                         "url": "u", "fixed": "1.25"}]}]}]
+    rep = posture.report(rows)
+    assert [r["ip"] for r in rep["rows"]] == ["172.20.4.50", "172.20.4.60"]
+    assert rep["kpi"]["high"] == 1 and rep["kpi"]["exposed"] == 1 and rep["kpi"]["stale"] == 1
+    assert rep["vulns"][0]["targets"] == [("172.20.4.50", "www.corp.example", 80)]
+    assert rep["vulns"][0]["products"] == ["nginx 1.24.0"]
+    assert {"label": "high", "n": 1} in rep["charts"]["sev"] and {"label": "none", "n": 1} in rep["charts"]["worst"]
+    assert [r["ip"] for r in posture.report(rows, host="nas.corp.example")["rows"]] == ["172.20.4.60"]
+
+
+def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        run_queue(settings)
+        page = h.get(f"/admin/security?domain={DOM}").text
+        order = [page.index(x) for x in ("Scan / renew", "Critical CVEs", "CVEs by severity", "Vulnerabilities",
+                                         "Addresses <small>")]
+        assert order == sorted(order)
+        assert 'id="posture-data"' in page and "CVE-2024-9999" in page
+        dom_page = h.get(f"/d/{DOM}").text
+        assert dom_page.index("Security posture") < dom_page.index("Records <small>")
+        assert "CVE look-up" in page and "Product (CPE)" in h.get("/admin/security/lookup").text
+
+
+def test_authorised_use_notice_can_be_dismissed_for_good(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "vee")
+        assert "Authorized use only" in h.get("/admin/security").text
+        assert h.post("/admin/security/dismiss-notice", data={"csrf": "x"}).status_code == 403
+        r = h.post("/admin/security/dismiss-notice", data={"csrf": csrf}, follow_redirects=False)
+        assert r.status_code == 303
+        assert "Authorized use only" not in h.get("/admin/security").text
+    with app_client(settings) as h:   # a new session of the same user: still gone; another user still sees it
+        sign_in(h, "vee")
+        assert "Authorized use only" not in h.get("/admin/security").text
+    with app_client(settings) as h:
+        sign_in(h, "ana")
+        assert "Authorized use only" in h.get("/admin/security").text

@@ -131,7 +131,7 @@ def test_search_across_domains(settings):
         assert "drill.js" in h.get("/").text and 'data-drill="/data/drill.json?scope=latest' in h.get("/").text
         r = h.get("/all", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
-        assert '<a href="/all" class="active">Drilldown (All)</a>' in r.text and 'id="page-data"' in r.text
+        assert '<a href="/all" class="active">All records</a>' in r.text and 'id="page-data"' in r.text
         assert "old.example.se" in h.get("/search", params={"q": "old", "scope": "all"}).text   # first address
         assert "old.example.se" not in h.get("/all", params={"q": "old"}).text
         r = h.get("/all", params={"q": "nothing-like-this"})

@@ -1,238 +1,66 @@
 {% extends "base.html" %}
-{% block title %}Security · domin{% endblock %}
+{% block title %}Posture · domin{% endblock %}
 {% block page %}security{% endblock %}
 {% block content %}
-<section class="hero"><div><h1>Security portal</h1>
-  <p class="muted">Look up known vulnerabilities (CVEs) for a product or package version. Source:
-    <b>{{ cve_source }}</b> — updated continuously upstream. This instance keeps a local CVE database
-    ({{ cve_mode }} mode, {{ cve_count }} target(s) cached).</p></div></section>
-
-<section class="card warn-card">
+<section class="hero"><div><h1>Security posture</h1>
+  <p class="muted">What is exposed and vulnerable across the inventoried domains: worst findings first.
+    {% if posture_domain %}Showing <b>{{ posture_domain }}</b>{% if posture_host %} · host <b>{{ posture_host }}</b>{% endif %}.
+    {% else %}Showing all domains.{% endif %}</p></div></section>
+{% set sub = "posture" %}{% include "_posture_nav.html" %}
+{% if show_notice %}
+<section class="card warn-card notice-banner">
+  <form method="post" action="{{ base }}/security/dismiss-notice" class="dismiss">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="link-btn" type="submit" title="Hide this notice for good">Dismiss</button></form>
   <h2>Authorized use only</h2>
   <p>This area is for authorised vulnerability management of infrastructure you own or are explicitly permitted to
     assess. Keep the scope limited to the domains and address ranges you control (Settings), and keep a record of
     your authorisation for each assessment.</p>
 </section>
+{% endif %}
+
+<section class="card controls">
+  <form method="get" action="{{ base }}/security" class="inline posture-pick">
+    <label class="field">Domain
+      <select name="domain" data-autosubmit data-reset="host">
+        <option value="">All domains</option>
+        {% for d in posture_domains %}<option value="{{ d }}" {% if d == posture_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}
+      </select></label>
+    {% if posture_domain %}
+    <label class="field">Host
+      <select name="host" data-autosubmit>
+        <option value="">All hosts</option>
+        {% for h in posture_hosts %}<option value="{{ h }}" {% if h == posture_host %}selected{% endif %}>{{ h }}</option>{% endfor %}
+      </select></label>{% endif %}
+    <button class="btn" type="submit">Show</button>
+  </form>
+  {% if posture_domain and user.role in ('admin', 'analyst') %}
+  <form method="post" action="{{ base }}/security/posture" class="inline posture-run">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="domain" value="{{ posture_domain }}">
+    <label class="field">Scan target
+      <select name="host">
+        <option value="">Whole domain ({{ posture_hosts|length }} host names)</option>
+        {% for h in posture_hosts %}<option value="{{ h }}" {% if (form.get('host') or posture_host) == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
+      </select></label>
+    <label class="field">Profile
+      <select name="profile">
+        {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %}</option>{% endfor %}
+      </select></label>
+    <label class="field">Ports <small>optional override</small>
+      <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile" size="12"
+        spellcheck="false" autocapitalize="off"></label>
+    <button class="btn primary" type="submit">Scan / renew</button>
+  </form>
+  {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
+  {% endif %}
+</section>
 
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 
-<section class="card" id="posture">
-  <h2>Posture <small>stage 2: fingerprint + CVEs of a domain's inventoried addresses</small></h2>
-  <form method="get" action="{{ base }}/security#posture" class="inline posture-pick">
-    <label class="field">Domain <small>from the inventory (latest scan)</small>
-      <select name="domain">
-        <option value="">All domains</option>
-        {% for d in posture_domains %}<option value="{{ d }}" {% if d == posture_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}
-      </select></label>
-    <button class="btn" type="submit">Show</button>
-  </form>
-  {% if posture_domain and user.role in ('admin', 'analyst') %}
-  <form method="post" action="{{ base }}/security/posture" class="posture-run">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="domain" value="{{ posture_domain }}">
-    <div class="grid g3">
-      <label class="field">Target
-        <select name="host">
-          <option value="">Whole domain ({{ posture_hosts|length }} host name(s))</option>
-          {% for h in posture_hosts %}<option value="{{ h }}" {% if form.get('host') == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
-        </select></label>
-      <label class="field">Profile <small><a href="{{ base }}/security/profiles">edit profiles</a></small>
-        <select name="profile">
-          {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %}</option>{% endfor %}
-        </select></label>
-      <label class="field">Ports <small>optional: overrides the profile's list</small>
-        <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile"
-          spellcheck="false" autocapitalize="off"></label>
-      <span class="muted small-print">Only addresses inside the posture scope (Settings: IP and country rules) are
-        scanned. Connect scan only (nmap -sT -sV); the worker runs the queue one address at a time.</span>
-    </div>
-    <p><button class="btn primary" type="submit">Scan / renew</button></p>
-  </form>
-  {% elif not posture_domain %}<p class="muted">Pick a domain to start or renew a posture scan.</p>
-  {% endif %}
+{% with rep=report, renew_base=base, can_run=user.role in ('admin', 'analyst'), show_domain=not posture_domain %}
+{% include "_posture_report.html" %}
+{% endwith %}
 
-  {% if posture_rows %}
-  <div class="table-wrap"><table>
-    <thead><tr>{% if not posture_domain %}<th>Domain</th>{% endif %}<th>Address</th><th>Host names</th><th>Status</th>
-      <th class="num">Open ports</th><th class="num">CVEs</th><th class="num">High+</th><th>Scanned</th><th></th></tr></thead>
-    <tbody>{% for p in posture_rows %}<tr>
-      {% if not posture_domain %}<td><a href="{{ base }}/security?domain={{ p.domain }}#posture">{{ p.domain }}</a></td>{% endif %}
-      <td><a href="#ps-{{ p.id }}">{{ p.ip }}</a></td>
-      <td>{{ p.hosts.replace(',', ', ') }}</td>
-      <td><span class="pill {{ 'sev-critical' if p.status == 'failed' else 'sev-low' if p.status == 'done' else 'sev-unknown' }}">{{ p.status }}</span>
-        {% if p.pending %}<span class="pill sev-unknown">renew {{ p.pending }}</span>{% endif %}</td>
-      <td class="num">{{ p.open_ports if p.status == 'done' else '—' }}</td>
-      <td class="num">{{ p.cves if p.status == 'done' else '—' }}</td>
-      <td class="num">{% if p.high %}<span class="pill sev-critical">{{ p.high }}</span>{% elif p.status == 'done' %}0{% else %}—{% endif %}</td>
-      <td>{{ p.finished or p.created }}</td>
-      <td>{% if user.role in ('admin', 'analyst') and not p.pending and p.status not in ('queued', 'running') %}
-        <form method="post" action="{{ base }}/security/posture">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="hidden" name="domain" value="{{ p.domain }}">
-          <input type="hidden" name="ip" value="{{ p.ip }}">
-          <input type="hidden" name="profile" value="{{ p.profile or 'default' }}">
-          <input type="hidden" name="ports" value="{{ p.ports }}">
-          <button class="btn small" type="submit">Renew</button></form>{% endif %}</td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-
-  {% for p in posture_rows if p.status in ('done', 'failed') %}
-  <details class="svc posture-detail" id="ps-{{ p.id }}">
-    <summary><b>{{ p.ip }}</b> · {{ p.hosts.replace(',', ', ') }}
-      <small class="muted">{{ p.domain }} · profile {{ p.profile or '—' }} · {{ p.finished }} by
-        {{ p.requested_by or '—' }}</small></summary>
-    {% include "_posture_raw.html" %}
-    {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
-    {% if p.note %}<p class="note" role="status">{{ p.note }}</p>{% endif %}
-    {% for svc in p.services %}
-    <div class="svc">
-      <h3>{{ svc.port }}/{{ svc.proto }} · {{ svc.service or 'unknown' }}
-        {% if svc.product %}<small>{{ svc.product }} {{ svc.version }}</small>{% endif %}
-        {% set crit = svc.findings|selectattr('severity', 'in', ['critical', 'high'])|list|length %}
-        {% if svc.findings %}<span class="pill {{ 'sev-critical' if crit else 'sev-medium' }}">{{ svc.findings|length }}
-          CVE(s){% if crit %}, {{ crit }} high+{% endif %}</span>
-        {% elif svc.matched %}<span class="pill sev-low">no known CVEs</span>
-        {% else %}<span class="pill sev-unknown">no CPE to match</span>{% endif %}</h3>
-      {% if svc.findings %}
-      <div class="table-wrap"><table>
-        <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th></tr></thead>
-        <tbody>{% for f in svc.findings %}<tr>
-          <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
-          <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
-          <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
-          <td>{{ f.fixed or '—' }}</td>
-          <td>{{ f.summary }}</td>
-        </tr>{% endfor %}</tbody>
-      </table></div>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </details>
-  {% endfor %}
-  {% elif posture_domain %}<p class="muted">No posture scans for {{ posture_domain }} yet.</p>
-  {% endif %}
-</section>
-
-{% if user.role in ('admin', 'analyst') %}
-<section class="card">
-  <h2>Look up CVEs</h2>
-  <form method="post" action="{{ base }}/security/scan" class="cve-form">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="tabs" role="radiogroup" aria-label="Target type">
-      <label class="tick"><input type="radio" name="kind" value="cpe"
-        {% if form.get('kind', 'cpe') == 'cpe' %}checked{% endif %}> Product (CPE)</label>
-      <label class="tick"><input type="radio" name="kind" value="osv"
-        {% if form.get('kind') == 'osv' %}checked{% endif %}> Package (OSV ecosystem)</label>
-      <label class="tick"><input type="radio" name="kind" value="host"
-        {% if form.get('kind') == 'host' %}checked{% endif %}> Host (fingerprint)</label>
-    </div>
-    <div class="grid g3">
-      <label class="field">Host <small>name or IPv4 to fingerprint (nmap -sT -sV)</small>
-        <input name="target" value="{{ form.get('target', '') }}" spellcheck="false" autocapitalize="off"></label>
-      <label class="field">Ports <small>default: common services</small>
-        <input name="ports" value="{{ form.get('ports', '') }}" placeholder="{{ default_ports }}"
-          spellcheck="false" autocapitalize="off"></label>
-      <span class="muted small-print">The target's resolved address must be inside the posture scope (Settings).
-        Connect scan only — no OS detection, no raw packets.</span>
-    </div>
-    <div class="grid g3">
-      <label class="field">Vendor <small>CPE, e.g. proxmox</small>
-        <input name="vendor" value="{{ form.get('vendor', '') }}" spellcheck="false" autocapitalize="off"></label>
-      <label class="field">Product <small>e.g. virtual_environment</small>
-        <input name="product" value="{{ form.get('product', '') }}" spellcheck="false" autocapitalize="off"></label>
-      <label class="field">Part
-        <select name="part">
-          {% for p, lbl in [('a', 'application'), ('o', 'operating system'), ('h', 'hardware')] %}
-          <option value="{{ p }}" {% if form.get('part', 'a') == p %}selected{% endif %}>{{ lbl }}</option>
-          {% endfor %}
-        </select></label>
-    </div>
-    <div class="grid g3">
-      <label class="field">Ecosystem <small>OSV, e.g. Debian:13, PyPI, Go</small>
-        <input name="ecosystem" value="{{ form.get('ecosystem', '') }}" spellcheck="false" autocapitalize="off"></label>
-      <label class="field">Package <small>OSV package name</small>
-        <input name="name" value="{{ form.get('name', '') }}" spellcheck="false" autocapitalize="off"></label>
-      <label class="field">Version <small>required</small>
-        <input name="version" value="{{ form.get('version', '') }}" spellcheck="false" autocapitalize="off" required></label>
-    </div>
-    <p><button class="btn primary" type="submit">Look up CVEs</button>
-      <span class="muted small-print">CPE fields use NVD; OSV fields use OSV.dev. Fill the row that matches your
-        target.</span></p>
-  </form>
-</section>
-{% else %}
-<section class="card"><p class="muted">Signed in as <b>{{ user.role }}</b>. Running a CVE look-up needs the
-  analyst role.</p></section>
-{% endif %}
-
-{% if result is not none %}
-<section class="card">
-  <h2>{{ result.label }}
-    <small>{{ result.findings|length }} CVE(s){% if result.cached %} · from the local database{% endif %}</small></h2>
-  {% if result.note %}<p class="note" role="status">{{ result.note }}</p>{% endif %}
-  {% if result.findings %}
-  <div class="table-wrap"><table>
-    <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
-      <th>Source</th></tr></thead>
-    <tbody>{% for f in result.findings %}<tr>
-      <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
-      <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
-      <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
-      <td>{{ f.fixed or '—' }}</td>
-      <td>{{ f.summary }}</td>
-      <td>{{ f.source }}</td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-  {% else %}<p class="muted">No known vulnerabilities matched this version.</p>{% endif %}
-</section>
-{% endif %}
-
-{% if host_result is not none %}
-<section class="card">
-  <h2>{{ host_result.target }}
-    <small>{{ host_result.ip }} · {{ host_result.services|length }} open port(s)</small></h2>
-  {% if host_result.error %}<p class="note bad" role="alert">{{ host_result.error }}</p>{% endif %}
-  {% if host_result.note %}<p class="note" role="status">{{ host_result.note }}</p>{% endif %}
-  {% for svc in host_result.services %}
-  <div class="svc">
-    <h3>{{ svc.port }}/{{ svc.proto }} · {{ svc.service or 'unknown' }}
-      {% if svc.product %}<small>{{ svc.product }} {{ svc.version }}</small>{% endif %}
-      {% set crit = svc.findings|selectattr('severity', 'in', ['critical', 'high'])|list|length %}
-      {% if svc.findings %}<span class="pill {{ 'sev-critical' if crit else 'sev-medium' }}">{{ svc.findings|length }}
-        CVE(s){% if crit %}, {{ crit }} high+{% endif %}</span>
-      {% elif svc.matched %}<span class="pill sev-low">no known CVEs</span>
-      {% else %}<span class="pill sev-unknown">no CPE to match</span>{% endif %}</h3>
-    {% if svc.findings %}
-    <div class="table-wrap"><table>
-      <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
-        <th>Source</th></tr></thead>
-      <tbody>{% for f in svc.findings %}<tr>
-        <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
-        <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
-        <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
-        <td>{{ f.fixed or '—' }}</td>
-        <td>{{ f.summary }}</td>
-        <td>{{ f.source }}</td>
-      </tr>{% endfor %}</tbody>
-    </table></div>
-    {% endif %}
-  </div>
-  {% endfor %}
-</section>
-{% endif %}
-
-<section class="card">
-  <h2>About the CVE database</h2>
-  <ul class="bullets">
-    <li>Source: {{ cve_source }} (OSV.dev for packages, NVD for products matched by CPE) — the same sources the
-      infrastructure vulnerability watch uses. Both update continuously as advisories are published.</li>
-    <li>Mode: <b>{{ cve_mode }}</b>. {% if cve_mode == 'own' %}This instance maintains its own database at
-      <code>{{ cve_db }}</code>, re-querying a target older than {{ cve_ttl }} day(s).{% else %}This instance reads a
-      shared database at <code>{{ cve_db }}</code>, read-only; it does not query the network.{% endif %}</li>
-    <li>Host fingerprinting (the <b>Host</b> tab) runs an nmap connect scan (<code>-sT -sV</code>, no OS detection,
-      no raw packets) of an in-scope address, then matches each service's CPEs against the sources above. You can
-      also enter a product or package version by hand.</li>
-  </ul>
-</section>
 {% endblock %}

@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import sqlite3
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -166,6 +167,56 @@ def current(conn: sqlite3.Connection, domain: str = "", limit: int = 500) -> lis
             d["pending"] = None
         out.append(d)
     return out
+
+
+SEVERITIES = ("critical", "high", "medium", "low", "unknown")
+STALE_DAYS = 30
+
+
+def report(rows: list[dict], host: str = "") -> dict:
+    """Summary of current posture rows for the report: KPIs, chart series and one vulnerability table (each CVE once,
+    worst first, with the addresses and host names it affects). Rows gain `worst` (their worst severity, "none" for
+    a clean scan, "" when nothing finished). host narrows the rows to one host name."""
+    if host:
+        rows = [r for r in rows if host in (r.get("hosts") or "").split(",")]
+    cutoff = (datetime.now() - timedelta(days=STALE_DAYS)).isoformat(timespec="seconds")
+    vulns: dict[str, dict] = {}
+    services: dict[str, int] = {}
+    worst_n = dict.fromkeys((*SEVERITIES, "none", "not scanned"), 0)
+    for r in rows:
+        sevs = set()
+        for s in r["services"]:
+            label = s.get("service") or "unknown"
+            services[label] = services.get(label, 0) + 1
+            for f in s.get("findings") or []:
+                sevs.add(f["severity"])
+                v = vulns.setdefault(f["cve"], {**f, "targets": [], "products": set()})
+                tgt = (r["ip"], (r.get("hosts") or "").split(",")[0], s["port"])
+                if tgt not in v["targets"]:
+                    v["targets"].append(tgt)
+                v["products"].add(f"{s.get('product') or label} {s.get('version') or ''}".strip())
+        done = r["status"] == "done"
+        r["worst"] = next((x for x in SEVERITIES if x in sevs), "none") if done else ""
+        r["stale"] = bool(r.get("finished") and r["finished"] < cutoff)
+        worst_n[r["worst"] or "not scanned"] += 1
+    table = sorted(vulns.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
+    for v in table:
+        v["products"] = sorted(v["products"])
+    rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
+    rows = sorted(rows, key=lambda r: (rank[r["worst"]], -r["high"], -r["cves"], r["ip"]))
+    by_sev = {s: sum(1 for v in table if v["severity"] == s) for s in SEVERITIES}
+    return {
+        "rows": rows, "vulns": table, "by_sev": by_sev,
+        "kpi": {"addresses": len(rows), "exposed": sum(1 for r in rows if r["worst"] in ("critical", "high")),
+                "cves": len(table), "critical": by_sev["critical"], "high": by_sev["high"],
+                "open_ports": sum(r["open_ports"] for r in rows if r["status"] == "done"),
+                "failed": sum(1 for r in rows if r["status"] == "failed"),
+                "pending": sum(1 for r in rows if r.get("pending") or r["status"] in ("queued", "running")),
+                "stale": sum(1 for r in rows if r["stale"])},
+        "charts": {"sev": [{"label": s, "n": n} for s, n in by_sev.items() if n],
+                   "worst": [{"label": s, "n": n} for s, n in worst_n.items() if n],
+                   "services": [{"label": k, "n": n} for k, n in sorted(services.items(), key=lambda x: -x[1])[:8]]},
+    }
 
 
 def domains(conn: sqlite3.Connection) -> list[str]:

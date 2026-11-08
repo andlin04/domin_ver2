@@ -372,9 +372,40 @@ $$("form[data-confirm]").forEach((f) => f.addEventListener("submit", (ev) => {
   });
 }));
 
+// a pick-list that applies itself (CSP allows no inline handlers); data-reset names a field to clear first
+document.querySelectorAll("select[data-autosubmit]").forEach((s) => s.addEventListener("change", () => {
+  const other = s.dataset.reset && s.form.elements[s.dataset.reset];
+  if (other) other.value = "";
+  s.form.submit();
+}));
+
+// posture report pies: severity colours follow the pills
+function posturePies() {
+  const el = document.getElementById("posture-data");
+  if (!el) return;
+  const d = JSON.parse(el.textContent);
+  const sev = { critical: "#991b1b", high: css("--down"), medium: css("--flat"), low: css("--up"), unknown: "#64748b",
+                none: "#10b981", "not scanned": "#94a3b8" };
+  const pie = (id, rows, colours) => {
+    const c = document.getElementById(id);
+    if (!c) return;
+    if (!rows?.length) { c.parentElement.innerHTML = '<p class="muted">Nothing to show</p>'; return; }
+    new Chart(c, {
+      type: "doughnut",
+      data: { labels: rows.map((r) => r.label), datasets: [{ data: rows.map((r) => r.n), borderWidth: 0,
+              backgroundColor: colours ? rows.map((r) => colours[r.label] || "#64748b") : palette() }] },
+      options: { cutout: "55%", plugins: { legend: { position: "right" } } },
+    });
+  };
+  pie("pc-sev", d.sev, sev);
+  pie("pc-worst", d.worst, sev);
+  pie("pc-services", d.services);
+}
+
 const page = document.body.dataset.page;
 if (page === "tools") toolsPage();
 if (chartDefaults()) {
+  posturePies();
   if (page === "overview") overviewCharts();
   if (page === "domain") domainCharts();
   if (page === "all") allCharts();
