@@ -5,12 +5,13 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from domin import admin, db, jobs, scanner
+from domin import admin, db, jobs, scanner, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
 BASE = "/admin"
 PW = "correct horse battery"
+USER = "admin"
 UA = {"user-agent": "Mozilla/5.0 (Windows NT 10.0) Firefox/130.0"}
 
 
@@ -19,7 +20,7 @@ def settings(tmp_path):
     s = replace(Settings.from_env(), db_path=tmp_path / "t.db", admin_ips=("127.0.0.1", "192.0.2.0/24"))
     db.init(s.db_path)
     with db.connect(s.db_path) as c:
-        admin.set_password(c, PW)
+        users.create(c, USER, "admin", PW)
     return s
 
 
@@ -28,8 +29,8 @@ def client(settings, ip="127.0.0.1"):
     return TestClient(create_app(settings), base_url="https://testserver", client=(ip, 50000))
 
 
-def sign_in(h) -> str:
-    r = h.post(BASE + "/login", data={"password": PW}, follow_redirects=False)
+def sign_in(h, name=USER, password=PW) -> str:
+    r = h.post(BASE + "/login", data={"name": name, "password": password}, follow_redirects=False)
     assert r.status_code == 303 and COOKIE in r.cookies
     page = h.get(BASE)
     assert page.status_code == 200 and "Tuning" in page.text and page.headers["cache-control"] == "no-store"
