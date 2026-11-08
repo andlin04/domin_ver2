@@ -94,14 +94,24 @@ def hash_password(password: str) -> str:
     return f"scrypt${SCRYPT_LOG_N}${salt.hex()}${_scrypt(password, salt, SCRYPT_LOG_N).hex()}"
 
 
-def check_password(conn: sqlite3.Connection, password: str) -> bool:
-    stored = kv_get(conn, "admin_password")
+def password_matches(stored: str, password: str) -> tuple[bool, bool]:
+    """(ok, needs_rehash) for a stored scrypt$... hash; parses the 3-field (old N=2^14) and 4-field formats."""
     if not stored or not password:
-        return False
+        return False, False
     parts = stored.split("$")
-    log_n, salt, want = (14, *parts[1:]) if len(parts) == 3 else (int(parts[1]), *parts[2:])
+    try:
+        log_n, salt, want = (14, *parts[1:]) if len(parts) == 3 else (int(parts[1]), *parts[2:])
+    except (ValueError, IndexError):
+        return False, False
     ok = hmac.compare_digest(_scrypt(password, bytes.fromhex(salt), log_n).hex(), want)
-    if ok and log_n != SCRYPT_LOG_N:
+    return ok, ok and log_n != SCRYPT_LOG_N
+
+
+def check_password(conn: sqlite3.Connection, password: str) -> bool:
+    """Legacy single-password check (kept for the admin-password CLI before the first user exists)."""
+    stored = kv_get(conn, "admin_password")
+    ok, rehash = password_matches(stored or "", password)
+    if rehash:
         kv_set(conn, "admin_password", hash_password(password))   # sessions stay: same password
     return ok
 
@@ -115,12 +125,12 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def new_session(conn: sqlite3.Connection) -> str:
-    """Returns the cookie token; only its hash is stored, next to the session's CSRF token."""
+def new_session(conn: sqlite3.Connection, user_id: int | None = None) -> str:
+    """Returns the cookie token; only its hash is stored, next to the session's CSRF token and its user."""
     token = secrets.token_urlsafe(32)
     expires = (datetime.now() + timedelta(hours=SESSION_HOURS)).isoformat(timespec="seconds")
-    conn.execute("INSERT INTO admin_sessions (token_hash, csrf, expires) VALUES (?, ?, ?)",
-                 (_token_hash(token), secrets.token_urlsafe(24), expires))
+    conn.execute("INSERT INTO admin_sessions (token_hash, csrf, expires, user_id) VALUES (?, ?, ?, ?)",
+                 (_token_hash(token), secrets.token_urlsafe(24), expires, user_id))
     return token
 
 
@@ -135,6 +145,11 @@ def session(conn: sqlite3.Connection, token: str | None) -> dict | None:
 def end_session(conn: sqlite3.Connection, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (_token_hash(token),))
+
+
+def end_user_sessions(conn: sqlite3.Connection, user_id: int) -> None:
+    """Sign a user out everywhere (after a password, role or disable change)."""
+    conn.execute("DELETE FROM admin_sessions WHERE user_id = ?", (user_id,))
 
 
 def login_blocked(conn: sqlite3.Connection, client: str) -> bool:

@@ -59,8 +59,22 @@ CREATE TABLE IF NOT EXISTS ip_cache (
     asn TEXT, prefix TEXT, netname TEXT, descr TEXT, country TEXT,
     fetched TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- admin password, tuning, salts
-CREATE TABLE IF NOT EXISTS admin_sessions (token_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- tuning, salts, scope, set-pw tokens
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL DEFAULT '',   -- scrypt$log_n$salt$hash; '' until the first set-password
+    role TEXT NOT NULL DEFAULT 'viewer',       -- viewer | analyst | admin
+    totp_secret TEXT NOT NULL DEFAULT '',      -- '' = no second factor
+    totp_required INTEGER NOT NULL DEFAULT 0,
+    totp_last_step INTEGER NOT NULL DEFAULT -1,   -- last accepted TOTP step: a code works only once
+    recovery TEXT NOT NULL DEFAULT '[]',       -- json list of sha256 of the unused recovery codes
+    disabled INTEGER NOT NULL DEFAULT 0,
+    created TEXT NOT NULL,
+    last_login TEXT
+);
+CREATE TABLE IF NOT EXISTS admin_sessions (token_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires TEXT NOT NULL,
+    user_id INTEGER);
 CREATE TABLE IF NOT EXISTS admin_fails (client TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS visits (
     id INTEGER PRIMARY KEY,
@@ -120,6 +134,10 @@ def init(path: Path) -> None:
                         SELECT DISTINCT scan_id, ip, country FROM records WHERE ip != '' AND country != '')
                     GROUP BY scan_id) c
                 WHERE scans.id = c.scan_id""", EU_NAMES)
+        if "user_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(admin_sessions)")}:
+            conn.execute("ALTER TABLE admin_sessions ADD COLUMN user_id INTEGER")
+        from . import users  # local import: users -> admin -> db
+        users.migrate_legacy_admin(conn)
 
 
 def domain_id(conn: sqlite3.Connection, name: str, added: str | None = None) -> int:
