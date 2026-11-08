@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         with db.connect(settings.db_path) as conn:
             print(importer.import_dir(conn, args.reports))
     elif args.cmd == "scan":
-        name = normalize_domain(args.domain)
+        name = normalize_domain(args.domain, settings.internal_zones)
         if not name:
             print(f"not a domain: {args.domain}", file=sys.stderr)
             return 2

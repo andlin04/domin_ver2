@@ -494,6 +494,66 @@ def test_eu_share_per_scan_and_per_day(settings):
 def test_names_resolve_over_the_old_resolver_set():
     r = scanner._resolver()
     assert len(r.nameservers) == 8 and r.rotate and r.lifetime == 15
+    internal = scanner._resolver(("172.20.0.252",))
+    assert internal.nameservers == ["172.20.0.252"] and internal.lifetime == 15
+
+
+def test_internal_zone_names_validate_only_when_configured():
+    from domin.validate import is_internal
+    assert normalize_domain("srv.home.arpa") is None                       # arpa is private by default
+    assert normalize_domain("srv.home.arpa", ("home.arpa",)) == "srv.home.arpa"
+    assert normalize_domain("home.arpa", ("home.arpa",)) == "home.arpa"
+    assert normalize_domain("evil.arpa", ("home.arpa",)) is None           # a different arpa zone stays blocked
+    assert normalize_domain("corp.example", ("corp.example",)) == "corp.example"          # a public suffix is unaffected
+    assert is_internal("a.home.arpa", ("home.arpa",)) and not is_internal("a.example.se", ("home.arpa",))
+
+
+def test_internal_zones_and_dns_from_env(monkeypatch):
+    monkeypatch.setenv("DOMIN_INTERNAL_ZONES", "home.arpa, CORP.example")
+    monkeypatch.setenv("DOMIN_INTERNAL_DNS", "172.20.0.252")
+    s = Settings.from_env()
+    assert s.internal_zones == ("home.arpa", "corp.example") and s.internal_dns == ("172.20.0.252",)
+
+
+def test_internal_scan_resolves_privately_without_external_egress(settings):
+    import dns.resolver
+
+    class R:
+        def __init__(self, ip):
+            self.ip = ip
+
+        def to_text(self):
+            return self.ip
+
+    zone = {("srv.home.arpa", "A"): ["10.1.2.3"], ("www.srv.home.arpa", "A"): ["172.20.0.9"]}
+
+    class FakeRes:   # only answers from the LAN zone; MX/NS and everything else is NXDOMAIN
+        nameservers = ["172.20.0.252"]
+
+        def resolve(self, name, rtype):
+            recs = zone.get((name, rtype))
+            if recs:
+                return [R(x) for x in recs]
+            raise dns.resolver.NXDOMAIN
+
+    def no_egress(req):
+        raise AssertionError(f"an internal scan must not reach {req.url}")
+
+    s = replace(settings, internal_zones=("home.arpa",), internal_dns=("172.20.0.252",))
+    with db.connect(s.db_path) as c, httpx.Client(transport=httpx.MockTransport(no_egress)) as client:
+        records = scanner.run(c, "srv.home.arpa", s, client=client, resolver=FakeRes())
+    by_host = {r["host"]: r for r in records}
+    # private addresses the LAN lookup returns are kept and shown, labelled, not dropped
+    assert by_host["srv.home.arpa"]["ip"] == "10.1.2.3"
+    assert by_host["srv.home.arpa"]["netname"] == "Private/reserved"
+    assert by_host["www.srv.home.arpa"]["ip"] == "172.20.0.9"   # a common-name guess resolved on the LAN
+
+
+def test_api_scan_accepts_an_internal_zone_only_when_configured(settings):
+    with TestClient(create_app(replace(settings, internal_zones=("home.arpa",)))) as h:
+        assert h.post("/api/scan", json={"domain": "srv.home.arpa"}).status_code == 200
+    with TestClient(create_app(settings)) as h:   # not configured: the arpa suffix is refused
+        assert h.post("/api/scan", json={"domain": "srv.home.arpa"}).status_code == 422
 
 
 def test_country_is_address_location_when_the_table_is_loaded(settings, tmp_path):

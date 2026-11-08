@@ -2,6 +2,18 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: internal scan mode (LAN zones, no external egress)
+
+- `DOMIN_INTERNAL_ZONES` lists domain suffixes (e.g. `home.arpa,corp.example`) scanned as internal. A scan of a name
+  under one of these zones: resolves only over `DOMIN_INTERNAL_DNS` (the LAN DNS server, e.g. the house resolver),
+  discovers host names over that DNS alone (no crt.sh, no amass, no public resolvers), and does no RDAP owner
+  look-up — so an internal scan makes no outbound internet request and never leaks internal names upstream.
+- Names under a configured internal zone pass validation even when the suffix is otherwise private (so `home.arpa`
+  hosts can be scanned); a special-use suffix that is not a configured zone stays rejected.
+- Private/reserved addresses the lookup returns are kept and listed (labelled "Private/reserved"), as before — this
+  change makes the internal lookups actually return them instead of public DNS answers.
+- Reversible: unset `DOMIN_INTERNAL_ZONES` (scans go back to the public/external path); no data change.
+
 ## 2026-11-08: Settings tick-box to disable scan limits; nav keeps admin links
 
 - The **Settings** page gains a **Disable scan limits** tick-box (under "Scan limits"). With it on, `POST /api/scan`

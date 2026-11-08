@@ -407,7 +407,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         # JSON only: a cross-site form or no-cors fetch can't send it without a CORS preflight (which fails)
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
             raise HTTPException(415, "Send the request as application/json")
-        name = normalize_domain(body.domain)
+        name = normalize_domain(body.domain, settings.internal_zones)
         if not name:
             raise HTTPException(422, "Not a valid domain name")
         request.state.domain = name

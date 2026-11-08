@@ -10,10 +10,11 @@ PRIVATE_TLDS = {"arpa", "corp", "example", "home", "internal", "intranet", "inva
                 "localhost", "onion", "private", "test"}
 
 
-def normalize_domain(value: str) -> str | None:
+def normalize_domain(value: str, internal_zones: tuple[str, ...] = ()) -> str | None:
     """Lower-case registrable-style name (example.se, sub.example.co.uk) or None when it isn't a valid host name.
 
-    Accepts pasted URLs and e-mail addresses; IDNs are converted to punycode."""
+    Accepts pasted URLs and e-mail addresses; IDNs are converted to punycode. A name under one of internal_zones
+    (configured special-use zones such as home.arpa) is accepted even when its suffix is otherwise private."""
     if len(value or "") > 2048:   # a pasted URL may be long; anything longer is not worth parsing
         return None
     v = (value or "").strip().lower()
@@ -30,11 +31,16 @@ def normalize_domain(value: str) -> str | None:
     if not v or len(v) > 253:
         return None
     labels = v.split(".")
-    if len(labels) < 2 or not all(_LABEL.match(x) for x in labels) or not _TLD.match(labels[-1]) \
-            or labels[-1] in PRIVATE_TLDS:
+    private = labels[-1] in PRIVATE_TLDS and not any(is_under(v, z) for z in internal_zones)
+    if len(labels) < 2 or not all(_LABEL.match(x) for x in labels) or not _TLD.match(labels[-1]) or private:
         return None
     return v
 
 
 def is_under(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
+
+
+def is_internal(domain: str, zones: tuple[str, ...]) -> bool:
+    """True when the domain is one of the configured internal zones or a name under one."""
+    return any(is_under(domain, z) for z in zones)

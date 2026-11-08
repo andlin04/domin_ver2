@@ -26,7 +26,7 @@ import pycountry
 
 from . import admin, db, tools
 from .config import Settings
-from .validate import is_under, normalize_domain
+from .validate import is_internal, is_under, normalize_domain
 
 log = logging.getLogger("domin.scanner")
 
@@ -40,11 +40,16 @@ Progress = Callable[[str], None]
 RESOLVERS = os.path.join(os.path.dirname(__file__), "resolvers.txt")  # the old version's dns_list.txt
 
 
-def _resolver(timeout: float = 5.0, lifetime: float = 15.0) -> dns.resolver.Resolver:
-    """The old version's resolver set, tried in turn until one answers (it gave dig 15 s)."""
+def _resolver(nameservers: tuple[str, ...] | None = None, timeout: float = 5.0,
+              lifetime: float = 15.0) -> dns.resolver.Resolver:
+    """The given nameservers (an internal scan's LAN DNS), else the old version's public resolver set, tried in
+    turn until one answers (it gave dig 15 s)."""
     r = dns.resolver.Resolver(configure=False)
-    with open(RESOLVERS) as f:
-        r.nameservers = f.read().split()
+    if nameservers:
+        r.nameservers = list(nameservers)
+    else:
+        with open(RESOLVERS) as f:
+            r.nameservers = f.read().split()
     r.rotate, r.timeout, r.lifetime = True, timeout, lifetime
     return r
 
@@ -146,8 +151,8 @@ class Enricher:
     Country is where the address is located (DB-IP table, as the old version's geolocation) when that table is
     loaded; else the registry country from RDAP."""
 
-    def __init__(self, conn: sqlite3.Connection, lookup: Callable[[str], dict] = _rdap):
-        self.conn, self.lookup = conn, lookup
+    def __init__(self, conn: sqlite3.Connection, lookup: Callable[[str], dict] = _rdap, internal: bool = False):
+        self.conn, self.lookup, self.internal = conn, lookup, internal
         self.prefixes: list[tuple[ipaddress._BaseNetwork, dict]] = []
         self.cutoff = (datetime.now() - timedelta(days=CACHE_DAYS)).isoformat(timespec="seconds")
 
@@ -166,6 +171,8 @@ class Enricher:
         for net, info in self.prefixes:
             if addr.version == net.version and addr in net:
                 return info
+        if self.internal:   # internal scan: a public address is listed, but no external RDAP lookup
+            return {"asn": "", "prefix": "", "netname": "", "descr": "", "country": ""}
         try:
             info = self.lookup(ip)
         except Exception as exc:  # RDAP servers fail in many ways; the address is still worth listing
@@ -184,12 +191,17 @@ class Enricher:
 def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Progress = lambda _: None,
         client: httpx.Client | None = None, resolver: dns.resolver.Resolver | None = None,
         enricher: Enricher | None = None) -> list[dict]:
-    resolver = resolver or _resolver()
+    internal = is_internal(domain, settings.internal_zones)
+    resolver = resolver or _resolver(settings.internal_dns if internal else None)
     own_client = client is None
     client = client or tools.http_client()
     try:
         progress("discovering host names")
-        found = {domain} | from_crtsh(domain, client) | from_dns(domain, resolver) | from_amass(domain, settings.amass)
+        if internal:   # internal scan: discover over the LAN DNS only, no crt.sh/amass egress
+            found = {domain} | from_dns(domain, resolver)
+        else:
+            found = ({domain} | from_crtsh(domain, client) | from_dns(domain, resolver)
+                     | from_amass(domain, settings.amass))
         guessed = {f"{w}.{domain}" for w in COMMON} - found
         wildcard = wildcard_ips(domain, resolver)
     finally:
@@ -206,7 +218,7 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         hosts[h] = ips
     unique = sorted({ip for ips in hosts.values() for ip in ips})
     progress(f"looking up owners of {len(unique)} addresses")
-    enricher = enricher or Enricher(conn)
+    enricher = enricher or Enricher(conn, internal=internal)
     info = {}
     for i, ip in enumerate(unique, 1):
         info[ip] = enricher.get(ip)
