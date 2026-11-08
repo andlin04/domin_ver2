@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, db, jobs, tools, totp, users
+from . import admin, cve, db, jobs, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -484,7 +484,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         limit_lookups(request)
         return tools.email_security(d)
 
-    add_admin(app, settings, conn, page, client_ip)
+    add_admin(app, settings, conn, page, client_ip, client)
     return app
 
 
@@ -497,10 +497,11 @@ PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the
 PENDING_MIN = 5
 
 
-def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
+def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client) -> None:
     """The signed-in area under /admin (behind the optional DOMIN_ADMIN_IPS network allowlist). User accounts with
     roles (viewer/analyst/admin), optional TOTP second factor, a session cookie and a CSRF token per form."""
     base = ADMIN
+    cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
 
     async def form(request: Request) -> dict[str, str]:
         body = await request.body()
@@ -827,7 +828,16 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
 
-    # --- security portal placeholder (any signed-in user) --------------------------------------------------------
+    # --- security portal: CVE scan tool (view: any signed-in user; run: analyst or admin) ------------------------
+
+    def security_ctx(status: int = 200, result: dict | None = None, form: dict | None = None, error: str = ""):
+        return {"status": status, "result": result, "form": form or {}, "error": error,
+                "cve_source": cve.SOURCE, "cve_mode": settings.cve_db_mode,
+                "cve_db": str(settings.cve_db_file), "cve_ttl": settings.cve_ttl_days,
+                "cve_count": cve_db.size()}
+
+    def security_view(request, u, s, ctx):
+        return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
     def security_page(request: Request):
@@ -835,7 +845,24 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
             s, u = current(request, c)
             if not u:
                 return back()
-        return shell(request, "security.html", u, s)
+        return security_view(request, u, s, security_ctx())
+
+    @app.post(base + "/security/scan", include_in_schema=False)
+    async def security_scan(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not users.can(u["role"], "analyst"):
+                return security_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
+            try:
+                target = cve.parse_target(data)
+            except ValueError as exc:
+                return security_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
+        result = await run_in_threadpool(cve.lookup, cve_db, target, http, settings.nvd_api_key)
+        result["label"] = cve.target_label(target)
+        return security_view(request, u, s, security_ctx(result=result, form=data))
 
     # --- tuning and jobs (admin or analyst) ----------------------------------------------------------------------
 

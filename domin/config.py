@@ -26,6 +26,14 @@ class Settings:
     analytics_days: int = 180      # visit statistics older than this are deleted
     admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; empty = no admin page
     internal_ips: tuple[str, ...] = ()   # private API clients (over a VPN): POST /api/scan without visitor limits
+    cve_db_mode: str = "own"      # own = this instance maintains its CVE database; shared = read one from elsewhere
+    cve_db_path: str = ""         # shared mode: the database file to read; own mode: defaults next to db_path
+    cve_ttl_days: int = 7         # own mode: re-query a target whose cached result is older than this
+    nvd_api_key: str = ""         # optional, raises the NVD rate limit
+
+    @property
+    def cve_db_file(self) -> Path:
+        return Path(self.cve_db_path) if self.cve_db_path else self.db_path.parent / "cve_db.json"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -47,4 +55,8 @@ class Settings:
             analytics_days=int(env("DOMIN_ANALYTICS_DAYS", "180")),
             admin_ips=tuple(x.strip() for x in env("DOMIN_ADMIN_IPS", "").split(",") if x.strip()),
             internal_ips=tuple(x.strip() for x in env("DOMIN_INTERNAL_IPS", "").split(",") if x.strip()),
+            cve_db_mode="shared" if env("DOMIN_CVE_DB_MODE", "own").strip().lower() == "shared" else "own",
+            cve_db_path=env("DOMIN_CVE_DB_PATH", "").strip(),
+            cve_ttl_days=int(env("DOMIN_CVE_TTL_DAYS", "7")),
+            nvd_api_key=env("DOMIN_NVD_API_KEY", "").strip(),
         )

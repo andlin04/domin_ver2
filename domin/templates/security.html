@@ -3,22 +3,92 @@
 {% block page %}security{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Security portal</h1>
-  <p class="muted">Fingerprinting and CVE reports for inventoried hosts arrive in a later phase.</p></div></section>
+  <p class="muted">Look up known vulnerabilities (CVEs) for a product or package version. Source:
+    <b>{{ cve_source }}</b> — updated continuously upstream. This instance keeps a local CVE database
+    ({{ cve_mode }} mode, {{ cve_count }} target(s) cached).</p></div></section>
 
 <section class="card warn-card">
   <h2>Authorized use only</h2>
   <p>This area is for authorised vulnerability management of infrastructure you own or are explicitly permitted to
-    assess. Scanning or fingerprinting systems without authorisation may be unlawful. Keep the scope limited to
-    domains and address ranges you control (Settings), and keep a record of your authorisation for each assessment.</p>
+    assess. Keep the scope limited to the domains and address ranges you control (Settings), and keep a record of
+    your authorisation for each assessment.</p>
 </section>
 
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+{% if user.role in ('admin', 'analyst') %}
 <section class="card">
-  <h2>Coming next</h2>
+  <h2>Look up CVEs</h2>
+  <form method="post" action="{{ base }}/security/scan" class="cve-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="tabs" role="radiogroup" aria-label="Target type">
+      <label class="tick"><input type="radio" name="kind" value="cpe"
+        {% if form.get('kind', 'cpe') != 'osv' %}checked{% endif %}> Product (CPE)</label>
+      <label class="tick"><input type="radio" name="kind" value="osv"
+        {% if form.get('kind') == 'osv' %}checked{% endif %}> Package (OSV ecosystem)</label>
+    </div>
+    <div class="grid g3">
+      <label class="field">Vendor <small>CPE, e.g. proxmox</small>
+        <input name="vendor" value="{{ form.get('vendor', '') }}" spellcheck="false" autocapitalize="off"></label>
+      <label class="field">Product <small>e.g. virtual_environment</small>
+        <input name="product" value="{{ form.get('product', '') }}" spellcheck="false" autocapitalize="off"></label>
+      <label class="field">Part
+        <select name="part">
+          {% for p, lbl in [('a', 'application'), ('o', 'operating system'), ('h', 'hardware')] %}
+          <option value="{{ p }}" {% if form.get('part', 'a') == p %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select></label>
+    </div>
+    <div class="grid g3">
+      <label class="field">Ecosystem <small>OSV, e.g. Debian:13, PyPI, Go</small>
+        <input name="ecosystem" value="{{ form.get('ecosystem', '') }}" spellcheck="false" autocapitalize="off"></label>
+      <label class="field">Package <small>OSV package name</small>
+        <input name="name" value="{{ form.get('name', '') }}" spellcheck="false" autocapitalize="off"></label>
+      <label class="field">Version <small>required</small>
+        <input name="version" value="{{ form.get('version', '') }}" spellcheck="false" autocapitalize="off" required></label>
+    </div>
+    <p><button class="btn primary" type="submit">Look up CVEs</button>
+      <span class="muted small-print">CPE fields use NVD; OSV fields use OSV.dev. Fill the row that matches your
+        target.</span></p>
+  </form>
+</section>
+{% else %}
+<section class="card"><p class="muted">Signed in as <b>{{ user.role }}</b>. Running a CVE look-up needs the
+  analyst role.</p></section>
+{% endif %}
+
+{% if result is not none %}
+<section class="card">
+  <h2>{{ result.label }}
+    <small>{{ result.findings|length }} CVE(s){% if result.cached %} · from the local database{% endif %}</small></h2>
+  {% if result.note %}<p class="note" role="status">{{ result.note }}</p>{% endif %}
+  {% if result.findings %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
+      <th>Source</th></tr></thead>
+    <tbody>{% for f in result.findings %}<tr>
+      <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
+      <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
+      <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
+      <td>{{ f.fixed or '—' }}</td>
+      <td>{{ f.summary }}</td>
+      <td>{{ f.source }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">No known vulnerabilities matched this version.</p>{% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>About the CVE database</h2>
   <ul class="bullets">
-    <li>Host fingerprinting: open ports, service and TLS versions (connect probes, no raw-socket OS probing).</li>
-    <li>Offline CVE matching per host and per domain, from a locally mirrored vulnerability feed.</li>
-    <li>An exposure overview per domain, limited to the scope set in Settings.</li>
+    <li>Source: {{ cve_source }} (OSV.dev for packages, NVD for products matched by CPE) — the same sources the
+      infrastructure vulnerability watch uses. Both update continuously as advisories are published.</li>
+    <li>Mode: <b>{{ cve_mode }}</b>. {% if cve_mode == 'own' %}This instance maintains its own database at
+      <code>{{ cve_db }}</code>, re-querying a target older than {{ cve_ttl }} day(s).{% else %}This instance reads a
+      shared database at <code>{{ cve_db }}</code>, read-only; it does not query the network.{% endif %}</li>
+    <li>Host fingerprinting (open ports, service and TLS versions) that feeds these look-ups automatically is built
+      next; today you enter a product or package version by hand.</li>
   </ul>
-  <p class="muted">Nothing is probed yet; this is the signed-in landing page for the planned tools.</p>
 </section>
 {% endblock %}
