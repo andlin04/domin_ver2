@@ -37,8 +37,12 @@
           <option value="">Whole domain ({{ posture_hosts|length }} host name(s))</option>
           {% for h in posture_hosts %}<option value="{{ h }}" {% if form.get('host') == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
         </select></label>
-      <label class="field">Ports <small>default: common services</small>
-        <input name="ports" value="{{ form.get('ports', '') }}" placeholder="{{ default_ports }}"
+      <label class="field">Profile <small><a href="{{ base }}/security/profiles">edit profiles</a></small>
+        <select name="profile">
+          {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %}</option>{% endfor %}
+        </select></label>
+      <label class="field">Ports <small>optional: overrides the profile's list</small>
+        <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile"
           spellcheck="false" autocapitalize="off"></label>
       <span class="muted small-print">Only addresses inside the posture scope (Settings: IP and country rules) are
         scanned. Connect scan only (nmap -sT -sV); the worker runs the queue one address at a time.</span>
@@ -67,6 +71,7 @@
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <input type="hidden" name="domain" value="{{ p.domain }}">
           <input type="hidden" name="ip" value="{{ p.ip }}">
+          <input type="hidden" name="profile" value="{{ p.profile or 'default' }}">
           <input type="hidden" name="ports" value="{{ p.ports }}">
           <button class="btn small" type="submit">Renew</button></form>{% endif %}</td>
     </tr>{% endfor %}</tbody>
@@ -75,8 +80,9 @@
   {% for p in posture_rows if p.status in ('done', 'failed') %}
   <details class="svc posture-detail" id="ps-{{ p.id }}">
     <summary><b>{{ p.ip }}</b> · {{ p.hosts.replace(',', ', ') }}
-      <small class="muted">{{ p.domain }} · ports {{ p.ports if p.ports|length < 40 else 'custom/default list' }} ·
-        {{ p.finished }} by {{ p.requested_by or '—' }}</small></summary>
+      <small class="muted">{{ p.domain }} · profile {{ p.profile or '—' }} · {{ p.finished }} by
+        {{ p.requested_by or '—' }}</small></summary>
+    {% include "_posture_raw.html" %}
     {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
     {% if p.note %}<p class="note" role="status">{{ p.note }}</p>{% endif %}
     {% for svc in p.services %}

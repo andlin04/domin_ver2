@@ -127,21 +127,26 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             for k in [k for k, v in lookups.items() if not v or v[-1] < now - 60]:
                 del lookups[k]
 
+    def viewer(request: Request) -> tuple[dict | None, str]:
+        """The signed-in user behind a public page request (and the session's CSRF token), or (None, "")."""
+        if COOKIE not in request.cookies:
+            return None, ""
+        with conn() as c:
+            sess = admin.session(c, request.cookies.get(COOKIE))
+            if sess and sess["user_id"]:
+                u = users.get(c, sess["user_id"])
+                if u and not u["disabled"]:
+                    return u, sess["csrf"]
+        return None, ""
+
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
         # Resolve the signed-in user for the nav on public pages too, so the menu keeps its admin links
         # everywhere a logged-in user goes (the admin views pass their own user and skip this lookup).
-        user = ctx.pop("user", None)
-        admin_csrf = ""
-        if user is None and COOKIE in request.cookies:
-            with conn() as c:
-                sess = admin.session(c, request.cookies.get(COOKIE))
-                if sess and sess["user_id"]:
-                    u = users.get(c, sess["user_id"])
-                    if u and not u["disabled"]:
-                        user = u
-                        if u["role"] == "admin":   # admins can drop a domain from a public page: give the token
-                            admin_csrf = sess["csrf"]
-        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user,
+        user, csrf = ctx.pop("user", None), ""
+        if user is None:
+            user, csrf = viewer(request)
+        admin_csrf = csrf if user and user["role"] == "admin" else ""   # admins can drop a domain from a public page
+        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, "csrf": csrf,
                "admin_base": ADMIN, "admin_csrf": admin_csrf, **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
@@ -249,8 +254,15 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         charts = {"history": done, "churn": churn, "current": current["id"],
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
                   "asns": db.breakdown(rows, "asn", 10)}
+        user, csrf = viewer(request)
+        posture_rows = []
+        if user:   # posture results are signed-in reports
+            with conn() as c:
+                posture_rows = posture.current(c, d["name"])
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
-                    rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None)
+                    rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
+                    user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
+                    posture_rows=posture_rows)
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
         """Host names added / removed at each scan versus the one before it."""
@@ -874,7 +886,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             known = posture.domains(c)
             dom = dom if dom in known else ""
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=posture.hosts(c, dom) if dom else [],
-                       posture_rows=posture.current(c, dom))
+                       posture_rows=posture.current(c, dom), profiles=posture.profiles(c))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
@@ -897,7 +909,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             dom = (data.get("domain") or "").strip().lower()
             host = (data.get("host") or "").strip().lower()
             ip = (data.get("ip") or "").strip()
-            ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
+            prof = posture.profile(c, (data.get("profile") or "").strip() or posture.DEFAULT_PROFILE)
 
             def refuse(status: int, error: str):
                 return security_view(request, u, s, security_ctx(status, error=error, form=data) | {
@@ -906,15 +918,64 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return refuse(403, "Running a posture scan needs the analyst role.")
             if dom not in posture.domains(c):
                 return refuse(422, "Pick a domain with a finished inventory scan.")
-            if not fingerprint.valid_ports(ports):
+            if not prof:
+                return refuse(422, "Pick an existing scan profile.")
+            ports = (data.get("ports") or "").strip()   # optional override of the profile's ports
+            if ports and not fingerprint.valid_ports(ports):
                 return refuse(422, "Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024).")
+            prof = {**prof, "ports": ports or prof["ports"]}
             found, skipped = posture.targets(c, dom, host=host, ip=ip)
             if not found:
                 what = host or ip or dom
                 why = f" ({skipped} address(es) outside the posture scope; see Settings)" if skipped else ""
                 return refuse(422, f"No address of {what} to scan{why}.")
-            n = posture.enqueue(c, dom, found, ports, u["name"])
+            n = posture.enqueue(c, dom, found, prof, u["name"])
         return back(f"{base}/security?domain={dom}", "posture-queued" if n else "posture-pending")
+
+    def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):
+        with conn() as c:
+            rows = posture.profiles(c)
+        return shell(request, "profiles.html", u, s, status, profiles=rows, error=error, form=form or {},
+                     default_ports=fingerprint.DEFAULT_PORTS)
+
+    @app.get(base + "/security/profiles", response_class=HTMLResponse, include_in_schema=False)
+    def profiles_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+        return profiles_view(request, u, s)
+
+    @app.post(base + "/security/profiles", include_in_schema=False)
+    async def profiles_save(request: Request):
+        """Add or change a scan profile (analyst or admin)."""
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not users.can(u["role"], "analyst"):
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs the analyst role.", data)
+            p, error = posture.check_profile((data.get("name") or "").strip().lower(),
+                                             (data.get("ports") or "").strip(), data.get("intensity"),
+                                             data.get("timing"), data.get("timeout"))
+            if not p:
+                return profiles_view(request, u, s, 422, error, data)
+            posture.save_profile(c, p, (data.get("note") or "").strip(), u["name"])
+        return back(f"{base}/security/profiles")
+
+    @app.post(base + "/security/profiles/{name}/delete", include_in_schema=False)
+    async def profiles_delete(request: Request, name: str):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not users.can(u["role"], "analyst"):
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs the analyst role.")
+            if not posture.delete_profile(c, name):
+                return profiles_view(request, u, s, 422, "The default profile cannot be deleted.")
+        return back(f"{base}/security/profiles")
 
     @app.post(base + "/security/scan", include_in_schema=False)
     async def security_scan(request: Request):

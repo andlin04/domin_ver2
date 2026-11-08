@@ -121,5 +121,26 @@
     </table>
   </div>
 </section>
+{% if user %}
+<section class="card" id="posture">
+  <div class="card-head">
+    <h2>Security posture <small>{{ posture_rows|length }} address(es)</small></h2>
+    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name }}#posture">Scan / renew</a>
+  </div>
+  {% for p in posture_rows %}
+  <details class="svc posture-detail">
+    <summary><b>{{ p.ip }}</b> · {{ p.hosts.replace(',', ', ') }}
+      <span class="pill {{ 'sev-critical' if p.high else 'sev-low' if p.status == 'done' else 'sev-unknown' }}">{{ p.status }}{% if p.status == 'done' %}: {{ p.open_ports }} port(s), {{ p.cves }} CVE(s){% if p.high %}, {{ p.high }} high+{% endif %}{% endif %}</span>
+      <small class="muted">{{ p.finished or p.created }} by {{ p.requested_by or '—' }}</small></summary>
+    {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
+    {% if p.services %}<ul class="small-print">{% for svc in p.services %}
+      <li>{{ svc.port }}/{{ svc.proto }} {{ svc.service }} {{ svc.product }} {{ svc.version }}{% if svc.findings %} · {{ svc.findings|length }} CVE(s){% endif %}</li>
+    {% endfor %}</ul>{% endif %}
+    {% include "_posture_raw.html" %}
+  </details>
+  {% else %}<p class="muted">No posture scans for this domain yet.</p>
+  {% endfor %}
+</section>
+{% endif %}
 <script type="application/json" id="page-data">{{ charts|tojson }}</script>
 {% endblock %}

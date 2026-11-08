@@ -196,3 +196,53 @@ def test_posture_needs_csrf(settings):
     with app_client(settings) as h:
         sign_in(h, "ana")
         assert h.post("/admin/security/posture", data={"csrf": "x", "domain": DOM}).status_code == 403
+
+
+# ---- scan profiles, saved parameters, raw output ----
+
+def test_nmap_args_carry_profile_knobs():
+    a = fingerprint.nmap_args("172.20.4.50", "22,80", 60, intensity=7, timing=2)
+    assert a[a.index("--version-intensity") + 1] == "7" and "-T2" in a and "60s" in a
+
+
+def test_default_profile_is_seeded_and_kept(settings):
+    with db.connect(settings.db_path) as c:
+        assert posture.profile(c, "default")["ports"] == fingerprint.DEFAULT_PORTS
+        assert posture.delete_profile(c, "default") is False
+
+
+def test_check_profile_rejects_bad_input():
+    assert posture.check_profile("web", "80,443", 5, 3, 60)[0]
+    assert not posture.check_profile("Bad Name", "80", 2, 3, 60)[0]
+    assert not posture.check_profile("web", "80;id", 2, 3, 60)[0]
+    assert not posture.check_profile("web", "80", 12, 3, 60)[0]
+    assert not posture.check_profile("web", "80", 2, 5, 60)[0]
+
+
+def test_analyst_makes_a_profile_and_scans_with_it(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        r = h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443",
+                   "intensity": "5", "timing": "4", "timeout": "60", "note": "web only"}, follow_redirects=False)
+        assert r.status_code == 303
+        assert "web only" in h.get("/admin/security/profiles").text
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM, "profile": "web"})
+        run_queue(settings)
+        with db.connect(settings.db_path) as c:
+            rows = posture.current(c, DOM)
+        assert rows and all(p["profile"] == "web" and p["ports"] == "80,443" and p["intensity"] == 5 for p in rows)
+        assert all("--version-intensity 5" in p["params"] and "-T4" in p["params"] for p in rows)
+        page = h.get(f"/d/{DOM}").text
+        assert "Security posture" in page and "Raw nmap output" in page and "profile <b>web</b>" in page
+        r = h.post("/admin/security/profiles/web/delete", data={"csrf": csrf}, follow_redirects=False)
+        assert r.status_code == 303 and "web only" not in h.get("/admin/security/profiles").text
+
+
+def test_viewer_cannot_change_profiles_and_anonymous_sees_no_posture(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "vee")
+        r = h.post("/admin/security/profiles", data={"csrf": csrf, "name": "x", "ports": "80", "intensity": "2",
+                   "timing": "3", "timeout": "60"})
+        assert r.status_code == 403
+    with app_client(settings) as h:
+        assert "Security posture" not in h.get(f"/d/{DOM}").text

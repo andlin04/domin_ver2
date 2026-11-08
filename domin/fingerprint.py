@@ -86,13 +86,21 @@ def with_aliases(target: dict) -> list[dict]:
     return [target, {**target, "vendor": alias}] if alias else [target]
 
 
-def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap") -> str:
-    """Run a connect + service-version scan and return the XML. Connect scan only (``-sT``); no OS
-    detection and no raw packets, so no root or cap_net_raw is needed."""
-    args = [nmap_bin, "-sT", "-sV", "-Pn", "-n", "--version-light", "-oX", "-",
-            "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
+def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int = 3,
+              nmap_bin: str = "nmap") -> list[str]:
+    """The nmap command line: connect scan only (``-sT``), no OS detection and no raw packets, so no root or
+    cap_net_raw is needed. intensity is nmap's --version-intensity (0-9; 2 = --version-light), timing its -T
+    template (1-4)."""
+    args = [nmap_bin, "-sT", "-sV", "-Pn", "-n", "--version-intensity", str(int(intensity)), f"-T{int(timing)}",
+            "-oX", "-", "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
     if ":" in ip:
         args.insert(1, "-6")
+    return args
+
+
+def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3) -> str:
+    """Run a connect + service-version scan and return the XML."""
+    args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin)
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 30)
     except subprocess.TimeoutExpired as exc:
@@ -136,18 +144,21 @@ def _dedupe(findings: list[dict]) -> list[dict]:
 
 
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
-         timeout: int = 120, nmap_bin: str = "nmap", display: str = "") -> dict:
+         timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
+         timing: int = 3) -> dict:
     """Fingerprint one host and match each service's CPEs against the CVE layer.
 
-    Returns {target, ip, services, note, error}. Each service carries its CPEs' findings (deduped,
-    worst first) and a `matched` flag (did any CPE yield a cve target to look up)."""
+    Returns {target, ip, services, note, error, raw, params}. Each service carries its CPEs' findings
+    (deduped, worst first) and a `matched` flag (did any CPE yield a cve target to look up). params is
+    the nmap command line that ran."""
+    params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
     try:
-        xml = run_nmap(ip, ports, timeout, nmap_bin)
+        xml = run_nmap(ip, ports, timeout, nmap_bin, intensity, timing)
     except FileNotFoundError:
-        return {"target": display or ip, "ip": ip, "services": [], "note": "",
+        return {"target": display or ip, "ip": ip, "services": [], "note": "", "params": params,
                 "error": "nmap is not installed on this host."}
     except NmapError as exc:
-        return {"target": display or ip, "ip": ip, "services": [], "note": "", "error": str(exc)}
+        return {"target": display or ip, "ip": ip, "services": [], "note": "", "error": str(exc), "params": params}
 
     services = parse_xml(xml)
     cache: dict[str, dict] = {}
@@ -162,4 +173,5 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
             findings.extend(cache[key]["findings"])
         s["findings"] = _dedupe(findings)
     note = "" if services else "No open TCP ports found in the scanned range."
-    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": "", "raw": xml}
+    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": "", "raw": xml,
+            "params": params}

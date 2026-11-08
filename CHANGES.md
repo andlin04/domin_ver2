@@ -2,6 +2,20 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: scan profiles, saved scan parameters, raw output pane
+
+- **Security → Scan profiles**: named nmap parameter sets (ports, version intensity 0-9, timing T1-T4, per-address
+  timeout, note). Analyst or admin adds, changes and deletes them; any signed-in user reads them. A `default` profile
+  (the previous fixed settings: common ports, light version probes, T3, 120 s) is created at start-up and cannot be
+  deleted.
+- The Posture form picks a profile; its port field is now an optional override. **Renew** reuses the scan's profile
+  and ports.
+- Each posture scan stores its profile, knobs and the exact nmap command line next to the raw nmap XML.
+- A domain's page shows signed-in users a **Security posture** section: the latest result per address, its
+  parameters and the raw nmap output in a collapsed, expandable pane. Anonymous visitors do not see it.
+- Migration: new `posture_profiles` table and five `posture_scans` columns, added at start-up. Rollback: redeploy the
+  previous build (the extra table and columns are ignored by it).
+
 ## 2026-11-08: security posture (stage 2)
 
 - **Security → Posture**: pick an inventoried domain, then scan the **whole domain** or **one host name**. The scan

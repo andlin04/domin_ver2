@@ -258,3 +258,7 @@ dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius); 
 dialog.confirm::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
 dialog.confirm p { margin: 0 0 1.1rem; line-height: 1.45; }
 dialog.confirm menu { display: flex; gap: .6rem; justify-content: flex-end; margin: 0; padding: 0; }
+details.raw { margin: .4rem 0 .8rem; }
+details.raw summary { cursor: pointer; }
+pre.raw-out { max-height: 24rem; overflow: auto; white-space: pre; font: .78rem/1.35 ui-monospace, "SF Mono", Consolas, monospace;
+  background: rgba(0, 0, 0, .25); padding: .6rem .8rem; border-radius: 6px; }
