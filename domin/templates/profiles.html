@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Scan profiles · domin{% endblock %}
-{% block page %}security{% endblock %}
+{% block page %}settings{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Scan profiles</h1>
   <p class="muted">Named parameter sets for posture scans. Pick one on the <a href="{{ base }}/security#posture">Posture</a>
     form; each scan keeps the parameters it ran with. Connect scan only (nmap -sT -sV, no OS detection).</p></div></section>
 
-{% set sub = "profiles" %}{% include "_posture_nav.html" %}
+{% set sub = "profiles" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
 {% if user.role in ('admin', 'analyst') %}

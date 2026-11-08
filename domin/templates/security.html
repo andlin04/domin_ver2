@@ -6,7 +6,6 @@
   <p class="muted">What is exposed and vulnerable, worst first.
     {% if posture_domain %}Showing <b>{{ posture_domain }}</b>{% if posture_host %} · host <b>{{ posture_host }}</b>{% endif %}.
     {% else %}Showing all domains.{% endif %}</p></div></section>
-{% set sub = "posture" %}{% include "_posture_nav.html" %}
 <section class="card controls">
   <form method="get" action="{{ base }}/security" class="inline posture-pick">
     <label class="field">Domain

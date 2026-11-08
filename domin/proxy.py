@@ -1,4 +1,4 @@
-"""Scan routes: how posture scans and inventory jobs reach the internet (Posture · Scan settings).
+"""Scan routes: how posture scans and inventory jobs reach the internet (Settings · Scan settings).
 
 Routes: direct, a custom proxy (socks5 / socks4 / http), Tor (the local tor client's SOCKS5) or Mullvad (a relay's
 SOCKS5 inside the host's Mullvad tunnel, chosen per target: mullvad.py). Tick boxes pick which jobs use the route.

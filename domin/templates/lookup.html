@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}CVE look-up · domin{% endblock %}
-{% block page %}security{% endblock %}
+{% block page %}settings{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>CVE look-up</h1>
   <p class="muted">Check one product or package version, or fingerprint one in-scope host ad hoc (not saved).
     Source: <b>{{ cve_source }}</b>; local CVE database ({{ cve_mode }} mode, {{ cve_count }} target(s) cached).</p></div></section>
-{% set sub = "lookup" %}{% include "_posture_nav.html" %}
+{% set sub = "lookup" %}{% include "_settings_nav.html" %}
 {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 

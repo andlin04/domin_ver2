@@ -12,7 +12,7 @@
 # (the relays' SOCKS5 proxies) goes through it. No DNS change, no default route; everything else stays as it is.
 #
 # Credentials, first found:
-#   1. the domin database (Posture > Scan settings): a WireGuard private key with its tunnel address (used as they
+#   1. the domin database (Settings > Scan settings): a WireGuard private key with its tunnel address (used as they
 #      are: no key generation, no API call), or an account number; optional entry country
 #   2. /etc/domin/mullvad-account (account number only; owner root, mode 0600 or 0400)
 # With an account number only, a key is generated once (/etc/wireguard/mullvad.key) and registered with Mullvad.

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Scan settings · domin{% endblock %}
-{% block page %}security{% endblock %}
+{% block page %}settings{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Scan settings</h1>
   <p class="muted">The route posture scans and inventory jobs take to the internet: direct, a custom proxy, Tor or
@@ -8,7 +8,7 @@
     names over DNS-over-HTTPS through it. When the route can't be used, the scan fails; it never falls back to a direct
     scan. Internal zones always stay direct. Applies to the next scan, no restart.</p></div></section>
 
-{% set sub = "scan-settings" %}{% include "_posture_nav.html" %}
+{% set sub = "scan-settings" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if test %}<p class="note {{ 'ok' if test[0] else 'bad' }}" role="status">Test route: {{ test[1] }}</p>{% endif %}

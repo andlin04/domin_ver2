@@ -22,8 +22,8 @@
       <span class="nav-sep" aria-hidden="true"></span>
       <a href="/admin/security" class="{{ 'active' if self.page() == 'security' }}">Posture</a>
       {% if user.role in ('admin', 'analyst') %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Operations</a>{% endif %}
-      {% if user.role == 'admin' %}<a href="/admin/settings" class="{{ 'active' if self.page() == 'settings' }}">Settings</a>
-      <a href="/admin/users" class="{{ 'active' if self.page() == 'users' }}">Users</a>{% endif %}
+      <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" class="{{ 'active' if self.page() == 'settings' }}">Settings</a>
+      {% if user.role == 'admin' %}<a href="/admin/users" class="{{ 'active' if self.page() == 'users' }}">Users</a>{% endif %}
       <a href="/admin/account" class="{{ 'active' if self.page() == 'account' }}">{{ user.name }}</a>
       {% elif signed_in_hint %}
       <span class="nav-sep" aria-hidden="true"></span>

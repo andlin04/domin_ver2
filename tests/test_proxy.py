@@ -70,7 +70,7 @@ def test_password_is_kept_replaced_or_cleared(settings):
 def test_only_admins_see_and_change_scan_settings(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
-        assert "Scan settings" in h.get("/admin/security").text
+        assert "Scan settings" in h.get("/admin/settings").text and "Scan settings" not in h.get("/admin/security").text
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **form(username="scanner",
                                                                                 password=SECRET)},
                    follow_redirects=False)

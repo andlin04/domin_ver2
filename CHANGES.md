@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: Scan profiles, CVE look-up and Scan settings under Settings
+
+- The Settings menu has sections General · Scan profiles · CVE look-up · Scan settings; Posture shows the report
+  only. URLs unchanged. Non-admins see Settings with Scan profiles and CVE look-up only.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: Tor and Mullvad routes for posture scans and inventory jobs
 
 - Posture · **Scan settings**: a route (direct / custom proxy / Tor / Mullvad) and tick boxes for which jobs take it

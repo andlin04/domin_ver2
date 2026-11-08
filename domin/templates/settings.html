@@ -9,6 +9,8 @@
 <section class="hero"><div><h1>Settings</h1>
   <p class="muted">Two separate guardrails, one per engine. Each is saved on its own; the counts below show how much
     of the current inventory each rule set covers.</p></div></section>
+
+{% set sub = "general" %}{% include "_settings_nav.html" %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 

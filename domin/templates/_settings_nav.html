@@ -1,5 +1,5 @@
-<nav class="subnav" aria-label="Posture sections">
-  <a href="{{ base }}/security" class="{{ 'active' if sub == 'posture' }}">Posture</a>
+<nav class="subnav" aria-label="Settings sections">
+  {% if user.role == 'admin' %}<a href="{{ base }}/settings" class="{{ 'active' if sub == 'general' }}">General</a>{% endif %}
   <a href="{{ base }}/security/profiles" class="{{ 'active' if sub == 'profiles' }}">Scan profiles</a>
   <a href="{{ base }}/security/lookup" class="{{ 'active' if sub == 'lookup' }}">CVE look-up</a>
   {% if user.role == 'admin' %}<a href="{{ base }}/security/scan-settings" class="{{ 'active' if sub == 'scan-settings' }}">Scan settings</a>{% endif %}
