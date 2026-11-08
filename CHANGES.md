@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: a posture scan that hits the per-host timeout says so
+
+- nmap marks a host it gave up on (`--host-timeout`) with `timedout="true"`; such a scan was shown as "No open TCP
+  ports found". It now fails with "Timed out: ... the result is incomplete" and keeps the ports found before the
+  limit. Seen on a scan through Mullvad: about 7 s per connection, 33 ports did not fit in 120 s.
+- Rollback: revert this change in `domin/fingerprint.py`.
+
 ## 2026-11-08: Settings > Public database (staging copy of the public data)
 
 - Settings (admin) has a "Public database" section with a Sync button: it replaces this instance's inventory

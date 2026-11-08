@@ -98,6 +98,19 @@ def test_scan_reports_missing_nmap(tmp_path, monkeypatch):
     assert res["services"] == [] and "not installed" in res["error"]
 
 
+def test_a_host_timeout_is_an_incomplete_result_not_no_open_ports(tmp_path, monkeypatch):
+    xml = SCAN_XML.replace("<host>", '<host timedout="true">', 1)
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: xml)
+    res = fingerprint.scan("172.20.4.50", cve_db=cve.Database("own", tmp_path / "d.json"), client=None,
+                           timeout=120)
+    assert res["error"].startswith("Timed out") and "120 s" in res["error"] and res["note"] == ""
+    assert [s["port"] for s in res["services"]] == [22, 80, 9999]   # what it found before the limit is kept
+    empty = '<?xml version="1.0"?><nmaprun><host timedout="true"><address addr="172.20.4.50"/></host></nmaprun>'
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: empty)
+    res = fingerprint.scan("172.20.4.50", cve_db=cve.Database("own", tmp_path / "d.json"), client=None)
+    assert "No open TCP ports" not in res["note"] and res["error"]
+
+
 # ---- web view ----
 
 @pytest.fixture

@@ -205,6 +205,18 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
                 cache[key] = cve.lookup(cve_db, t, client, api_key)
             findings.extend(cache[key]["findings"])
         s["findings"] = _dedupe(findings)
-    note = "" if services else "No open TCP ports found in the scanned range."
-    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": "", "raw": xml,
+    error = ""
+    if timed_out(xml):   # nmap gave up on the host: missing ports are unknown, not closed
+        error = (f"Timed out: nmap stopped after the {timeout} s per-host limit, so the result is incomplete. "
+                 "Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer timeout or fewer ports.")
+    note = "" if services or error else "No open TCP ports found in the scanned range."
+    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": error, "raw": xml,
             "params": params}
+
+
+def timed_out(text: str) -> bool:
+    """nmap marks a host it gave up on (--host-timeout) with timedout="true"."""
+    try:
+        return any(h.get("timedout") == "true" for h in ET.fromstring(text).findall("host"))
+    except ET.ParseError:
+        return False
