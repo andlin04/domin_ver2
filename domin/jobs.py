@@ -219,21 +219,26 @@ def _scan_loop(settings: Settings, refresh: bool, idle: float) -> None:
         time.sleep(idle)
 
 
-def _posture_next(settings: Settings, cve_db: cve.Database, client) -> bool:
-    """Run one queued posture scan; False when there was none (or scans are paused)."""
+POSTURE_SLOTS = 4   # posture worker threads; Settings' "Posture scans at once" (1-4) decides how many take scans
+
+
+def _posture_next(settings: Settings, cve_db: cve.Database, client, slot: int = 0) -> bool:
+    """Run one queued posture scan; False when there was none (or scans are paused, or this slot is above the
+    "Posture scans at once" setting). claim() is atomic, so slots never run the same scan."""
     with db.connect(settings.db_path) as conn:
-        if admin.effective(settings, conn).scans_paused or not (row := posture.claim(conn)):
+        live = admin.effective(settings, conn)
+        if live.scans_paused or slot >= live.posture_parallel or not (row := posture.claim(conn)):
             return False
         posture.run(conn, row, cve_db, client, settings.nvd_api_key)
         return True
 
 
-def _posture_loop(settings: Settings, idle: float) -> None:
+def _posture_loop(settings: Settings, idle: float, slot: int = 0) -> None:
     cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
     client = tools.http_client()
     while True:
         try:
-            if _posture_next(settings, cve_db, client):
+            if _posture_next(settings, cve_db, client, slot):
                 continue
         except Exception:
             log.exception("posture thread error")
@@ -270,7 +275,9 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
         while _posture_next(settings, cve_db, client):
             pass
         return
-    threading.Thread(target=_posture_loop, args=(settings, idle), daemon=True, name="posture").start()
+    for slot in range(POSTURE_SLOTS):
+        threading.Thread(target=_posture_loop, args=(settings, idle, slot), daemon=True,
+                         name=f"posture-{slot}").start()
     for refresh, n in ((False, settings.user_workers), (True, settings.refresh_workers)):
         for i in range(n):
             threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,

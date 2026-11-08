@@ -158,6 +158,17 @@ def test_automatic_follows_then_falls_back_then_takes_any(settings):
         assert h["host"] != "fi-hel-wg-socks5-001.relays.mullvad.net"   # never an inactive relay
 
 
+def test_random_country_draws_a_country_per_scan_among_active_relays(settings):
+    seen = {mullvad.choose(rt(mullvad_mode="random"), RELAYS, "se", random.Random(seed))[0]["country_code"]
+            for seed in range(40)}
+    assert seen == {"se", "de"}   # fi has no active relay; the host's country does not decide
+    relay, how = mullvad.choose(rt(mullvad_mode="random"), RELAYS, "", random.Random(1))
+    assert how == "random country" and relay["active"]
+    assert proxy.details(rt(mullvad_mode="random")) == "mullvad, random country"
+    with pytest.raises(mullvad.MullvadError):
+        mullvad.choose(rt(mullvad_mode="random"), [], "se")
+
+
 def test_relay_pick_is_random_among_active_ones():
     picks = {mullvad.pick(RELAYS, "se", "", random.Random(seed))["hostname"] for seed in range(20)}
     assert picks == {"se-got-wg-001", "se-sto-wg-002"}

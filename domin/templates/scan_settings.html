@@ -151,7 +151,8 @@
   </div>
   <p class="muted"><b>Automatic</b>: the address's country, else the fallback, else any relay. <b>Follow host</b>: a
     relay in the address's country (DB-IP), else the fallback country, else the scan fails. <b>Fixed</b>: the country
-    (and city) above. Inventory jobs use the fixed or fallback country (automatic without a fallback: any relay). A
+    (and city) above. <b>Random country</b>: a new country for every scan, each country equally likely. Inventory
+    jobs use the fixed or fallback country (automatic without a fallback: any relay; random: a random country). A
     relay is picked at random among the active ones. Private addresses can't go through Mullvad.</p>
   </div>
   <p><button class="btn primary" type="submit">Save route</button>

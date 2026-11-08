@@ -259,7 +259,7 @@ def check_route(form: dict[str, str], cfg: dict, countries: set[str] | None = No
         country, city, fallback = ((form.get(k) or "").strip().lower()
                                    for k in ("mullvad_country", "mullvad_city", "mullvad_fallback"))
         if mode not in mullvad.MODES:
-            raise ValueError("Mullvad mode: follow host, fixed or automatic.")
+            raise ValueError("Mullvad mode: follow host, fixed, automatic or random country.")
         for what, cc in (("Mullvad country", country), ("Fallback country", fallback)):
             if cc and (not _CC.match(cc) or (countries is not None and cc not in countries)):
                 raise ValueError(f"{what}: a country from the Mullvad relay list.")
@@ -380,6 +380,8 @@ def details(r: dict, inventory: bool = False) -> str:
     if mode == "fixed":
         where = r["mullvad_country"] + (f"-{r['mullvad_city']}" if r.get("mullvad_city") else "")
         return f"mullvad, fixed {where}"
+    if mode == "random":
+        return "mullvad, random country"
     fb = f" (fallback {r['mullvad_fallback']})" if r.get("mullvad_fallback") else ""
     if inventory:   # a domain has no single country: the fallback country, or any relay
         return f"mullvad, {r['mullvad_fallback']}" if fb else ("mullvad, any country" if mode == "auto" else

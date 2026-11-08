@@ -34,8 +34,8 @@ TUNNEL_KEY = "mullvad_tunnel"
 MAX_AGE = timedelta(hours=24)
 IN_TUNNEL = ("10.64.0.1", 1080)   # Mullvad's SOCKS5 inside the tunnel: answers only when the tunnel is up
 REQUEST_FILE, STATUS_FILE = "mullvad.request", "mullvad.status"
-MODES = ("follow", "fixed", "auto")
-MODE_NAMES = {"follow": "follow host", "fixed": "fixed", "auto": "automatic"}
+MODES = ("follow", "fixed", "auto", "random")
+MODE_NAMES = {"follow": "follow host", "fixed": "fixed", "auto": "automatic", "random": "random country"}
 
 _CC = re.compile(r"^[a-z]{2}$")
 _CITY = re.compile(r"^[a-z]{3}$")
@@ -155,8 +155,14 @@ def choose(cfg: dict, relays: list[dict], host_cc: str = "", rng: random.Random 
 
     follow: the host's country, else the fallback country, else an error.
     fixed: the set country (and city), else an error.
-    auto: the host's country, else the fallback country, else any active relay."""
+    auto: the host's country, else the fallback country, else any active relay.
+    random: a country drawn at random for each scan (each country equally likely), then a relay in it."""
     mode, fallback = cfg.get("mullvad_mode") or "auto", cfg.get("mullvad_fallback") or ""
+    if mode == "random":
+        ccs = sorted({r["country_code"] for r in relays if r["active"]})
+        if ccs and (r := pick(relays, (rng or random).choice(ccs), "", rng)):
+            return r, "random country"
+        raise MullvadError("no active Mullvad relay")
     if mode == "fixed":
         cc, city = cfg.get("mullvad_country") or "", cfg.get("mullvad_city") or ""
         if r := pick(relays, cc, city, rng):

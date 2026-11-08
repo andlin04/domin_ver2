@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: parallel posture scans, Mullvad "random country"
+
+- Tuning: "Posture scans at once" (1-4, default 1). The worker runs 4 posture threads; only as many as the setting
+  take scans (claim is atomic). Each scan picks its own route hop, so parallel Mullvad scans use different relays.
+- Mullvad routes: a "random country" mode draws a country for every scan (each country with an active relay
+  equally likely), then a random relay in it; inventory jobs on such a route also get a random country.
+- Rollback: set "Posture scans at once" to 1; switch random-country routes to another mode; revert this change.
+
 ## 2026-11-08: a posture scan that hits the per-host timeout says so
 
 - nmap marks a host it gave up on (`--host-timeout`) with `timedout="true"`; such a scan was shown as "No open TCP

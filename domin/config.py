@@ -24,6 +24,7 @@ class Settings:
     once_per_day: bool = True      # POST /api/scan: each domain at most once per day
     scan_limits_off: bool = False  # POST /api/scan: skip all visitor limits (once-per-day, rate, quota, queue)
     scans_paused: bool = False     # the worker leaves queued jobs waiting
+    posture_parallel: int = 1      # posture scans running at once (up to POSTURE_SLOTS worker threads)
     analytics_days: int = 180      # visit statistics older than this are deleted
     admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; empty = no admin page
     internal_ips: tuple[str, ...] = ()   # private API clients (over a VPN): POST /api/scan without visitor limits

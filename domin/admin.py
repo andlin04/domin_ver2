@@ -35,6 +35,7 @@ TUNABLE = {
     "scans_per_day_total": ("Visitor scans per day, all clients together", 0, 100000),
     "queue_max": ("Queued visitor scans before new ones are refused", 1, 10000),
     "scan_timeout_hours": ("A scan fails after N hours", 1, 48),
+    "posture_parallel": ("Posture scans at once (each picks its own route exit)", 1, 4),
     "lookups_per_minute": ("RDAP / e-mail lookups per minute per client", 1, 1000),
     "max_hosts": ("Max host names per scan", 10, 50000),
     "refresh_days": ("Re-scan domains older than N days (0 = off)", 0, 3650),

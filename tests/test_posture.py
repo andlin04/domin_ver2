@@ -66,6 +66,20 @@ def test_enqueue_skips_addresses_already_pending(settings):
         assert posture.enqueue(c, DOM, found, "22,80", "ana") == 0
 
 
+def test_posture_slots_above_the_setting_take_no_scans(settings, nmap):
+    with db.connect(settings.db_path) as c:
+        found, _ = posture.targets(c, DOM)
+        posture.enqueue(c, DOM, found, "22,80", "ana")
+    cve_db = cve.Database("own", settings.cve_db_file)
+    with httpx.Client(transport=transport()) as client:
+        assert not jobs._posture_next(settings, cve_db, client, slot=1)   # default: 1 at once
+        with db.connect(settings.db_path) as c:
+            admin.kv_set(c, "tuning", json.dumps({"posture_parallel": 2}))
+        assert jobs._posture_next(settings, cve_db, client, slot=1)
+        assert jobs._posture_next(settings, cve_db, client, slot=0)
+    assert jobs.POSTURE_SLOTS == 4
+
+
 def test_worker_runs_and_persists_with_params_and_raw_output(settings, nmap):
     with db.connect(settings.db_path) as c:
         posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22,80,9999", "ana")
