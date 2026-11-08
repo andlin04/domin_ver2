@@ -27,11 +27,19 @@
   </section>
 
   <section class="card">
-    <h2>Security posture scope <small>for the vulnerability / posture engine — not active yet</small></h2>
+    <h2>Scan limits <small>rate limits for the public domain scanner</small></h2>
+    <label class="tick"><input type="checkbox" name="scan_limits_off"
+      {% if scope.scan_limits_off %}checked{% endif %}> Disable scan limits — retry any domain freely</label>
+    <p class="muted">When on, the scan box skips the once-per-day, per-client hour/day, daily-total and queue limits,
+      so a domain can be re-scanned as often as you like. Leave it off on an instance exposed to the public.</p>
+  </section>
+
+  <section class="card">
+    <h2>Security posture scope <small>governs the Host fingerprint tool on the Security page</small></h2>
     <p class="kpi-line"><b>{{ posture_counts.in_scope }}</b> of {{ posture_counts.total }} inventoried host names,
       and {{ posture_counts.countries_in_scope }} of {{ posture_counts.countries }} countries, are in scope.</p>
-    <p class="muted">IP ranges and geolocation limit the future posture tools only; they never affect the domain
-      scanner above. Saved now so the rules are ready when that engine ships.</p>
+    <p class="muted">IP ranges limit which addresses the Host fingerprint scan may probe (geolocation is held for the
+      wider posture tools); they never affect the domain scanner above.</p>
     <div class="grid g2">
       {{ area("ip_allow", "Allow IP ranges (CIDR or address; empty = all)", scope.ip_allow) }}
       {{ area("ip_deny", "Deny IP ranges", scope.ip_deny) }}

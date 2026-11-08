@@ -2,12 +2,17 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
-## 2026-11-08: Settings tick-box to disable scan limits
+## 2026-11-08: Settings tick-box to disable scan limits; nav keeps admin links
 
-- Settings (admin) gains a **Disable scan limits** tick-box. With it on, `POST /api/scan` skips every visitor limit
-  (once-per-day, per-client hour/day caps, the daily total and the queue cap), so a domain can be re-scanned freely.
-  Off by default; leave it off on an instance exposed to abuse. Also settable at start with `DOMIN_SCAN_LIMITS_OFF=1`.
-- Reversible: untick it (or revert the commit); no data change.
+- The **Settings** page gains a **Disable scan limits** tick-box (under "Scan limits"). With it on, `POST /api/scan`
+  skips every visitor limit (once-per-day, per-client hour/day caps, the daily total and the queue cap), so a domain
+  can be re-scanned freely. Off by default; leave it off on an instance exposed to abuse. Also settable at start with
+  `DOMIN_SCAN_LIMITS_OFF=1`.
+- The signed-in navigation (Security, Dashboard, Settings, Users, account) now stays on the public pages too, instead
+  of dropping to just an account link when you leave the admin views.
+- Settings copy: the security posture scope is labelled as governing the Host fingerprint tool (now active), not "not
+  active yet".
+- Reversible: untick the box (or revert the commit); no data change.
 
 ## 2026-11-08: security portal (CVE look-up and host fingerprinting)
 

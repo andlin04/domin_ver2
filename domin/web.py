@@ -128,7 +128,17 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 del lookups[k]
 
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
-        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": None, **ctx}
+        # Resolve the signed-in user for the nav on public pages too, so the menu keeps its admin links
+        # everywhere a logged-in user goes (the admin views pass their own user and skip this lookup).
+        user = ctx.pop("user", None)
+        if user is None and COOKIE in request.cookies:
+            with conn() as c:
+                sess = admin.session(c, request.cookies.get(COOKIE))
+                if sess and sess["user_id"]:
+                    u = users.get(c, sess["user_id"])
+                    if u and not u["disabled"]:
+                        user = u
+        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
     def domain_or_404(c, name: str) -> dict:
@@ -406,7 +416,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(403, f"{name} is outside the configured inventory scope")
             s = admin.effective(settings, c)
             who = admin.client_key(c, client_ip(request))
-            if peer_in(request, internal_nets) or s.scan_limits_off:   # trusted clients / limits off in Settings
+            limits_off = settings.scan_limits_off or users.get_scope(c).get("scan_limits_off", False)
+            if peer_in(request, internal_nets) or limits_off:   # trusted clients, or limits disabled in Settings
                 return jobs.enqueue(c, name, client=who)
             last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
                              (name,)).fetchone()[0]

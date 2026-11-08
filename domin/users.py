@@ -219,18 +219,24 @@ def migrate_legacy_admin(conn: sqlite3.Connection) -> None:
 
 SCOPE_DEFAULT = {"domains_allow": [], "domains_deny": [],                 # domain inventory engine
                  "ip_allow": [], "ip_deny": [], "countries_allow": [], "countries_deny": [],   # posture engine
+                 "scan_limits_off": False,                                # domain scanner: skip the visitor limits
                  "require_2fa": {r: False for r in ROLES}}
 LIST_KEYS = ("domains_allow", "domains_deny", "ip_allow", "ip_deny", "countries_allow", "countries_deny")
 
 
 def get_scope(conn: sqlite3.Connection) -> dict:
     raw = admin.kv_get(conn, "scope")
-    out = {**{k: [] for k in LIST_KEYS}, "require_2fa": dict(SCOPE_DEFAULT["require_2fa"])}
+    out = {**{k: [] for k in LIST_KEYS}, "require_2fa": dict(SCOPE_DEFAULT["require_2fa"]), "scan_limits_off": False}
     if raw:
         saved = json.loads(raw)
         for k in out:
             if k in saved:
-                out[k] = {**out[k], **saved[k]} if k == "require_2fa" else list(saved[k])
+                if k == "require_2fa":
+                    out[k] = {**out[k], **saved[k]}
+                elif k == "scan_limits_off":
+                    out[k] = bool(saved[k])
+                else:
+                    out[k] = list(saved[k])
     return out
 
 
@@ -251,7 +257,8 @@ def parse_scope(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
     posture countries come from tick boxes (ca:<country> / cd:<country>) over the countries present in the
     inventory, so the choice uses the same country values as the records."""
     import ipaddress
-    out: dict = {"require_2fa": {r: form.get(f"require_2fa_{r}") == "on" for r in ROLES}}
+    out: dict = {"require_2fa": {r: form.get(f"require_2fa_{r}") == "on" for r in ROLES},
+                 "scan_limits_off": form.get("scan_limits_off") == "on"}
     out["domains_allow"] = [d.lower().lstrip(".") for d in _lines(form.get("domains_allow", ""))]
     out["domains_deny"] = [d.lower().lstrip(".") for d in _lines(form.get("domains_deny", ""))]
     for key, label in (("ip_allow", "allowed IP range"), ("ip_deny", "denied IP range")):
