@@ -111,6 +111,19 @@ def test_dropping_a_domain_drops_its_posture(settings):
         assert c.execute("SELECT COUNT(*) FROM posture_scans").fetchone()[0] == 0
 
 
+def test_renamed_cpe_vendor_is_looked_up_under_both_names(tmp_path, monkeypatch):
+    xml = SCAN_XML.replace("cpe:/a:apache:http_server:2.4.52", "cpe:/a:igor_sysoev:nginx:1.24.0")
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: xml)
+    asked = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        asked.append(req.url.params.get("virtualMatchString", ""))
+        return httpx.Response(200, json={"vulnerabilities": []})
+    with httpx.Client(transport=httpx.MockTransport(handle)) as c:
+        fingerprint.scan("172.20.4.50", cve_db=cve.Database("own", tmp_path / "d.json"), client=c)
+    assert any(":igor_sysoev:nginx:" in a for a in asked) and any(":f5:nginx:1.24.0" in a for a in asked)
+
+
 def test_nmap_gets_minus_6_for_ipv6(monkeypatch):
     seen = {}
 

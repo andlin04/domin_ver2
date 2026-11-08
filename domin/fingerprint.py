@@ -76,6 +76,16 @@ def parse_cpe(cpe: str) -> dict | None:
     return {"kind": "cpe", "part": part, "vendor": vendor, "product": product, "version": version}
 
 
+# nmap's CPE dictionary keeps some vendors NVD has since renamed; newer CVEs are filed under the new name only
+# (nginx 1.24.0: 0 CVEs as igor_sysoev, 2 as f5). Both names are looked up.
+VENDOR_ALIASES = {("igor_sysoev", "nginx"): "f5"}
+
+
+def with_aliases(target: dict) -> list[dict]:
+    alias = VENDOR_ALIASES.get((target.get("vendor"), target.get("product")))
+    return [target, {**target, "vendor": alias}] if alias else [target]
+
+
 def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap") -> str:
     """Run a connect + service-version scan and return the XML. Connect scan only (``-sT``); no OS
     detection and no raw packets, so no root or cap_net_raw is needed."""
@@ -142,7 +152,7 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
     services = parse_xml(xml)
     cache: dict[str, dict] = {}
     for s in services:
-        targets = [t for t in (parse_cpe(c) for c in s["cpes"]) if t]
+        targets = [a for t in (parse_cpe(c) for c in s["cpes"]) if t for a in with_aliases(t)]
         s["matched"] = bool(targets)
         findings: list[dict] = []
         for t in targets:
