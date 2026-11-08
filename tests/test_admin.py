@@ -129,6 +129,32 @@ def test_scan_limits_off_bypasses_limits(settings):
         assert h.post("/api/scan", json={"domain": "b.se"}).status_code == 200   # past the per-hour cap
 
 
+def test_admin_drops_a_domain_from_the_inventory(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "gone.se", "2025-06-01T00:00:00", "scan", [{"host": "w.gone.se", "ip": "192.0.2.5"}])
+    with client(settings) as h:
+        csrf = sign_in(h)
+        assert "Drop from inventory" in h.get("/d/gone.se").text   # the admin-only control shows for an admin
+        assert h.post(BASE + "/domains/gone.se/delete", data={"csrf": "forged"}).status_code == 403   # CSRF checked
+        r = h.post(BASE + "/domains/gone.se/delete", data={"csrf": csrf}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/"
+        assert h.post(BASE + "/domains/gone.se/delete", data={"csrf": csrf}).status_code == 404   # already gone
+    with db.connect(settings.db_path) as c:
+        assert db.domain(c, "gone.se") is None
+
+
+def test_non_admin_cannot_drop_a_domain(settings):
+    with db.connect(settings.db_path) as c:
+        users.create(c, "ana", "analyst", PW)
+        db.save_scan(c, "keep.se", "2025-06-01T00:00:00", "scan", [{"host": "w.keep.se", "ip": "192.0.2.5"}])
+    with client(settings) as h:
+        csrf = sign_in(h, name="ana")
+        assert "Drop from inventory" not in h.get("/d/keep.se").text   # no control for an analyst
+        assert h.post(BASE + "/domains/keep.se/delete", data={"csrf": csrf}).status_code == 404
+    with db.connect(settings.db_path) as c:
+        assert db.domain(c, "keep.se")   # untouched
+
+
 def test_nav_keeps_admin_links_on_public_pages(settings):
     with client(settings) as h:
         sign_in(h)                       # admin user

@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: admin can drop a domain from the inventory
+
+- An **admin** (only) sees a **Drop from inventory** button on a domain's page. It removes that domain and all of its
+  scans, records and queued/old jobs from the database (user accounts, settings and scope are untouched), then
+  returns to the overview. CSRF-checked; analysts and viewers do not see or reach it.
+- Reversible only by re-scanning the domain (the removed history is gone); no migration.
+
 ## 2026-11-08: internal scan mode (LAN zones, no external egress)
 
 - `DOMIN_INTERNAL_ZONES` lists domain suffixes (e.g. `home.arpa,corp.example`) scanned as internal. A scan of a name

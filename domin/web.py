@@ -131,6 +131,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         # Resolve the signed-in user for the nav on public pages too, so the menu keeps its admin links
         # everywhere a logged-in user goes (the admin views pass their own user and skip this lookup).
         user = ctx.pop("user", None)
+        admin_csrf = ""
         if user is None and COOKIE in request.cookies:
             with conn() as c:
                 sess = admin.session(c, request.cookies.get(COOKIE))
@@ -138,7 +139,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                     u = users.get(c, sess["user_id"])
                     if u and not u["disabled"]:
                         user = u
-        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, **ctx}
+                        if u["role"] == "admin":   # admins can drop a domain from a public page: give the token
+                            admin_csrf = sess["csrf"]
+        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user,
+               "admin_base": ADMIN, "admin_csrf": admin_csrf, **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
     def domain_or_404(c, name: str) -> dict:
@@ -807,6 +811,18 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 users.delete(c, user_id)
                 return back(base + "/users", "user-deleted")
         raise HTTPException(404, "Unknown action")
+
+    @app.post(base + "/domains/{name}/delete", include_in_schema=False)
+    async def admin_drop_domain(request: Request, name: str):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            d = normalize_domain(name, settings.internal_zones)
+            if not d or not db.delete_domain(c, d):
+                raise HTTPException(404, "No such domain")
+        return back("/")   # the domain is gone from the overview
 
     # --- settings / scope (admin only) ---------------------------------------------------------------------------
 

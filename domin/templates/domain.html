@@ -22,6 +22,13 @@
     </form>
     <a class="btn" href="/tools?domain={{ domain.name }}">Whois &amp; e-mail</a>
     <a class="btn" href="/scans/{{ current.id }}.csv">CSV</a>
+    {% if user and user.role == 'admin' %}
+    <form method="post" action="{{ admin_base }}/domains/{{ domain.name }}/delete" class="inline"
+          data-confirm="Drop {{ domain.name }} and all its scans from the inventory? This cannot be undone.">
+      <input type="hidden" name="csrf" value="{{ admin_csrf }}">
+      <button class="btn" type="submit">Drop from inventory</button>
+    </form>
+    {% endif %}
   </div>
 </section>
 

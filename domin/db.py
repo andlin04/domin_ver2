@@ -169,6 +169,20 @@ def save_scan(conn: sqlite3.Connection, domain: str, started: str, source: str, 
     return sid
 
 
+def delete_domain(conn: sqlite3.Connection, name: str) -> bool:
+    """Admin action: drop a domain and all of its scans, records and jobs from the inventory. Returns False when
+    the domain is unknown. User accounts, settings and scope are untouched."""
+    row = conn.execute("SELECT id FROM domains WHERE name = ?", (name,)).fetchone()
+    if not row:
+        return False
+    did = row["id"]
+    conn.execute("DELETE FROM records WHERE scan_id IN (SELECT id FROM scans WHERE domain_id = ?)", (did,))
+    conn.execute("DELETE FROM scans WHERE domain_id = ?", (did,))
+    conn.execute("DELETE FROM jobs WHERE domain = ?", (name,))
+    conn.execute("DELETE FROM domains WHERE id = ?", (did,))
+    return True
+
+
 # --- reads -------------------------------------------------------------------------------------------------------
 
 LATEST = """

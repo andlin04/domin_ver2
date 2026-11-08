@@ -498,6 +498,21 @@ def test_names_resolve_over_the_old_resolver_set():
     assert internal.nameservers == ["172.20.0.252"] and internal.lifetime == 15
 
 
+def test_delete_domain_drops_its_scans_records_and_jobs(settings):
+    with db.connect(settings.db_path) as c:
+        sid = db.save_scan(c, "drop.se", "2025-06-01T00:00:00", "scan", [{"host": "a.drop.se", "ip": "192.0.2.5"}])
+        jobs.enqueue(c, "drop.se", client="cli")
+        assert db.domain(c, "drop.se") and c.execute("SELECT COUNT(*) FROM records WHERE scan_id = ?",
+                                                      (sid,)).fetchone()[0] == 1
+        assert db.delete_domain(c, "drop.se")
+        assert db.domain(c, "drop.se") is None
+        assert c.execute("SELECT COUNT(*) FROM records WHERE scan_id = ?", (sid,)).fetchone()[0] == 0
+        assert c.execute("SELECT COUNT(*) FROM scans WHERE source = 'scan'").fetchone()[0] == 0
+        assert c.execute("SELECT COUNT(*) FROM jobs WHERE domain = 'drop.se'").fetchone()[0] == 0
+        assert not db.delete_domain(c, "drop.se")   # already gone
+        assert db.domain(c, "example.se")            # other domains are untouched
+
+
 def test_internal_zone_names_validate_only_when_configured():
     from domin.validate import is_internal
     assert normalize_domain("srv.home.arpa") is None                       # arpa is private by default
