@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: routes table Save button
+
+- The button under the routes table reads "Save" (was "Make the ticked route the preferred one"); same form.
+- Rollback: restore the old button text in `domin/templates/scan_settings.html`.
+
 ## 2026-11-08: ready-made Tor and Mullvad routes
 
 - The Routes page creates a "Tor" route when the local tor client answers and a "Mullvad (automatic)" route
