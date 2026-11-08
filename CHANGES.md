@@ -2,6 +2,25 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: signed-in area (users, roles, two-factor, scope)
+
+- The single admin password is replaced by user accounts with roles: viewer (reads the signed-in reports), analyst
+  (also runs scans and tuning) and admin (also manages users and settings). An existing `admin_password` becomes an
+  `admin` user automatically on the first start.
+- Optional two-factor (TOTP, standard library) per user, with one-time recovery codes; an admin can require it per
+  role in Settings. Second-factor step after the password at sign-in.
+- Users page (admin): add, change role, reset password (one-time set-password link), reset two-factor, disable,
+  delete; the last remaining admin is protected. Account page (every user): change password, enrol/replace or turn
+  off two-factor, regenerate recovery codes.
+- Settings page (admin): allow/deny lists for IP ranges, countries and domains, and the per-role two-factor
+  requirement; shows how many inventoried hosts are in scope. Stored now; the scan tools in a later phase use them.
+- Security tab: signed-in landing page for the planned vulnerability tools, with an authorised-use notice. No
+  scanning yet.
+- `DOMIN_ADMIN_IPS` is now an optional network allowlist in front of the whole signed-in area; empty means the
+  sign-in alone governs access.
+- CLI: `domin user-add|user-list|user-passwd|user-role|user-2fa-reset`; `admin-password` still sets the `admin`
+  user's password.
+
 ## 2026-11-08: uninstall script
 
 - `deploy/uninstall.sh` removes the services, code and nginx config (keeps the database and `/etc/domin.env`);

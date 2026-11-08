@@ -16,7 +16,9 @@ Domain inventory: host names, addresses and hosting providers per domain, and ho
 - **Tables:** sort by any column; a filter box under each column heading, and the filters add up (Drilldown:
   across every match, not just the page shown).
 - **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
-- **Admin page:** usage statistics without stored IP addresses, scan job control, live tuning (see below).
+- **Signed-in area:** user accounts with roles (viewer / analyst / admin), optional two-factor (TOTP), a Users page,
+  a Settings/scope page and a Security tab, plus the admin dashboard (usage statistics without stored IP addresses,
+  scan job control, live tuning — see below).
 - **Scans:** certificate transparency (crt.sh) plus common names, MX and NS; DNS A/AAAA; RDAP for ASN, prefix,
   network name and country. amass is used when installed. One scan per domain per day, 10 per hour per visitor.
 
@@ -59,17 +61,32 @@ database and certificate). Options: see the top of [deploy/install.sh](deploy/in
 `/etc/domin.env`; `bash deploy/uninstall.sh --purge` also deletes the data and the `domin` user. Reinstall any time
 with `install.sh`.
 
-## Admin page
+## Signed-in area
 
-At `/admin`, HTTPS only, for the client addresses in `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or
-CIDRs; `install.sh --admin-ip` sets it; empty = no admin page; `systemctl restart domin` after editing). Those clients see an
-Admin link in the header; for everyone else there is no link and every /admin path answers 404. The client address
-is nginx's `$remote_addr` passed as X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from Cloudflare's
-ranges); other forwarding headers from visitors are ignored. Set the password once:
+Everything under `/admin`, HTTPS only. `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or CIDRs;
+`install.sh --admin-ip` sets it; `systemctl restart domin` after editing) is an **optional network allowlist** in
+front of the whole area: when it is set, every `/admin` path (including the sign-in page) answers 404 for anyone
+else; when it is **empty, the sign-in alone governs access**. The client address is nginx's `$remote_addr` passed as
+X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from Cloudflare's ranges); other forwarding headers
+from visitors are ignored.
+
+**Users and roles.** viewer reads the signed-in reports; analyst also runs scans and tuning; admin also manages
+users and settings. Create the first admin on the server (it prints a one-time link to set the password):
 
 ```bash
-cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin admin-password
+cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin user-add you --role admin
 ```
+
+Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <role>`, `user-2fa-reset <name>`;
+`admin-password` sets the `admin` user's password. An existing single `admin_password` becomes an `admin` user on
+the first start.
+
+- **Two-factor:** each user can enrol a TOTP authenticator with one-time recovery codes on their Account page; an
+  admin can require it per role on the Settings page, and reset a user's two-factor from the Users page.
+- **Settings / scope:** allow/deny lists for IP ranges, countries and domains, shown with a live count of
+  inventoried hosts in scope. Stored now; the vulnerability tools in a later phase read them.
+- **Security tab:** the signed-in landing page for the planned fingerprinting and CVE reports, with an
+  authorised-use notice. No scanning yet.
 
 - **Usage:** visitors, page views, visit length and pages in order, top pages, domains, CSV downloads, tools,
   referrers and countries, scans started and refused.
