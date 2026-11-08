@@ -16,6 +16,16 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["domin"]
+
+[tool.setuptools.package-data]
+domin = ["templates/*.html", "static/*", "static/vendor/*", "resolvers.txt"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"

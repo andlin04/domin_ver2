@@ -102,6 +102,13 @@ def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) ->
     return conn.execute("SELECT COUNT(*) FROM jobs WHERE client = ? AND created >= ?", (client, since)).fetchone()[0]
 
 
+def visitor_scans(conn: sqlite3.Connection, hours: int = 24) -> int:
+    """Visitors' jobs in the last hours, from all clients together (not refreshes, admin retries or the CLI)."""
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    return conn.execute("SELECT COUNT(*) FROM jobs WHERE client NOT IN ('', 'refresh', 'admin', 'cli') "
+                        "AND created >= ?", (since,)).fetchone()[0]
+
+
 def claim(conn: sqlite3.Connection, refresh: bool = False) -> dict | None:
     row = conn.execute(f"SELECT * FROM jobs WHERE status = 'queued' AND {_queue(refresh)} ORDER BY id LIMIT 1"
                        ).fetchone()

@@ -10,6 +10,11 @@
 #                       the server has no database yet, unless --replace-history (the old one is kept as .bak)
 #   --no-worker         install the scan worker but don't start it (pages and tools only, no scans)
 #   --firewall          enable ufw with SSH (22), HTTP and HTTPS only
+#   --ssh-from CIDRS    with --firewall: SSH only from these networks (comma-separated; default any)
+#   --admin-ip CIDRS    client addresses that get the admin page /admin (comma-separated); without it, and without
+#                       DOMIN_ADMIN_IPS in /etc/domin.env, there is no admin page
+#   --deny CIDRS        extra addresses the app and the scans may never connect to (e.g. your home or office), on top
+#                       of the non-public ranges and this server's own addresses; kept for later runs
 #   --alias A           extra host name for the same site (e.g. www.example.com)
 #   --cloudflare        site is proxied by Cloudflare: take the client address from CF-Connecting-IP (Cloudflare's
 #                       published ranges only), so rate limits apply per visitor; HTTPS can then stay at Cloudflare
@@ -19,11 +24,16 @@
 #                       Cloudflare connects on 443.
 #
 # Re-running updates the code and keeps the database, /etc/domin.env and the TLS certificate.
+# AUTO_UPDATES=off: no automatic security updates (default: unattended-upgrades, unless apt has its own setup).
 set -euo pipefail
 
-DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN=
+DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN= SSH_FROM= ADMIN_IP= DENY=
+CIDRS='^[0-9A-Fa-f:.,/]*$'
 while [ $# -gt 0 ]; do
   case "$1" in
+    --ssh-from) SSH_FROM=$2; shift ;;
+    --admin-ip) ADMIN_IP=$2; shift ;;
+    --deny) DENY=$2; shift ;;
     --domain) DOMAIN=$2; shift ;;
     --alias) ALIAS=$2; shift ;;
     --cloudflare) CLOUDFLARE=1 ;;
@@ -41,6 +51,7 @@ done
 [ -n "$DOMAIN" ] || { echo "--domain is required"; exit 2; }
 [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "bad --domain"; exit 2; }
 [[ "$ALIAS" =~ ^[A-Za-z0-9.-]*$ ]] || { echo "bad --alias"; exit 2; }
+for v in "$SSH_FROM" "$ADMIN_IP" "$DENY"; do [[ "$v" =~ $CIDRS ]] || { echo "bad address list: $v"; exit 2; }; done
 [ -z "$HISTORY" ] || [ -f "$HISTORY" ] || { echo "no such file: $HISTORY"; exit 2; }
 if [ -n "$ORIGIN" ]; then
   [ "$CLOUDFLARE" = 1 ] && [ -z "$EMAIL" ] || { echo "--origin-cert needs --cloudflare and no --email"; exit 2; }
@@ -53,6 +64,16 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
+# Automatic security updates (unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host already
+# has an apt periodic setup of its own (kept as it is).
+if [ "${AUTO_UPDATES:-on}" != off ] && [ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
+  apt-get install -y -q unattended-upgrades >/dev/null
+  printf '%s\n' '// domin install.sh: daily package lists and security updates (AUTO_UPDATES=off: none)' \
+    'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' \
+    > /etc/apt/apt.conf.d/20auto-upgrades
+  printf '%s\n' '// domin install.sh: no automatic reboot' 'Unattended-Upgrade::Automatic-Reboot "false";' \
+    > /etc/apt/apt.conf.d/52domin-unattended
+fi
 
 id -u domin >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin domin
 [ -d "$DATA" ] || install -d -o domin -g domin -m 700 "$DATA"
@@ -62,19 +83,26 @@ chown -R root:root "$APP/app"
 chmod 755 "$APP/app"
 
 [ -x "$APP/venv/bin/python" ] || python3 -m venv "$APP/venv"
-"$APP/venv/bin/pip" install -q --upgrade pip
-python3 -c 'import tomllib, sys; [print(d) for d in tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]]' \
-  "$APP/app/pyproject.toml" > "$APP/requirements.txt"
-"$APP/venv/bin/pip" install -q -r "$APP/requirements.txt"
+# The tested versions (deploy/requirements.txt), not whatever is newest on PyPI at install time.
+"$APP/venv/bin/pip" install -q --no-input -r "$APP/app/deploy/requirements.txt"
+rm -f "$APP/requirements.txt"   # older installs wrote the unpinned list here
 
 if [ ! -f /etc/domin.env ]; then
   ( umask 027; printf 'DOMIN_DB=%s/domin.db\nDOMIN_REFRESH_DAYS=0\nDOMIN_QUEUE_MAX=50\nDOMIN_LOOKUPS_PER_MINUTE=30\n' \
       "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
-# Admin page at /admin, served and linked only for these client addresses (comma-separated IPs/CIDRs; edit, then
+setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines stay
+  (umask 027; { grep -v "^$1=" /etc/domin.env || true; echo "$1=$2"; } > /etc/domin.env.new)
+  chown root:domin /etc/domin.env.new && mv /etc/domin.env.new /etc/domin.env
+}
+# Admin page at /admin, served and linked only for DOMIN_ADMIN_IPS (comma-separated IPs/CIDRs; edit, then
 # systemctl restart domin); everyone else gets 404. `python -m domin admin-password` sets its password.
-grep -q '^DOMIN_ADMIN_IPS=' /etc/domin.env || echo "DOMIN_ADMIN_IPS=203.0.113.10" >> /etc/domin.env
+[ -z "$ADMIN_IP" ] || setenv DOMIN_ADMIN_IPS "$ADMIN_IP"
+# --deny is kept in the env file (the app ignores it) so a later run without it keeps the list.
+if [ -n "$DENY" ]; then setenv DOMIN_DENY_IPS "$DENY"
+else DENY=$(sed -n 's/^DOMIN_DENY_IPS=//p' /etc/domin.env); fi
+[[ "$DENY" =~ $CIDRS ]] || { echo "bad DOMIN_DENY_IPS in /etc/domin.env"; exit 2; }
 
 if [ -n "$HISTORY" ]; then
   if [ -f "$DATA/domin.db" ] && [ "$REPLACE" = 0 ]; then
@@ -118,6 +146,9 @@ fi
 # A scanned domain's DNS decides where the scan tools connect: the kernel refuses every non-public address for the
 # service and all its child processes, whatever they resolve.
 NON_PUBLIC="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4 ::1/128 fc00::/7 fe80::/10 ff00::/8"
+# Also this server's own public addresses (a scan must not reach its own SSH or admin page) and --deny.
+OWN=$(ip -o addr show scope global | awk '{sub("/.*", "", $4); print $4}' | tr '\n' ' ')
+DENY_MORE=$(echo $OWN ${DENY//,/ })   # an empty IPAddressDeny= line would clear the list above: only set if not empty
 
 unit() {  # name, description, command, memory limit, task limit, extra [Service] line
   cat > "/etc/systemd/system/$1.service" <<EOF
@@ -140,8 +171,11 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$DATA
 IPAddressDeny=$NON_PUBLIC
+${DENY_MORE:+IPAddressDeny=$DENY_MORE}
 ${6:-}
+UMask=0077
 CapabilityBoundingSet=
+AmbientCapabilities=
 PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
@@ -150,6 +184,8 @@ ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
 ProtectProc=invisible
+ProcSubset=pid
+RemoveIPC=true
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
@@ -158,6 +194,7 @@ MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
 SystemCallErrorNumber=EPERM
 MemoryMax=$4
 TasksMax=$5
@@ -207,6 +244,7 @@ server {   # Cloudflare -> origin, SSL mode Full (strict); only Cloudflare's cli
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_client_certificate $AOP;
     ssl_verify_client on;
+    add_header Strict-Transport-Security "max-age=31536000" always;   # browsers only reach it through Cloudflare's HTTPS
     include /etc/nginx/domin-site.conf;
 }
 EOF
@@ -269,7 +307,13 @@ fi
 
 if [ "$FIREWALL" = 1 ]; then
   apt-get install -y -q ufw >/dev/null
-  ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+  if [ -n "$SSH_FROM" ]; then
+    ufw delete allow 22/tcp >/dev/null 2>&1 || true
+    for net in ${SSH_FROM//,/ }; do ufw allow from "$net" to any port 22 proto tcp >/dev/null; done
+  else
+    ufw allow 22/tcp >/dev/null
+  fi
+  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
   ufw --force enable >/dev/null
 fi
 

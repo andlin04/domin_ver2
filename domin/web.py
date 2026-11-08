@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 from collections import defaultdict, deque
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -34,7 +35,12 @@ from .validate import normalize_domain
 HERE = Path(__file__).parent
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-CHURN_SCANS = 40   # host churn chart: the newest N scans of a domain
+SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
+                    "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
+                    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+                    "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin"}
+HEAVY_AT_ONCE = 2   # filtered searches and CSV downloads (seconds of database work each) running in parallel
+CHURN_SCANS = 40  # host churn chart: the newest N scans of a domain
 MAX_ID = 2**63 - 1   # SQLite INTEGER; larger ids would raise OverflowError (500)
 SEARCH_PAGE = 100   # search results per page
 DRILL_FORMAT = 2   # layout of /data/drill.json; raise it when the columns change (2: EU column)
@@ -159,8 +165,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             resp = JSONResponse({"detail": "Not Found"}, status_code=404)   # same answer as a path that doesn't exist
         else:
             resp = await call_next(request)
-        resp.headers.update({"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
-                             "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY"})
+        resp.headers.update(SECURITY_HEADERS)
         if request.url.path.startswith("/static/"):
             resp.headers["Cache-Control"] = "no-cache"   # revalidate (ETag) so a deploy shows at once
         kind = visit_kind(request, resp.status_code)
@@ -320,6 +325,18 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     threading.Thread(target=warm_history, daemon=True, name="warm-history").start()
 
+    heavy_slots = threading.BoundedSemaphore(HEAVY_AT_ONCE)
+
+    @contextmanager
+    def heavy():
+        """Many parallel filtered searches or downloads would starve the pages: wait briefly for a slot, else 503."""
+        if not heavy_slots.acquire(timeout=10):
+            raise HTTPException(503, "Busy with other searches; try again in a moment")
+        try:
+            yield
+        finally:
+            heavy_slots.release()
+
     @app.get("/all", response_class=HTMLResponse)
     @app.get("/search", response_class=HTMLResponse, include_in_schema=False)   # the page's first address
     def all_domains(request: Request, q: str = "", field: str = "", scope: str = "latest",
@@ -327,16 +344,18 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         args = search_args(request, q, field, scope)
         offset = (page_no - 1) * SEARCH_PAGE
         unfiltered_history = args["history"] and not args["q"] and not args["columns"]
-        with conn() as c:
-            version = data_version(c)
-            src = drill_src(c, args["history"])
-            if not unfiltered_history:
-                rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset)
-        if unfiltered_history:
+        if unfiltered_history:   # computed hourly in the background (warm_history)
+            with conn() as c:
+                src = drill_src(c, True)
             rows, total = history_page(db.now()[:13], offset)
             stats = summary(db.now()[:13], "", "", True, ())
         else:
-            stats = summary(version, args["q"], args["field"], args["history"], tuple(sorted(args["columns"].items())))
+            with heavy(), conn() as c:
+                version = data_version(c)
+                src = drill_src(c, args["history"])
+                rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset)
+                stats = summary(version, args["q"], args["field"], args["history"],
+                                tuple(sorted(args["columns"].items())))
         pages = max(1, -(-total // SEARCH_PAGE))
         return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages, stats=stats,
                     hourly=unfiltered_history,
@@ -346,7 +365,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     @app.get("/search.csv")
     def search_csv(request: Request, q: str = "", field: str = "", scope: str = "latest"):
         args = search_args(request, q, field, scope)
-        with conn() as c:
+        with heavy(), conn() as c:
             rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX)
         names = ["domain", *db.RECORD_FIELDS, "eu", *(["first_seen", "last_seen", "seen"] if args["history"]
                                                  else ["last_seen"])]
@@ -391,6 +410,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(429, f"At most {s.scans_per_hour} scans per hour")
             if jobs.scans_by_client(c, who, minutes=24 * 60) >= s.scans_per_day:
                 raise HTTPException(429, f"At most {s.scans_per_day} scans per day")
+            if jobs.visitor_scans(c) >= s.scans_per_day_total:
+                raise HTTPException(503, "The day's scans are used up; try again tomorrow")
             if jobs.queued(c) >= s.queue_max:
                 raise HTTPException(503, "The scan queue is full; try again later")
             return jobs.enqueue(c, name, client=who)

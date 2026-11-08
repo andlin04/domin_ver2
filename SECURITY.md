@@ -1,0 +1,54 @@
+# Security
+
+## Reporting a vulnerability
+Report it privately through GitHub: this repository's **Security** tab > **Report a vulnerability**. Please don't open
+a public issue for it.
+
+## Privilege model
+| Part | Runs as | Can do |
+| --- | --- | --- |
+| nginx | `www-data` | TLS (Let's Encrypt, or a Cloudflare Origin CA certificate with Cloudflare's client certificate required), rate limits, proxies to 127.0.0.1:8000 |
+| domin (web, uvicorn) | `domin`, systemd sandbox | Reads and writes only `/var/lib/domin`; outbound HTTPS for the RDAP and e-mail tools |
+| domin-worker (scans) | `domin`, systemd sandbox | Same files; DNS, crt.sh, RDAP and amass towards public addresses only |
+| amass | child of the worker | Gets only `PATH` and a temporary `HOME`, none of the app's settings |
+
+- **No root at run time.** install.sh runs as root once; both services run as the unprivileged `domin` user. The
+  code in `/opt/domin` belongs to root and is read-only for the services.
+- **Sandbox** (both services): `NoNewPrivileges`, no capabilities, `ProtectSystem=strict` (writes only to
+  `/var/lib/domin`), private `/tmp` and `/dev`, no home directories, kernel tunables/modules/logs protected, no
+  namespaces, a `@system-service` system call filter without `@privileged` and `@resources`, only IP, Unix and netlink
+  sockets, `UMask=0077`. Limits: web 2 GB memory and 200 tasks, worker 16 GB and 2000 tasks.
+- **Scans can't be aimed inward.** A scanned domain's DNS decides where the tools connect, so the kernel refuses
+  every non-public address for both services and all their child processes (`IPAddressDeny`), plus this server's own
+  addresses and the `--deny` list. Outbound HTTP requests also refuse non-HTTPS URLs and non-public targets on every
+  redirect, and cap the response size.
+- **Settings:** `/etc/domin.env` (root, group `domin`, mode 640). The admin password is a scrypt hash in the database.
+
+## Web
+- **Admin page:** served only to `DOMIN_ADMIN_IPS` (empty by default: no admin page); everyone else gets the same 404
+  as an unknown path. The client address comes from nginx (`X-Real-IP`, trusted from localhost only; behind Cloudflare
+  `CF-Connecting-IP` from Cloudflare's published ranges only). Password (scrypt, N=2^15, constant-time comparison),
+  5 failed sign-ins in 15 minutes block the client (30 in total block everyone), session cookie `__Host-`, Secure,
+  HttpOnly, SameSite=Strict, CSRF token on every form, `Cache-Control: no-store`.
+- **Scan requests:** JSON only (a cross-site form can't send one), per-client limits per hour and day, a daily limit
+  for all visitors together, one scan per domain per day, a bounded queue.
+- **Load:** nginx limits requests and connections per client and request sizes; filtered searches and CSV downloads
+  run at most two at a time per web process (others wait briefly, then get 503).
+- **Headers:** a Content-Security-Policy that allows only the site's own files (no inline script), `X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
+  `Cross-Origin-Resource-Policy`; HSTS on the Origin CA (Cloudflare) setup.
+- **Output:** templates escape everything; script-built HTML escapes third-party text; CSV cells that a spreadsheet
+  would run as a formula are prefixed with `'`.
+- **Privacy:** no IP addresses are stored; visitors are a daily-salted hash, scan clients a salted hash kept 24 hours.
+
+## Supply chain
+- Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time").
+- amass: a pinned release, checked against its SHA-256 before it is installed.
+- System packages come from the distribution; install.sh turns on daily security updates (unattended-upgrades, no
+  automatic reboot) unless the host has its own apt setup or `AUTO_UPDATES=off`.
+- Chart.js is vendored; pages load nothing from other sites.
+
+## Network
+- `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list.
+- Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
+  unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.

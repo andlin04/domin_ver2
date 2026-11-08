@@ -36,6 +36,19 @@ def sign_in(h) -> str:
     return re.search(r'name="csrf" value="([^"]+)"', page.text).group(1)
 
 
+def test_old_password_hash_is_upgraded_at_sign_in(settings):
+    import hashlib
+    salt = b"0123456789abcdef"
+    old = "scrypt$" + salt.hex() + "$" + hashlib.scrypt(PW.encode(), salt=salt, n=2**14, r=8, p=1).hex()
+    with db.connect(settings.db_path) as c:
+        admin.kv_set(c, "admin_password", old)
+        assert not admin.check_password(c, "wrong password")
+        assert admin.kv_get(c, "admin_password") == old
+        assert admin.check_password(c, PW)
+        assert admin.kv_get(c, "admin_password").startswith(f"scrypt${admin.SCRYPT_LOG_N}$")
+        assert admin.check_password(c, PW)
+
+
 def test_asset_links_are_relative(settings):
     # behind a proxy the app sees http and another Host: absolute links would be blocked as mixed content
     page = client(settings).get(BASE, headers=UA).text
@@ -82,7 +95,7 @@ def test_login_logout_and_lockout(settings):
 def test_forms_need_the_csrf_token(settings):
     with client(settings) as h:
         csrf = sign_in(h)
-        form = {k: str(v) for k, v in {"scans_per_hour": 5, "scans_per_day": 50, "queue_max": 9,
+        form = {k: str(v) for k, v in {"scans_per_hour": 5, "scans_per_day": 50, "scans_per_day_total": 60, "queue_max": 9,
                                         "scan_timeout_hours": 3, "lookups_per_minute": 3,
                                         "max_hosts": 100, "refresh_days": 0, "analytics_days": 30}.items()}
         assert h.post(BASE + "/tune", data={**form, "csrf": "forged"}).status_code == 403

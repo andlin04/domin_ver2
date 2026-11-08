@@ -317,6 +317,69 @@ def test_scans_per_day_limit(settings):
         assert r.status_code == 429 and "per day" in r.text
 
 
+def test_visitor_scans_per_day_from_all_clients(settings):
+    s = replace(settings, scans_per_hour=100, scans_per_day_total=2)
+    for i, ip in enumerate(("198.51.100.1", "198.51.100.2", "198.51.100.3")):
+        with TestClient(create_app(s), client=(ip, 50000)) as h:
+            r = h.post("/api/scan", json={"domain": f"t{i}.se"})
+            assert r.status_code == (200 if i < 2 else 503)
+    assert "used up" in r.text
+    with db.connect(settings.db_path) as c:   # refreshes and admin retries don't use the visitors' budget
+        jobs.enqueue(c, "r1.se", client=jobs.REFRESH)
+        jobs.enqueue(c, "a1.se", client="admin")
+        assert jobs.visitor_scans(c) == 2
+
+
+def test_heavy_searches_wait_for_a_slot(settings, monkeypatch):
+    import threading
+
+    from domin import web
+    monkeypatch.setattr(web, "HEAVY_AT_ONCE", 1)
+    release, started = threading.Event(), threading.Event()
+    real = db.search
+
+    def slow(*a, **kw):
+        started.set()
+        release.wait(10)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(db, "search", slow)
+    real_acquire = threading.BoundedSemaphore.acquire
+    monkeypatch.setattr(threading.BoundedSemaphore, "acquire", lambda self, timeout=None: real_acquire(self, timeout=0.2))
+    with TestClient(create_app(settings)) as h:
+        first = threading.Thread(target=lambda: h.get("/search.csv?q=example"))
+        first.start()
+        assert started.wait(10)
+        assert h.get("/all?q=example").status_code == 503   # the one slot is taken
+        release.set()
+        first.join(10)
+        assert h.get("/all?q=example").status_code == 200
+
+
+def test_security_headers(settings):
+    with TestClient(create_app(settings)) as h:
+        r = h.get("/")
+    for k in ("content-security-policy", "permissions-policy", "cross-origin-opener-policy",
+              "cross-origin-resource-policy", "x-frame-options", "x-content-type-options", "referrer-policy"):
+        assert k in r.headers
+
+
+def test_no_admin_page_without_admin_ips(monkeypatch):
+    monkeypatch.delenv("DOMIN_ADMIN_IPS", raising=False)
+    assert Settings.from_env().admin_ips == ()
+
+
+def test_install_pins_dependencies_and_denies_own_addresses():
+    root = Path(__file__).parent.parent
+    install = (root / "deploy" / "install.sh").read_text()
+    pins = [x for x in (root / "deploy" / "requirements.txt").read_text().splitlines() if x and not x.startswith("#")]
+    assert pins and all("==" in x for x in pins)
+    assert "deploy/requirements.txt" in install and "--upgrade pip" not in install
+    assert "${DENY_MORE:+IPAddressDeny=$DENY_MORE}" in install   # never an empty IPAddressDeny= (it clears the list)
+    assert "UMask=0077" in install.splitlines()
+    assert "SystemCallFilter=~@privileged @resources" in install.splitlines()
+
+
 def test_internal_ips_skip_scan_limits(settings):
     s = replace(settings, scans_per_hour=1, scans_per_day=1, queue_max=1, internal_ips=("192.0.2.0/24",))
     with TestClient(create_app(s), client=("192.0.2.9", 50000)) as h:

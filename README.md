@@ -28,11 +28,15 @@ Debian 12/13 or Ubuntu 24.04, a DNS record for your host name pointing at the se
 
 ```bash
 git clone https://github.com/andlin04/domin_ver2.git && cd domin_ver2
-bash deploy/install.sh --domain domin.example.com --email you@example.com --firewall
+bash deploy/install.sh --domain domin.example.com --email you@example.com --firewall --ssh-from 203.0.113.0/24 \
+  --admin-ip 203.0.113.10
 ```
 
-This installs the app in /opt/domin, the database in /var/lib/domin, two systemd services (`domin` web,
-`domin-worker` scans), nginx with rate limits, and a Let's Encrypt certificate with automatic renewal.
+This installs the app in /opt/domin, the database in /var/lib/domin, two sandboxed systemd services (`domin` web,
+`domin-worker` scans), nginx with rate limits, a Let's Encrypt certificate with automatic renewal, and daily
+security updates (`AUTO_UPDATES=off` to skip). Python packages are the tested versions in
+[deploy/requirements.txt](deploy/requirements.txt). Security model: [SECURITY.md](SECURITY.md); changes:
+[CHANGES.md](CHANGES.md).
 
 **Existing history:** copy a database to the server and pass it once:
 
@@ -54,7 +58,7 @@ database and certificate). Options: see the top of [deploy/install.sh](deploy/in
 ## Admin page
 
 At `/admin`, HTTPS only, for the client addresses in `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or
-CIDRs; the installer adds the owner's address once; `systemctl restart domin` after editing). Those clients see an
+CIDRs; `install.sh --admin-ip` sets it; empty = no admin page; `systemctl restart domin` after editing). Those clients see an
 Admin link in the header; for everyone else there is no link and every /admin path answers 404. The client address
 is nginx's `$remote_addr` passed as X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from Cloudflare's
 ranges); other forwarding headers from visitors are ignored. Set the password once:
@@ -85,6 +89,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 Settings (environment): `DOMIN_DB`, `DOMIN_REFRESH_DAYS` (re-scan domains older than N days, 0 = off),
 `DOMIN_SCAN_WORKERS`, `DOMIN_MAX_HOSTS`, `DOMIN_SCANS_PER_HOUR`, `DOMIN_SCANS_PER_DAY` (200),
+`DOMIN_SCANS_PER_DAY_TOTAL` (500 visitor scans in 24 h from all clients together),
 `DOMIN_USER_WORKERS` (3 parallel visitor scans), `DOMIN_REFRESH_WORKERS` (2 parallel refreshes, a separate queue),
 `DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin), `DOMIN_INTERNAL_IPS`
 (private API clients, e.g. over a VPN: `POST /api/scan` without the per-client, once-a-day and queue limits; empty

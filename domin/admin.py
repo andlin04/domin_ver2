@@ -31,6 +31,7 @@ TUNABLE = {
     "once_per_day": ("Each domain at most once per day", None, None),
     "scans_per_hour": ("Scans per hour per client", 0, 1000),
     "scans_per_day": ("Scans per day per client", 0, 100000),
+    "scans_per_day_total": ("Visitor scans per day, all clients together", 0, 100000),
     "queue_max": ("Queued visitor scans before new ones are refused", 1, 10000),
     "scan_timeout_hours": ("A scan fails after N hours", 1, 48),
     "lookups_per_minute": ("RDAP / e-mail lookups per minute per client", 1, 1000),
@@ -81,19 +82,28 @@ def save_tuning(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
 
 # --- password and sessions ---------------------------------------------------------------------------------------
 
+SCRYPT_LOG_N = 15   # N = 2^15; hashes from older versions (2^14, no N field) are replaced at the next sign-in
+
+
+def _scrypt(password: str, salt: bytes, log_n: int) -> bytes:
+    return hashlib.scrypt(password.encode(), salt=salt, n=2**log_n, r=8, p=1, maxmem=128 * 2**log_n * 8 * 2)
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    h = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
-    return f"scrypt${salt.hex()}${h.hex()}"
+    return f"scrypt${SCRYPT_LOG_N}${salt.hex()}${_scrypt(password, salt, SCRYPT_LOG_N).hex()}"
 
 
 def check_password(conn: sqlite3.Connection, password: str) -> bool:
     stored = kv_get(conn, "admin_password")
     if not stored or not password:
         return False
-    _, salt, want = stored.split("$")
-    got = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=2**14, r=8, p=1)
-    return hmac.compare_digest(got.hex(), want)
+    parts = stored.split("$")
+    log_n, salt, want = (14, *parts[1:]) if len(parts) == 3 else (int(parts[1]), *parts[2:])
+    ok = hmac.compare_digest(_scrypt(password, bytes.fromhex(salt), log_n).hex(), want)
+    if ok and log_n != SCRYPT_LOG_N:
+        kv_set(conn, "admin_password", hash_password(password))   # sessions stay: same password
+    return ok
 
 
 def set_password(conn: sqlite3.Connection, password: str) -> None:
