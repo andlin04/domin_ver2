@@ -348,8 +348,28 @@ function adminCharts() {
     options: { scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } },
   });
 }
+// Styled confirmation popup for destructive actions (forms with data-confirm): a modal <dialog>, not window.confirm.
+function confirmModal(message) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement("dialog");
+    dlg.className = "confirm";
+    dlg.innerHTML =
+      `<form method="dialog"><p>${esc(message)}</p>` +
+      `<menu><button value="cancel" class="btn">Cancel</button>` +
+      `<button value="ok" class="btn danger" autofocus>Confirm</button></menu></form>`;
+    document.body.appendChild(dlg);
+    dlg.addEventListener("close", () => { resolve(dlg.returnValue === "ok"); dlg.remove(); });
+    dlg.showModal();
+  });
+}
 $$("form[data-confirm]").forEach((f) => f.addEventListener("submit", (ev) => {
-  if (!confirm(f.dataset.confirm)) ev.preventDefault();
+  if (f.dataset.confirmed) return;   // already confirmed in the modal: let this submit through
+  ev.preventDefault();
+  confirmModal(f.dataset.confirm).then((ok) => {
+    if (!ok) return;
+    f.dataset.confirmed = "1";
+    f.requestSubmit ? f.requestSubmit() : f.submit();
+  });
 }));
 
 const page = document.body.dataset.page;

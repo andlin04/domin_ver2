@@ -245,3 +245,12 @@ form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: 
 .kpi-line { font-size: 1.05rem; } .kpi-line b { font-size: 1.4rem; }
 .warn-card { border-color: var(--flat); background: color-mix(in srgb, var(--flat) 9%, var(--surface)); }
 .bullets { margin: .3rem 0 0; padding-left: 1.1rem; display: grid; gap: .3rem; }
+
+/* confirmation modal for destructive actions */
+.btn.danger { background: var(--down); border-color: var(--down); color: #fff; }
+.btn.danger:hover { filter: brightness(1.08); }
+dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+  color: var(--text); max-width: 26rem; padding: 1.25rem 1.3rem; box-shadow: var(--shadow); }
+dialog.confirm::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
+dialog.confirm p { margin: 0 0 1.1rem; line-height: 1.45; }
+dialog.confirm menu { display: flex; gap: .6rem; justify-content: flex-end; margin: 0; padding: 0; }

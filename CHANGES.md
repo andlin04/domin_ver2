@@ -7,6 +7,8 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 - An **admin** (only) sees a **Drop from inventory** button on a domain's page. It removes that domain and all of its
   scans, records and queued/old jobs from the database (user accounts, settings and scope are untouched), then
   returns to the overview. CSRF-checked; analysts and viewers do not see or reach it.
+- Destructive actions now confirm in a **styled modal popup** (naming the domain) instead of the plain browser
+  prompt; the same popup covers the other destructive buttons (delete user, reset two-factor, …).
 - Reversible only by re-scanning the domain (the removed history is gone); no migration.
 
 ## 2026-11-08: internal scan mode (LAN zones, no external egress)
