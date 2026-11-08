@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import cve, db, fingerprint, users
+from . import cve, db, fingerprint, proxy, users
 
 log = logging.getLogger("domin.posture")
 
@@ -172,10 +172,13 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     if not users.posture_ok(users.get_scope(conn), row["ip"], row["country"]):
         _finish(conn, row["id"], "failed", {"error": "outside the posture scope (Settings changed after queueing)"})
         return
+    via = proxy.get(conn)   # read per scan: a change on the Scan settings page applies to the next one
     try:
-        res = fingerprint.scan(row["ip"], cve_db=cve_db, client=client, api_key=api_key, ports=row["ports"],
-                               display=row["hosts"].split(",")[0] or row["ip"], intensity=row.get("intensity", 2),
-                               timing=row.get("timing", 3), timeout=row.get("timeout", 120))
+        with proxy.cve_client(via, client) as lookups:
+            res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],
+                                   display=row["hosts"].split(",")[0] or row["ip"],
+                                   intensity=row.get("intensity", 2), timing=row.get("timing", 3),
+                                   timeout=row.get("timeout", 120), via=via)
     except Exception as exc:   # one bad host must not stop the queue
         log.exception("posture scan %s failed", row["ip"])
         res = {"error": f"internal error ({type(exc).__name__})"}

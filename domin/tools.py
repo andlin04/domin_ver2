@@ -27,9 +27,9 @@ def public_only(request: httpx.Request) -> None:
         raise httpx.RequestError(f"refused: {request.url.host} is not a public address", request=request)
 
 
-def http_client() -> httpx.Client:
+def http_client(proxy: httpx.Proxy | None = None) -> httpx.Client:
     return httpx.Client(headers={"User-Agent": "domin/2 (domain inventory)"}, follow_redirects=True, max_redirects=5,
-                        timeout=20, event_hooks={"request": [public_only]})
+                        timeout=20, event_hooks={"request": [public_only]}, proxy=proxy)
 
 
 def get_json(client: httpx.Client, url: str, timeout: float, **kw) -> tuple[str, object] | None:

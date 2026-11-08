@@ -6,18 +6,22 @@ and version nmap recognises, and the CPEs it reports. No raw-socket scan and no 
 (:func:`cve.lookup`) to list the known vulnerabilities of each service version. The posture
 scope (Settings) governs which addresses a scan may probe; the caller checks it before probing.
 
-This module only speaks to the target over TCP. It never reaches the internet itself; the CVE
-layer it calls does, through the configured source and local database.
+This module only speaks to the target over TCP, through the scan proxy when one is on (proxy.py).
+It never reaches the internet itself; the CVE layer it calls does, through the configured source
+and local database.
 """
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
+import shutil
 import socket
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 
-from . import cve
+from . import cve, proxy
 
 # A compact, common-service port set: web, mail, databases, remote access, caches. Keeps a scan
 # quick and predictable; the form lets an analyst override it.
@@ -98,9 +102,33 @@ def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int
     return args
 
 
-def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3) -> str:
-    """Run a connect + service-version scan and return the XML."""
+def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3,
+             via: dict | None = None) -> str:
+    """Run a connect + service-version scan and return the XML. via: the scan proxy settings when it is on; nmap
+    then runs under proxychains4 with a per-run config (mode 0600, deleted afterwards). Fails closed: a missing
+    proxychains4 or an unresolvable or unreachable proxy is an NmapError, never a direct scan."""
     args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin)
+    if not via:
+        return _run(args, timeout)
+    pc = shutil.which("proxychains4")
+    if not pc:
+        raise NmapError("proxy enabled but proxychains4 is not installed")
+    try:
+        proxy.handshake(via)
+        text = proxy.conf(via, proxy.resolve(via["host"]))
+    except proxy.ProxyError as exc:
+        raise NmapError(f"proxy {proxy.route(via)}: {exc}") from None
+    fd, path = tempfile.mkstemp(prefix="domin-proxy-", suffix=".conf")   # 0600 on POSIX
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(path, 0o600)
+        return _run([pc, "-q", "-f", path, *args], timeout)
+    finally:
+        os.unlink(path)
+
+
+def _run(args: list[str], timeout: int) -> str:
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 30)
     except subprocess.TimeoutExpired as exc:
@@ -145,15 +173,19 @@ def _dedupe(findings: list[dict]) -> list[dict]:
 
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
          timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
-         timing: int = 3) -> dict:
+         timing: int = 3, via: dict | None = None) -> dict:
     """Fingerprint one host and match each service's CPEs against the CVE layer.
 
     Returns {target, ip, services, note, error, raw, params}. Each service carries its CPEs' findings
     (deduped, worst first) and a `matched` flag (did any CPE yield a cve target to look up). params is
-    the nmap command line that ran."""
+    the nmap command line that ran, plus the route ("via socks5 192.0.2.10:1080") when via (the scan proxy
+    settings) is on."""
+    via = via if via and via.get("enabled") else None
     params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
+    if via:
+        params += f" via {proxy.route(via)}"
     try:
-        xml = run_nmap(ip, ports, timeout, nmap_bin, intensity, timing)
+        xml = run_nmap(ip, ports, timeout, nmap_bin, intensity, timing, via=via)
     except FileNotFoundError:
         return {"target": display or ip, "ip": ip, "services": [], "note": "", "params": params,
                 "error": "nmap is not installed on this host."}

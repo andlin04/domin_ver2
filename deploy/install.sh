@@ -62,7 +62,7 @@ APP=/opt/domin DATA=/var/lib/domin
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl >/dev/null
+apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 >/dev/null   # proxychains4: scan proxy
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
 # Automatic security updates (unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host already
 # has an apt periodic setup of its own (kept as it is).

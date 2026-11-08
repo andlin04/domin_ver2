@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, posture, tags, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, posture, proxy, tags, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -909,7 +909,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       report=rep, profiles=posture.profiles(c),
+                       report=rep, profiles=posture.profiles(c), scan_route=proxy.route(proxy.get(c)),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
@@ -925,7 +925,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return back(f"{base}/security")
 
     def lookup_view(request, u, s, ctx):
-        return shell(request, "lookup.html", u, s, ctx.pop("status", 200), **ctx)
+        with conn() as c:
+            route = proxy.route(proxy.get(c))
+        return shell(request, "lookup.html", u, s, ctx.pop("status", 200), scan_route=route, **ctx)
 
     @app.get(base + "/security/lookup", response_class=HTMLResponse, include_in_schema=False)
     def lookup_page(request: Request):
@@ -1070,6 +1072,57 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return profiles_view(request, u, s, 422, "The default profile cannot be deleted.")
         return back(f"{base}/security/profiles")
 
+    # --- scan settings: the proxy every posture scan goes through (admin only) -----------------------------------
+
+    def scan_settings_view(request, c, u, s, status: int = 200, error: str = "", form: dict | None = None,
+                           test: tuple[bool, str] | None = None):
+        cfg = proxy.public(proxy.get(c))
+        if form:   # a refused save shows what was typed (never the password)
+            cfg.update({k: form.get(k, "") for k in ("type", "host", "port", "username")},
+                       enabled=form.get("enabled") == "on", cve=form.get("cve") == "on")
+        return shell(request, "scan_settings.html", u, s, status, proxy=cfg, types=proxy.TYPES, error=error,
+                     test=test, route=proxy.route(proxy.get(c)))
+
+    @app.get(base + "/security/scan-settings", response_class=HTMLResponse, include_in_schema=False)
+    def scan_settings_page(request: Request):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            return scan_settings_view(request, c, u, s)
+
+    @app.post(base + "/security/scan-settings", include_in_schema=False)
+    async def scan_settings_save(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                proxy.save(c, data)
+            except ValueError as exc:
+                return scan_settings_view(request, c, u, s, 422, str(exc), data)
+        return back(base + "/security/scan-settings", "saved")
+
+    @app.post(base + "/security/scan-settings/test", include_in_schema=False)
+    async def scan_settings_test(request: Request):
+        """Handshake with the saved proxy from the web process; no traffic to any target."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            cfg = proxy.get(c)
+        if not cfg["host"]:
+            result = (False, "Save a proxy host first.")
+        else:
+            try:
+                result = (True, await run_in_threadpool(proxy.handshake, cfg))
+            except proxy.ProxyError as exc:
+                result = (False, str(exc))
+        with conn() as c:
+            return scan_settings_view(request, c, u, s, test=result)
+
     @app.post(base + "/security/scan", include_in_schema=False)
     async def security_scan(request: Request):
         data = await form(request)
@@ -1078,6 +1131,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
+            via = proxy.get(c)
             if not users.can(u["role"], "analyst"):
                 return lookup_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
             if data.get("kind") == "host":
@@ -1105,11 +1159,13 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                     return lookup_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
         if host_params is not None:
             ip0, name, ports = host_params
-            scan = await run_in_threadpool(
-                fingerprint.scan, ip0, cve_db=cve_db, client=http, api_key=settings.nvd_api_key,
-                ports=ports, display=name)
+            with proxy.cve_client(via, http) as lookups:
+                scan = await run_in_threadpool(
+                    fingerprint.scan, ip0, cve_db=cve_db, client=lookups, api_key=settings.nvd_api_key,
+                    ports=ports, display=name, via=via)
             return lookup_view(request, u, s, security_ctx(host_result=scan, form=data))
-        result = await run_in_threadpool(cve.lookup, cve_db, target, http, settings.nvd_api_key)
+        with proxy.cve_client(via, http) as lookups:
+            result = await run_in_threadpool(cve.lookup, cve_db, target, lookups, settings.nvd_api_key)
         result["label"] = cve.target_label(target)
         return lookup_view(request, u, s, security_ctx(result=result, form=data))
 

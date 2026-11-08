@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Scan settings · domin{% endblock %}
+{% block page %}security{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Scan settings</h1>
+  <p class="muted">A proxy every posture scan goes through: nmap runs under proxychains4, so the port scan and the
+    version probes both leave through it. When the proxy is on and cannot be used, the scan fails; it never falls back
+    to a direct scan. Applies to the next scan, no restart.</p></div></section>
+
+{% set sub = "scan-settings" %}{% include "_posture_nav.html" %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if test %}<p class="note {{ 'ok' if test[0] else 'bad' }}" role="status">Test proxy: {{ test[1] }}</p>{% endif %}
+
+<section class="card">
+  <h2>Scan proxy <small>{% if route %}on: {{ route }}{% else %}off: scans go direct{% endif %}</small></h2>
+  <form method="post" action="{{ base }}/security/scan-settings">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick"><input type="checkbox" name="enabled" {% if proxy.enabled %}checked{% endif %}>
+      Send all posture scans through this proxy</label>
+    <div class="grid g3">
+      <label class="field">Type
+        <select name="type">{% for t in types %}<option value="{{ t }}" {% if proxy.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+      <label class="field">Host <small>IP address or host name</small>
+        <input name="host" value="{{ proxy.host }}" maxlength="253" spellcheck="false" autocapitalize="off"
+          placeholder="192.0.2.10"></label>
+      <label class="field">Port
+        <input name="port" type="number" min="1" max="65535" value="{{ proxy.port }}" required></label>
+      <label class="field">User name <small>optional</small>
+        <input name="username" value="{{ proxy.username }}" maxlength="255" autocomplete="off" spellcheck="false"
+          autocapitalize="off"></label>
+      <label class="field">Password <small>{% if proxy.password_saved %}saved; blank keeps it{% else %}optional{% endif %}</small>
+        <input name="password" type="password" maxlength="255" autocomplete="new-password"></label>
+      {% if proxy.password_saved %}<label class="tick"><input type="checkbox" name="clear_password"> Clear the saved password</label>{% endif %}
+    </div>
+    <label class="tick"><input type="checkbox" name="cve" {% if proxy.cve %}checked{% endif %}>
+      Also send CVE look-ups through the proxy</label>
+    <p class="muted">CVE look-ups (OSV, NVD) can use an http proxy only; socks support for them is not installed.
+      The password is stored in plain text in the database (readable by the service account only).</p>
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </form>
+  <form method="post" action="{{ base }}/security/scan-settings/test" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Test proxy</button>
+    <span class="muted">Connects to the saved proxy and completes its greeting (SOCKS5: with the user name and
+      password); no request to any target.</span>
+  </form>
+</section>
+{% endblock %}

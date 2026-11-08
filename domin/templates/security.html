@@ -42,6 +42,7 @@
   </form>
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}
+  {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 </section>
 
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}

@@ -2,6 +2,25 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: scan proxy for posture scans
+
+- Posture · **Scan settings** (admin only): a proxy every posture scan goes through. Type socks5 / socks4 / http,
+  host (IP or name), port, optional user name and password, on/off. The password is never shown again (blank on save
+  keeps it, a tick clears it); it is stored in plain text in the database.
+- nmap runs as `proxychains4 -q -f <per-run config> nmap -sT -sV ...`; the config (strict chain, proxy DNS, one
+  proxy by numeric address) is written mode 0600 and deleted after the run. A host name is resolved at scan time.
+- Fails closed: proxy on and proxychains4 missing, the proxy host not resolving or the proxy not answering its
+  greeting makes that scan fail with the reason; never a direct scan. Proxy off: the command is as before.
+- The route ("via socks5 192.0.2.10:1080", no credentials) is kept in the scan's parameters; the Posture and CVE
+  look-up pages show "Scans go through ..." while the proxy is on. Ad-hoc host fingerprints use it too.
+- **Test proxy** connects to the saved proxy from the web process and completes the greeting (SOCKS5 with user name
+  and password; SOCKS4 and http: the TCP connect). No request to any target.
+- "Also send CVE look-ups through the proxy": OSV and NVD queries go through an http proxy (socks support for
+  look-ups is not installed; the form refuses that combination).
+- `deploy/install.sh` installs proxychains4.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: inventory and admin pages back to their previous layout
 
 - Inventory, domain page layout, Operations, Settings, Users and Account return to the layout before the entry below;
