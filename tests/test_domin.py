@@ -635,6 +635,22 @@ def test_internal_scan_finds_hosts_by_reverse_lookups_and_zone_transfer(settings
     assert sum(n.endswith(".in-addr.arpa.") for n in asked) == 254 + 14   # every host address of both networks
 
 
+def test_paced_resolver_keeps_under_the_query_rate():
+    now, slept = [100.0], []
+
+    class Inner:
+        def resolve(self, name, rtype):
+            return name
+
+    def sleep(s):
+        slept.append(round(s, 3))
+        now[0] += s
+
+    p = scanner.Paced(Inner(), 10, clock=lambda: now[0], sleep=sleep)
+    assert [p.resolve(f"h{i}", "A") for i in range(4)] == ["h0", "h1", "h2", "h3"]
+    assert slept == [0.1, 0.1, 0.1]   # the first query goes at once, then one every 1/qps seconds
+
+
 def test_sweep_defaults_to_the_slash24_of_dns_servers_and_the_domain():
     got = scanner.sweep_addresses((), ["172.20.0.252", "172.20.4.7", "9.9.9.9", "fe80::1"], 8192)
     assert len(got) == 2 * 254 and got[0] == "172.20.0.1" and "172.20.4.254" in got

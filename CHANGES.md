@@ -10,6 +10,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   ignored. MX/NS records and common names are still tried; no query leaves the internal DNS servers.
 - **Settings → Internal domains** gains **Internal networks** (private IPv4 CIDRs, at most 8192 addresses in all).
   Empty = the /24 of each internal DNS server and of the domain's own address. `DOMIN_INTERNAL_NETS` prefills it.
+- Internal scans send at most 12 DNS queries per second: a LAN DNS server such as Pi-hole refuses a client that
+  asks more than 1000 times a minute, and the refused look-ups left hosts without addresses. A sweep of four /24
+  networks takes about two minutes.
 - No migration. Rollback: redeploy the previous build (the stored networks are then ignored).
 
 ## 2026-11-08: "Today" look

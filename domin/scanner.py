@@ -15,6 +15,8 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -55,6 +57,26 @@ def _resolver(nameservers: tuple[str, ...] | None = None, timeout: float = 5.0,
             r.nameservers = f.read().split()
     r.rotate, r.timeout, r.lifetime = True, timeout, lifetime
     return r
+
+
+INTERNAL_QPS = 12   # LAN DNS servers rate-limit a client (Pi-hole: 1000 queries per 60 s); stay well under it
+
+
+class Paced:
+    """A resolver that sends at most `qps` queries per second, shared by all threads of one scan."""
+
+    def __init__(self, inner: dns.resolver.Resolver, qps: float, clock=time.monotonic, sleep=time.sleep):
+        self.inner, self.gap, self.clock, self.sleep = inner, 1.0 / qps, clock, sleep
+        self.nameservers = getattr(inner, "nameservers", [])
+        self.lock, self.next = threading.Lock(), 0.0
+
+    def resolve(self, name, rtype):
+        with self.lock:
+            now = self.clock()
+            wait, self.next = self.next - now, max(self.next, now) + self.gap
+        if wait > 0:
+            self.sleep(wait)
+        return self.inner.resolve(name, rtype)
 
 
 def resolve(host: str, resolver: dns.resolver.Resolver | None = None) -> list[str]:
@@ -255,6 +277,8 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         enricher: Enricher | None = None) -> list[dict]:
     internal = is_internal(domain, settings.internal_zones)
     resolver = resolver or _resolver(settings.internal_dns if internal else None)
+    if internal:
+        resolver = Paced(resolver, INTERNAL_QPS)
     own_client = client is None
     client = client or tools.http_client()
     try:
