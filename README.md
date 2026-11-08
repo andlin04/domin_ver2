@@ -83,8 +83,14 @@ the first start.
 
 - **Two-factor:** each user can enrol a TOTP authenticator with one-time recovery codes on their Account page; an
   admin can require it per role on the Settings page, and reset a user's two-factor from the Users page.
-- **Settings / scope:** allow/deny lists for IP ranges, countries and domains, shown with a live count of
-  inventoried hosts in scope. Stored now; the vulnerability tools in a later phase read them.
+- **Settings / scope:** two separate guardrails, one per engine, each with its own live count:
+  - *Domain inventory scope* — a domain/suffix allow and deny list that governs the domain scanner (crt.sh / DNS /
+    RDAP). A scan or refresh of a domain outside the allow list, or on the deny list, is refused at every entry point
+    (web `/api/scan`, the `scan` CLI, scheduled refreshes and auto-retries). This engine is never limited by IP
+    address or geolocation.
+  - *Security posture scope* — IP range (CIDR) allow/deny lists and a per-country allow/deny pick-list built from the
+    countries actually present in the inventory (DB-IP values). Validated and stored now for the vulnerability /
+    posture engine of a later phase; it never affects the domain scanner.
 - **Security tab:** the signed-in landing page for the planned fingerprinting and CVE reports, with an
   authorised-use notice. No scanning yet.
 

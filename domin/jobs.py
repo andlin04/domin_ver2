@@ -11,7 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, db, scanner
+from . import admin, db, scanner, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -164,6 +164,7 @@ def enqueue_due(conn: sqlite3.Connection, days: int) -> int:
     due = [r["name"] for r in conn.execute(
         "SELECT d.name FROM domains d JOIN scans s ON s.domain_id = d.id GROUP BY d.id HAVING MAX(s.started) < ? "
         "ORDER BY MAX(s.started), d.name", (cutoff,))]
+    due = [n for n in due if users.domain_allowed(conn, n)]   # the original scanner's inventory-scope guardrail
     for name in due:
         enqueue(conn, name, client=REFRESH)
     return len(due)
@@ -188,6 +189,7 @@ def retry_failed(conn: sqlite3.Connection) -> int:
         """SELECT l.domain FROM (SELECT domain, status, MAX(id) FROM jobs GROUP BY domain) l WHERE l.status = 'failed'
            AND (SELECT COUNT(*) FROM jobs f WHERE f.domain = l.domain AND f.status = 'failed' AND f.finished >= ?)
                <= ? ORDER BY l.domain""", (since, RETRIES_PER_DAY))]
+    due = [n for n in due if users.domain_allowed(conn, n)]   # don't auto-retry an out-of-scope domain
     for name in due:
         enqueue(conn, name, client=REFRESH)
     return len(due)

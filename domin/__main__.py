@@ -68,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"not a domain: {args.domain}", file=sys.stderr)
             return 2
         with db.connect(settings.db_path) as conn:
+            if not users.domain_allowed(conn, name):
+                print(f"{name} is outside the configured inventory scope", file=sys.stderr)
+                return 2
             print(jobs.enqueue(conn, name, client="cli"))
     elif args.cmd == "geoip":
         with db.connect(settings.db_path) as conn:

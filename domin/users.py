@@ -209,20 +209,28 @@ def migrate_legacy_admin(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM kv WHERE key = 'admin_password'")
 
 
-# --- scope and policy settings (persisted this phase; they gate scans in a later one) -----------------------------
+# --- scope and policy settings -----------------------------------------------------------------------------------
+# Two independent guardrails, one per engine:
+#  * Domain inventory scope (domains_allow / domains_deny) gates the original crt.sh/DNS/RDAP scanner. It is NEVER
+#    limited by IP or geolocation.
+#  * Security posture scope (ip_allow / ip_deny, countries_allow / countries_deny) belongs to the future posture /
+#    vulnerability engine only (the Security tab is a placeholder this phase). It never affects the original scanner.
+# require_2fa is a login policy, not a scan guardrail; it lives here for one shared settings store.
 
-SCOPE_DEFAULT = {"ip_allow": [], "ip_deny": [], "countries_allow": [], "countries_deny": [],
-                 "domains_allow": [], "domains_deny": [], "require_2fa": {r: False for r in ROLES}}
+SCOPE_DEFAULT = {"domains_allow": [], "domains_deny": [],                 # domain inventory engine
+                 "ip_allow": [], "ip_deny": [], "countries_allow": [], "countries_deny": [],   # posture engine
+                 "require_2fa": {r: False for r in ROLES}}
+LIST_KEYS = ("domains_allow", "domains_deny", "ip_allow", "ip_deny", "countries_allow", "countries_deny")
 
 
 def get_scope(conn: sqlite3.Connection) -> dict:
     raw = admin.kv_get(conn, "scope")
-    out = {**SCOPE_DEFAULT, "require_2fa": dict(SCOPE_DEFAULT["require_2fa"])}
+    out = {**{k: [] for k in LIST_KEYS}, "require_2fa": dict(SCOPE_DEFAULT["require_2fa"])}
     if raw:
         saved = json.loads(raw)
         for k in out:
             if k in saved:
-                out[k] = {**out[k], **saved[k]} if k == "require_2fa" else saved[k]
+                out[k] = {**out[k], **saved[k]} if k == "require_2fa" else list(saved[k])
     return out
 
 
@@ -238,10 +246,14 @@ def _lines(text: str) -> list[str]:
     return [x.strip() for x in (text or "").replace(",", "\n").splitlines() if x.strip()]
 
 
-def parse_scope(form: dict[str, str]) -> dict:
-    """Build and validate a scope from the settings form (textarea per list, a 'require 2fa' tick per role)."""
+def parse_scope(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
+    """Build and validate a scope from the settings form. Domains and IP ranges come from a textarea each; the
+    posture countries come from tick boxes (ca:<country> / cd:<country>) over the countries present in the
+    inventory, so the choice uses the same country values as the records."""
     import ipaddress
-    out = {"require_2fa": {r: form.get(f"require_2fa_{r}") == "on" for r in ROLES}}
+    out: dict = {"require_2fa": {r: form.get(f"require_2fa_{r}") == "on" for r in ROLES}}
+    out["domains_allow"] = [d.lower().lstrip(".") for d in _lines(form.get("domains_allow", ""))]
+    out["domains_deny"] = [d.lower().lstrip(".") for d in _lines(form.get("domains_deny", ""))]
     for key, label in (("ip_allow", "allowed IP range"), ("ip_deny", "denied IP range")):
         nets = []
         for item in _lines(form.get(key, "")):
@@ -250,22 +262,40 @@ def parse_scope(form: dict[str, str]) -> dict:
             except ValueError:
                 raise ValueError(f"{label}: {item} is not a valid CIDR or address") from None
         out[key] = nets
-    for key, label in (("countries_allow", "allowed country"), ("countries_deny", "denied country")):
-        ccs = []
-        for item in _lines(form.get(key, "")):
-            if not (len(item) == 2 and item.isalpha()):
-                raise ValueError(f"{label}: {item} is not a two-letter country code")
-            ccs.append(item.upper())
-        out[key] = ccs
-    for key in ("domains_allow", "domains_deny"):
-        out[key] = [d.lower().lstrip(".") for d in _lines(form.get(key, ""))]
+    inv = set(inventory_countries(conn))
+    out["countries_allow"] = [c for c in inv if form.get(f"ca:{c}") == "on"]
+    out["countries_deny"] = [c for c in inv if form.get(f"cd:{c}") == "on"]
     return out
 
+
+# --- domain inventory engine guardrail ---------------------------------------------------------------------------
 
 def _domain_ok(name: str, allow: list[str], deny: list[str]) -> bool:
     def matches(rules: list[str]) -> bool:
         return any(name == r or name.endswith("." + r) for r in rules)
     return (not allow or matches(allow)) and not matches(deny)
+
+
+def domain_allowed(conn: sqlite3.Connection, name: str) -> bool:
+    """True when the original scanner may scan/analyse this domain (inventory scope only; never IP or geo)."""
+    scope = get_scope(conn)
+    return _domain_ok((name or "").lower(), scope["domains_allow"], scope["domains_deny"])
+
+
+def inventory_in_scope(conn: sqlite3.Connection, scope: dict) -> dict:
+    """How many known domains the inventory scope keeps in scope."""
+    domains = [r["name"] for r in conn.execute("SELECT name FROM domains")]
+    n = sum(1 for d in domains if _domain_ok(d, scope["domains_allow"], scope["domains_deny"]))
+    return {"total": len(domains), "in_scope": n}
+
+
+# --- security posture engine guardrail (persisted now; the engine reads it in a later phase) ---------------------
+
+def inventory_countries(conn: sqlite3.Connection) -> list[str]:
+    """Distinct country values present in the latest scans' records, for the geolocation pick-list."""
+    return [r[0] for r in conn.execute(
+        f"SELECT DISTINCT r.country FROM records r JOIN ({db.LATEST}) s ON s.id = r.scan_id "
+        "WHERE r.country != '' ORDER BY r.country")]
 
 
 def _ip_ok(ips: list[str], allow: list[str], deny: list[str]) -> bool:
@@ -281,24 +311,29 @@ def _ip_ok(ips: list[str], allow: list[str], deny: list[str]) -> bool:
         return any(a in n for n in nets)
     if not ips:
         return not allow_n   # a host with no address is in scope only when no allow-list narrows it
-    ok = any((not allow_n or inn(ip, allow_n)) and not inn(ip, deny_n) for ip in ips)
-    return ok
+    return any((not allow_n or inn(ip, allow_n)) and not inn(ip, deny_n) for ip in ips)
 
 
-def hosts_in_scope(conn: sqlite3.Connection, scope: dict) -> dict:
-    """Count host names from the latest scans that the IP-range and domain rules keep in scope (country rules are
-    stored and applied to scans in a later phase, so they are not counted here)."""
-    rows = conn.execute(f"""SELECT d.name AS domain, r.host AS host, r.ip AS ip FROM records r
-                            JOIN ({db.LATEST}) s ON s.id = r.scan_id
-                            JOIN domains d ON d.id = s.domain_id""").fetchall()
-    hosts: dict[str, list[str]] = {}
-    domain_of: dict[str, str] = {}
+def _country_ok(country: str, allow: list[str], deny: list[str]) -> bool:
+    if not country:
+        return not allow   # unknown country is in scope only when no allow-list narrows it
+    return (not allow or country in allow) and country not in deny
+
+
+def posture_in_scope(conn: sqlite3.Connection, scope: dict) -> dict:
+    """How many inventoried host names (and distinct countries) the posture IP and geolocation rules keep in scope."""
+    rows = conn.execute(f"""SELECT r.host AS host, r.ip AS ip, r.country AS country FROM records r
+                            JOIN ({db.LATEST}) s ON s.id = r.scan_id""").fetchall()
+    hosts: dict[str, dict] = {}
     for r in rows:
-        hosts.setdefault(r["host"], [])
-        domain_of[r["host"]] = r["domain"]
+        h = hosts.setdefault(r["host"], {"ips": [], "country": ""})
         if r["ip"]:
-            hosts[r["host"]].append(r["ip"])
-    in_scope = sum(1 for h, ips in hosts.items()
-                   if _domain_ok(domain_of[h], scope["domains_allow"], scope["domains_deny"])
-                   and _ip_ok(ips, scope["ip_allow"], scope["ip_deny"]))
-    return {"total": len(hosts), "in_scope": in_scope}
+            h["ips"].append(r["ip"])
+        if r["country"]:
+            h["country"] = r["country"]
+    in_scope = sum(1 for h in hosts.values()
+                   if _ip_ok(h["ips"], scope["ip_allow"], scope["ip_deny"])
+                   and _country_ok(h["country"], scope["countries_allow"], scope["countries_deny"]))
+    countries = inventory_countries(conn)
+    cc_in = sum(1 for c in countries if _country_ok(c, scope["countries_allow"], scope["countries_deny"]))
+    return {"total": len(hosts), "in_scope": in_scope, "countries": len(countries), "countries_in_scope": cc_in}

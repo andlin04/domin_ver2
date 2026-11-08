@@ -173,26 +173,71 @@ def test_required_role_cannot_turn_two_factor_off(settings):
 
 # --- scope settings ----------------------------------------------------------------------------------------------
 
-def test_scope_saves_valid_lists_and_rejects_bad_ones(settings):
+def _inventory(c):
+    db.save_scan(c, "example.se", "2025-03-01T00:00:00", "import",
+                 [{"host": "a.example.se", "ip": "192.0.2.10", "country": "Sweden"},
+                  {"host": "b.example.se", "ip": "198.51.100.5", "country": "Finland"}])
+
+
+def test_settings_save_and_counts_per_engine(settings):
     mkuser(settings, "boss", "admin")
-    with db.connect(settings.db_path) as c:   # a small inventory to count against
-        db.save_scan(c, "example.se", "2025-03-01T00:00:00", "import",
-                     [{"host": "a.example.se", "ip": "192.0.2.10"}, {"host": "b.example.se", "ip": "198.51.100.5"}])
+    with db.connect(settings.db_path) as c:
+        _inventory(c)
     with client(settings) as h:
         login(h, "boss")
         token = csrf_of(h, BASE + "/settings")
-        bad = h.post(BASE + "/settings", data={"csrf": token, "ip_allow": "not-a-cidr"})
-        assert bad.status_code == 422
-        ok = h.post(BASE + "/settings", data={"csrf": token, "ip_allow": "192.0.2.0/24",
-                                              "countries_allow": "SE", "domains_deny": "example.org",
+        assert h.post(BASE + "/settings", data={"csrf": token, "ip_allow": "not-a-cidr"}).status_code == 422
+        ok = h.post(BASE + "/settings", data={"csrf": token, "domains_allow": "example.se",
+                                              "ip_allow": "192.0.2.0/24", "cd:Finland": "on",
                                               "require_2fa_admin": "on"}, follow_redirects=False)
         assert ok.status_code == 303
     with db.connect(settings.db_path) as c:
         scope = users.get_scope(c)
-        assert scope["ip_allow"] == ["192.0.2.0/24"] and scope["countries_allow"] == ["SE"]
-        assert scope["require_2fa"]["admin"] is True
-        counts = users.hosts_in_scope(c, scope)
-        assert counts == {"total": 2, "in_scope": 1}   # only the host in 192.0.2.0/24
+        assert scope["domains_allow"] == ["example.se"] and scope["ip_allow"] == ["192.0.2.0/24"]
+        assert scope["countries_deny"] == ["Finland"] and scope["require_2fa"]["admin"] is True
+        assert users.inventory_in_scope(c, scope) == {"total": 1, "in_scope": 1}
+        posture = users.posture_in_scope(c, scope)
+        assert posture["in_scope"] == 1 and posture["total"] == 2        # only the 192.0.2.10 host, and not Finland
+        assert posture["countries_in_scope"] == 1 and posture["countries"] == 2
+
+
+def test_geolocation_options_come_from_the_inventory(settings):
+    mkuser(settings, "boss", "admin")
+    with db.connect(settings.db_path) as c:
+        _inventory(c)
+        assert users.inventory_countries(c) == ["Finland", "Sweden"]
+    with client(settings) as h:
+        login(h, "boss")
+        page = h.get(BASE + "/settings").text
+        assert 'name="ca:Sweden"' in page and 'name="cd:Finland"' in page   # pick-list, not free text
+
+
+def test_domain_scope_refuses_out_of_scope_domain_in_the_scanner(settings):
+    with db.connect(settings.db_path) as c:
+        users.save_scope(c, {**users.get_scope(c), "domains_allow": ["example.se"]})
+    with client(settings) as h:
+        assert h.post("/api/scan", json={"domain": "example.se"}).status_code == 200
+        r = h.post("/api/scan", json={"domain": "other.com"})
+        assert r.status_code == 403 and "scope" in r.json()["error"]
+
+
+def test_posture_ip_and_geo_rules_do_not_gate_the_scanner(settings):
+    # deny every address and country in the posture scope; the domain scanner must be unaffected
+    with db.connect(settings.db_path) as c:
+        users.save_scope(c, {**users.get_scope(c), "ip_deny": ["0.0.0.0/0"], "countries_deny": ["Sweden"]})
+    with client(settings) as h:
+        assert h.post("/api/scan", json={"domain": "example.se"}).status_code == 200
+
+
+def test_refresh_skips_out_of_scope_domains(settings):
+    from domin import jobs
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "in.se", "2000-01-01T00:00:00", "import", [{"host": "in.se"}])
+        db.save_scan(c, "out.com", "2000-01-01T00:00:00", "import", [{"host": "out.com"}])
+        users.save_scope(c, {**users.get_scope(c), "domains_allow": ["in.se"]})
+        assert jobs.enqueue_due(c, days=1) == 1   # only the in-scope domain is queued for refresh
+        queued = [r["domain"] for r in c.execute("SELECT domain FROM jobs WHERE status = 'queued'")]
+        assert queued == ["in.se"]
 
 
 def test_network_gate_blocks_when_admin_ips_set(tmp_path):

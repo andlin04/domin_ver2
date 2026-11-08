@@ -7,44 +7,60 @@
 {% endmacro %}
 {% block content %}
 <section class="hero"><div><h1>Settings</h1>
-  <p class="muted">Scope limits which inventoried hosts the security tools may analyse, and which roles must use
-    two-factor. Saved now; the scan tools in a later phase read these rules.</p></div></section>
+  <p class="muted">Two separate guardrails, one per engine. Each is saved on its own; the counts below show how much
+    of the current inventory each rule set covers.</p></div></section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
-<section class="card">
-  <h2>In scope now <small>by IP range and domain rules</small></h2>
-  <p class="kpi-line"><b>{{ counts.in_scope }}</b> of {{ counts.total }} inventoried host names are in scope.
-    <span class="muted">Country rules are stored and applied when scans run.</span></p>
-</section>
-
 <form method="post" action="{{ base }}/settings">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <section class="grid g2">
-    <div class="card">
-      <h2>IP ranges <small>CIDR or address, one per line; empty allow = all</small></h2>
-      {{ area("ip_allow", "Allow", scope.ip_allow) }}
-      {{ area("ip_deny", "Deny", scope.ip_deny) }}
-    </div>
-    <div class="card">
-      <h2>Countries <small>two-letter codes</small></h2>
-      {{ area("countries_allow", "Allow", scope.countries_allow) }}
-      {{ area("countries_deny", "Deny", scope.countries_deny) }}
-    </div>
-    <div class="card">
-      <h2>Domains <small>a suffix matches its subdomains</small></h2>
-      {{ area("domains_allow", "Allow", scope.domains_allow) }}
+
+  <section class="card">
+    <h2>Domain inventory scope <small>governs the domain scanner (crt.sh / DNS / RDAP)</small></h2>
+    <p class="kpi-line"><b>{{ inv_counts.in_scope }}</b> of {{ inv_counts.total }} known domains are in scope.</p>
+    <p class="muted">A scan or refresh of a domain outside the allow-list (or on the deny-list) is refused. This
+      engine is never limited by IP address or geolocation.</p>
+    <div class="grid g2">
+      {{ area("domains_allow", "Allow (a suffix matches its subdomains; empty = all)", scope.domains_allow) }}
       {{ area("domains_deny", "Deny", scope.domains_deny) }}
     </div>
-    <div class="card">
-      <h2>Require two-factor</h2>
-      <p class="muted">Users in a ticked role must set up a second factor.</p>
-      {% for r in roles %}
-      <label class="tick"><input type="checkbox" name="require_2fa_{{ r }}"
-        {% if scope.require_2fa[r] %}checked{% endif %}> {{ r }}</label>
-      {% endfor %}
-    </div>
   </section>
+
+  <section class="card">
+    <h2>Security posture scope <small>for the vulnerability / posture engine — not active yet</small></h2>
+    <p class="kpi-line"><b>{{ posture_counts.in_scope }}</b> of {{ posture_counts.total }} inventoried host names,
+      and {{ posture_counts.countries_in_scope }} of {{ posture_counts.countries }} countries, are in scope.</p>
+    <p class="muted">IP ranges and geolocation limit the future posture tools only; they never affect the domain
+      scanner above. Saved now so the rules are ready when that engine ships.</p>
+    <div class="grid g2">
+      {{ area("ip_allow", "Allow IP ranges (CIDR or address; empty = all)", scope.ip_allow) }}
+      {{ area("ip_deny", "Deny IP ranges", scope.ip_deny) }}
+    </div>
+    <h3>Geolocation <small>countries present in the inventory</small></h3>
+    {% if countries %}
+    <div class="table-wrap short"><table>
+      <thead><tr><th>Country</th><th class="num">Allow</th><th class="num">Deny</th></tr></thead>
+      <tbody>{% for c in countries %}<tr>
+        <td>{{ c }}</td>
+        <td class="num"><input type="checkbox" name="ca:{{ c }}" {% if c in scope.countries_allow %}checked{% endif %}
+          aria-label="Allow {{ c }}"></td>
+        <td class="num"><input type="checkbox" name="cd:{{ c }}" {% if c in scope.countries_deny %}checked{% endif %}
+          aria-label="Deny {{ c }}"></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted small-print">Empty allow = every country; deny removes a country even when allowed.</p>
+    {% else %}<p class="muted">No country data in the inventory yet (load DB-IP country data and run scans).</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Require two-factor</h2>
+    <p class="muted">Users in a ticked role must set up a second factor.</p>
+    {% for r in roles %}
+    <label class="tick"><input type="checkbox" name="require_2fa_{{ r }}"
+      {% if scope.require_2fa[r] %}checked{% endif %}> {{ r }}</label>
+    {% endfor %}
+  </section>
+
   <p><button class="btn primary" type="submit">Save settings</button></p>
 </form>
 {% endblock %}

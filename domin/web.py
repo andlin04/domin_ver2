@@ -402,6 +402,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             raise HTTPException(422, "Not a valid domain name")
         request.state.domain = name
         with conn() as c:
+            if not users.domain_allowed(c, name):   # domain inventory scope: the original scanner's guardrail
+                raise HTTPException(403, f"{name} is outside the configured inventory scope")
             s = admin.effective(settings, c)
             who = admin.client_key(c, client_ip(request))
             if peer_in(request, internal_nets):   # DOMIN_INTERNAL_IPS: no visitor limits
@@ -796,15 +798,20 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
 
     # --- settings / scope (admin only) ---------------------------------------------------------------------------
 
+    def settings_view(request, c, u, s, scope, status=200, error=""):
+        countries = sorted(set(users.inventory_countries(c)) | set(scope["countries_allow"])
+                           | set(scope["countries_deny"]))
+        return shell(request, "settings.html", u, s, status, scope=scope,
+                     inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
+                     countries=countries, roles=users.ROLES, error=error)
+
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):
         with conn() as c:
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            scope = users.get_scope(c)
-            counts = users.hosts_in_scope(c, scope)
-        return shell(request, "settings.html", u, s, scope=scope, counts=counts, roles=users.ROLES, error="")
+            return settings_view(request, c, u, s, users.get_scope(c))
 
     @app.post(base + "/settings", include_in_schema=False)
     async def settings_save(request: Request):
@@ -814,11 +821,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip) -> None:
             if redirect:
                 return redirect
             try:
-                scope = users.parse_scope(data)
+                scope = users.parse_scope(c, data)
             except ValueError as exc:
-                cur = users.get_scope(c)
-                return shell(request, "settings.html", u, s, 422, scope=cur,
-                             counts=users.hosts_in_scope(c, cur), roles=users.ROLES, error=str(exc))
+                return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
 

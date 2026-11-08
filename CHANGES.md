@@ -12,8 +12,14 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 - Users page (admin): add, change role, reset password (one-time set-password link), reset two-factor, disable,
   delete; the last remaining admin is protected. Account page (every user): change password, enrol/replace or turn
   off two-factor, regenerate recovery codes.
-- Settings page (admin): allow/deny lists for IP ranges, countries and domains, and the per-role two-factor
-  requirement; shows how many inventoried hosts are in scope. Stored now; the scan tools in a later phase use them.
+- Settings page (admin): two separate scope guardrails, one per engine, each with its own live in-scope count, plus
+  the per-role two-factor requirement.
+  - Domain inventory scope: a domain/suffix allow and deny list that governs the domain scanner. A scan or refresh of
+    an out-of-scope domain is refused at every entry point (web, CLI, scheduled refresh, auto-retry); this engine is
+    never limited by IP or geolocation.
+  - Security posture scope: IP range (CIDR) allow/deny lists and a per-country allow/deny pick-list built from the
+    countries present in the inventory. Stored and validated now for the later posture engine; it never affects the
+    domain scanner.
 - Security tab: signed-in landing page for the planned vulnerability tools, with an authorised-use notice. No
   scanning yet.
 - `DOMIN_ADMIN_IPS` is now an optional network allowlist in front of the whole signed-in area; empty means the
