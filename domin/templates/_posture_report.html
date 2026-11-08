@@ -18,7 +18,8 @@
 {% if ch %}
 <section class="card posture-changes">
   <h2>Changes <small>last {{ ch.days }} days, each scan against the address's previous scan · {{ ch.changed }} of
-    {{ ch.compared }} addresses with two or more scans changed</small></h2>
+    {{ ch.compared }} addresses with two or more scans changed · CVE data of the latest scans refreshed
+    {{ rep.cve_refreshed or 'not yet (daily)' }}</small></h2>
   <div class="kpis">
     <div class="kpi {{ 'alarm' if ch.kpi['new-cve'] }}"><span>New CVEs</span><b>{{ '+' if ch.kpi['new-cve'] }}{{ ch.kpi['new-cve'] }}</b></div>
     <div class="kpi"><span>CVEs gone</span><b class="{{ 'up' if ch.kpi['gone-cve'] }}">{{ '−' if ch.kpi['gone-cve'] }}{{ ch.kpi['gone-cve'] }}</b></div>

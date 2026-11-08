@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: daily CVE refresh
+
+- Once a day (the worker's hourly loop, not at startup) CVE entries older than a day are fetched again and the
+  latest successful scan of every address is matched against them: newly published CVEs, fixed versions, scores.
+  Older scans keep the CVEs of their day, so a CVE published since the previous scan shows as new in the Changes
+  panel, whose header shows when the refresh last ran (kv `cve_refresh:last`).
+- Rollback: revert this change.
+
 ## 2026-11-08: CVE match review (all 237 cached findings checked against NVD)
 
 - A CVE with one range per release branch (nginx 1.26.x fixed in 1.26.3, 1.27.x in 1.27.4) showed every branch's

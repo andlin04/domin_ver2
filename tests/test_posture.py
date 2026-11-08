@@ -204,6 +204,26 @@ def test_refresh_fixes_fills_in_fixed_versions_without_changing_the_cves(setting
     assert stored[0]["findings"][0]["fixed"] == "2.4.67"
 
 
+def test_daily_cve_refresh_rematches_the_latest_scan_only(settings, nmap, monkeypatch):
+    with db.connect(settings.db_path) as c:
+        for _ in range(2):
+            posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana")
+            c.commit()
+            assert run_queue(settings) >= 1
+        ids = [r[0] for r in c.execute("SELECT id FROM posture_scans ORDER BY id")]
+        empty = json.dumps([{**s, "findings": []} for s in json.loads(
+            c.execute("SELECT services FROM posture_scans WHERE id = ?", (ids[0],)).fetchone()[0])])
+        c.execute("UPDATE posture_scans SET services = ?, cves = 0", (empty,))   # as if scanned before the CVE
+    monkeypatch.setattr(jobs.tools, "http_client", lambda *a, **k: httpx.Client(transport=transport()))
+    res = jobs.cve_refresh(settings, now=1e9)
+    again = jobs.cve_refresh(settings, now=1e9 + 3600)
+    half = len(ids) // 2   # two runs over the same addresses
+    assert res == {"scans": half, "changed": half} and again is None   # the latest per address; once a day
+    with db.connect(settings.db_path) as c:
+        cves = dict(c.execute("SELECT id, cves FROM posture_scans").fetchall())
+    assert all(cves[i] == 0 for i in ids[:half]) and all(cves[i] > 0 for i in ids[half:])   # older: as of their day
+
+
 def test_dropping_a_domain_drops_its_posture(settings):
     with db.connect(settings.db_path) as c:
         posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "22", "ana")

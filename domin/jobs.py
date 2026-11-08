@@ -5,6 +5,7 @@ runs user_workers threads on visitors' jobs and refresh_workers threads on refre
 never delays a visitor (the old version's 3 + 2 threads)."""
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -258,6 +259,26 @@ def housekeeping(settings: Settings) -> None:
             log.info("refresh: %d domains queued", n)
 
 
+CVE_REFRESH_KEY = "cve_refresh:last"
+CVE_REFRESH_HOURS = 24
+
+
+def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
+    """Once a day (from the worker's hourly loop): CVE entries older than a day are fetched again and the latest scan
+    of every address is matched against them (posture.refresh_cves). The result goes to kv `cve_refresh:last`."""
+    now = time.time() if now is None else now
+    with db.connect(settings.db_path) as conn:
+        last = json.loads(admin.kv_get(conn, CVE_REFRESH_KEY) or "{}")
+        if now - last.get("at", 0) < CVE_REFRESH_HOURS * 3600:
+            return None
+        cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, ttl_days=1)
+        with tools.http_client() as client:
+            res = posture.refresh_cves(conn, cve_db, client, settings.nvd_api_key)
+        admin.kv_set(conn, CVE_REFRESH_KEY, json.dumps({"at": now, **res}))
+    log.info("cve refresh: %d of %d latest scans changed", res["changed"], res["scans"])
+    return res
+
+
 def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     """once: run housekeeping, then every queued job one at a time (visitors' first), and return."""
     db.init(settings.db_path)
@@ -289,3 +310,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
             housekeeping(settings)
         except Exception:
             log.exception("housekeeping failed")
+        try:   # not at startup: it waits on NVD, scans should not
+            cve_refresh(settings)
+        except Exception:
+            log.exception("cve refresh failed")

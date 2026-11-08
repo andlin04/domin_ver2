@@ -250,7 +250,23 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
 
     services = sorted(({k: v for k, v in s.items() if k not in ("findings", "matched")} for s in found.values()),
                       key=lambda s: s["port"])
-    cache: dict[str, dict] = {}
+    match(services, cve_db, client, api_key)
+    error = ""
+    if late or timed_out(resume.get("raw") or ""):   # nmap gave up on the host: missing ports are unknown, not closed
+        where = f" on ports {', '.join(late)}" if late else ""
+        error = (f"Timed out{where}: nmap stopped after the {timeout} s limit per run of {CHUNK_PORTS} ports, so the "
+                 "result is incomplete. Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer "
+                 "timeout or fewer ports.")
+    note = "" if services or error else "No open TCP ports found in the scanned range."
+    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": error, "raw": xml,
+            "params": params}
+
+
+def match(services: list[dict], cve_db: cve.Database, client=None, api_key: str = "",
+          cache: dict[str, dict] | None = None) -> None:
+    """Set each service's `findings` (its CPEs' CVEs, deduped, worst first) and `matched` (did any CPE give a
+    target to look up), in place. cache: look-ups shared across calls."""
+    cache = {} if cache is None else cache
     for s in services:
         targets = [a for t in (parse_cpe(c) for c in s["cpes"]) if t for a in with_aliases(t)]
         s["matched"] = bool(targets)
@@ -261,15 +277,6 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
                 cache[key] = cve.lookup(cve_db, t, client, api_key)
             findings.extend(cache[key]["findings"])
         s["findings"] = _dedupe(findings)
-    error = ""
-    if late or timed_out(resume.get("raw") or ""):   # nmap gave up on the host: missing ports are unknown, not closed
-        where = f" on ports {', '.join(late)}" if late else ""
-        error = (f"Timed out{where}: nmap stopped after the {timeout} s limit per run of {CHUNK_PORTS} ports, so the "
-                 "result is incomplete. Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer "
-                 "timeout or fewer ports.")
-    note = "" if services or error else "No open TCP ports found in the scanned range."
-    return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": error, "raw": xml,
-            "params": params}
 
 
 def timed_out(text: str) -> bool:

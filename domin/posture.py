@@ -243,6 +243,30 @@ def refresh_fixes(conn: sqlite3.Connection, cve_db: cve.Database, client: httpx.
     return {"scans": scans, "findings": updated}
 
 
+def refresh_cves(conn: sqlite3.Connection, cve_db: cve.Database, client: httpx.Client | None,
+                 api_key: str = "") -> dict:
+    """Match the latest successful scan of every address against the current CVE data again (newly published CVEs,
+    fixed versions, scores); the services found stay as scanned. Older scans keep the CVEs of their day, so the
+    Changes panel shows a CVE published since the previous scan as new. Returns {scans, changed}."""
+    rows = conn.execute("""SELECT id, services FROM posture_scans p WHERE status = 'done' AND open_ports > 0
+                           AND id = (SELECT max(id) FROM posture_scans q WHERE q.domain = p.domain AND q.ip = p.ip
+                                     AND q.status = 'done')""").fetchall()
+    lookups: dict[str, dict] = {}
+    changed = 0
+    for r in rows:
+        services = json.loads(r["services"] or "[]")
+        before = json.dumps(services, sort_keys=True)
+        fingerprint.match(services, cve_db, client, api_key, lookups)
+        if json.dumps(services, sort_keys=True) != before:
+            findings = [f for s in services for f in s.get("findings") or []]
+            conn.execute("UPDATE posture_scans SET services = ?, cves = ?, high = ? WHERE id = ?",
+                         (json.dumps(services), len({f["cve"] for f in findings}),
+                          len({f["cve"] for f in findings if f["severity"] in ("critical", "high")}), r["id"]))
+            conn.commit()
+            changed += 1
+    return {"scans": len(rows), "changed": changed}
+
+
 REQUEUED = "requeued after a worker restart"
 
 
