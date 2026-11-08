@@ -68,7 +68,37 @@ def test_nvd_cves_parses_score_and_desc():
     assert found[0]["severity"] == "critical" and found[0]["source"] == "NVD"
 
 
+def test_nvd_fixed_version_comes_from_the_products_vulnerable_range():
+    rec = {"configurations": [{"nodes": [{"cpeMatch": [
+        {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
+         "versionStartIncluding": "2.4.0", "versionEndExcluding": "2.4.67"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:other:thing:*:*:*:*:*:*:*:*", "versionEndExcluding": "9.9"},
+        {"vulnerable": False, "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+         "versionEndExcluding": "6.0"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
+         "versionEndIncluding": "2.2.34"}]}]}]}
+    assert cve.nvd_fixed(rec, "a", "apache", "http_server") == ["2.4.67"]
+    assert cve.nvd_fixed({}, "a", "apache", "http_server") == []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"vulnerabilities": [{"cve": {"id": "CVE-2026-0002", **rec,
+                                                                     "descriptions": []}}]})
+    with client_with(httpx.MockTransport(handler)) as c:
+        found = cve.nvd_cves(c, "a", "apache", "http_server", "2.4.66")
+    assert found[0]["fixed"] == "2.4.67"
+
+
 # ---- local database + lookup ----
+
+def test_entries_from_before_the_fixed_versions_format_are_refetched(tmp_path):
+    path = tmp_path / "cve_db.json"
+    key = cve.target_key({"kind": "osv", "ecosystem": "PyPI", "name": "foo", "version": "1.0.0"})
+    path.write_text(json.dumps({key: {"fetched": int(time.time()), "findings": []}}), encoding="utf-8")
+    database = cve.Database("own", path)
+    with client_with(transport()) as c:
+        res = cve.lookup(database, {"kind": "osv", "ecosystem": "PyPI", "name": "foo", "version": "1.0.0"}, c)
+    assert res["cached"] is False and res["findings"]
+    assert database.fresh(database.entry(key))
 
 def test_own_mode_queries_then_serves_from_cache(tmp_path):
     database = cve.Database("own", tmp_path / "cve_db.json")

@@ -33,6 +33,7 @@ OSV = "https://api.osv.dev/v1"
 NVD = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 SOURCE = "OSV.dev + NVD"
 SEVERITIES = ("critical", "high", "medium", "low", "unknown")
+FORMAT = 2   # cache entry format; 2 = NVD findings carry fixed versions (older entries are refetched once)
 
 _CVSS3 = {"AV": {"N": .85, "A": .62, "L": .55, "P": .2}, "AC": {"L": .77, "H": .44}, "UI": {"N": .85, "R": .62},
           "CIA": {"H": .56, "L": .22, "N": 0.0}}
@@ -100,6 +101,17 @@ def osv_cves(client: httpx.Client, ecosystem: str, name: str, version: str) -> l
     return out
 
 
+def nvd_fixed(cve: dict, part: str, vendor: str, product: str) -> list[str]:
+    """Fixed versions from an NVD record: the versionEndExcluding of the vulnerable CPE ranges for this product
+    (the first version outside the range, e.g. 2.4.67 for "2.4.66 and earlier")."""
+    prefix = f"cpe:2.3:{part}:{vendor}:{product}:".lower()
+    found = [m["versionEndExcluding"] for c in cve.get("configurations") or [] for n in c.get("nodes") or []
+             for m in n.get("cpeMatch") or []
+             if m.get("vulnerable") and m.get("versionEndExcluding")
+             and str(m.get("criteria", "")).lower().startswith(prefix)]
+    return list(dict.fromkeys(found))
+
+
 def nvd_cves(client: httpx.Client, part: str, vendor: str, product: str, version: str,
              api_key: str = "") -> list[dict]:
     """Known vulnerabilities for a product version from NVD, matched by CPE."""
@@ -119,7 +131,8 @@ def nvd_cves(client: httpx.Client, part: str, vendor: str, product: str, version
                 break
         desc = next((d["value"] for d in cve.get("descriptions") or [] if d.get("lang") == "en"), "")
         cid = cve.get("id", "?")
-        out.append(_finding(cid, band(score), score, None, desc,
+        fixed = " / ".join(nvd_fixed(cve, part, vendor, product)) or None
+        out.append(_finding(cid, band(score), score, fixed, desc,
                             f"https://nvd.nist.gov/vuln/detail/{cid}", "NVD"))
     return out
 
@@ -170,13 +183,14 @@ class Database:
         return self._load().get(key)
 
     def fresh(self, entry: dict | None) -> bool:
-        return bool(entry) and (time.time() - entry.get("fetched", 0)) < self.ttl_days * 86400
+        return (bool(entry) and entry.get("format", 1) == FORMAT
+                and (time.time() - entry.get("fetched", 0)) < self.ttl_days * 86400)
 
     def store(self, key: str, findings: list[dict]) -> None:
         if self.mode != "own":
             return
         data = self._load()
-        data[key] = {"fetched": int(time.time()), "findings": findings}
+        data[key] = {"fetched": int(time.time()), "format": FORMAT, "findings": findings}
         tmp = self.path.with_name(self.path.name + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(data), encoding="utf-8")

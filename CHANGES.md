@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: fixed versions for NVD matches
+
+- CVEs matched through NVD (by CPE, e.g. Apache httpd) showed "no fixed version published yet" even when the
+  advisory names one: only OSV findings carried fixed versions. NVD findings now take the `versionEndExcluding` of
+  the product's vulnerable ranges (CVE "2.4.66 and earlier" -> fixed in 2.4.67). Cached CVE look-ups from before
+  this change are refetched once; existing scan results update on their next scan.
+- Rollback: revert this change (`cve.nvd_fixed`, `cve.FORMAT`); cache entries stay readable.
+
 ## 2026-11-08: posture Changes panel
 
 - The posture report (Security, per domain or host) has a Changes panel under the KPIs: each successful scan of an
