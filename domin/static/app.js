@@ -401,6 +401,7 @@ function postureProgress() {
   const secs = (s) => (s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`);
   const result = (it) => {
     if (it.status === "failed") return `<small class="bad-text">${esc(it.error || "failed")}</small>`;
+    if (it.status === "running" && it.chunks > 1) return `<small>part ${it.chunks_done} of ${it.chunks} done · ${it.open_ports} open so far</small>`;
     if (it.status !== "done") return "";
     return `<small>${it.open_ports} port(s) · ${it.cves} CVE(s)${it.high ? ` · ${it.high} high+` : ""}</small>`;
   };

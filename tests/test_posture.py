@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -155,6 +156,51 @@ def test_restart_requeues_running_posture_once(settings):
         assert posture.requeue_running(c) == 0   # interrupted a second time: fails, no loop
         row = c.execute("SELECT status, error FROM posture_scans WHERE id = ?", (first["id"],)).fetchone()
         assert row["status"] == "failed" and row["error"] == "worker restarted twice"
+
+
+def test_a_requeued_scan_that_made_progress_can_be_requeued_again(settings, monkeypatch):
+    with db.connect(settings.db_path) as c:
+        posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "1-25", "ana")
+        row = posture.claim(c)
+        assert posture.requeue_running(c) == 1
+        row = posture.claim(c)
+        calls = []
+
+        def fake(ip, ports, *a, **k):   # the worker dies in the second chunk
+            calls.append(ports)
+            if len(calls) == 2:
+                raise KeyboardInterrupt
+            return SCAN_XML
+        monkeypatch.setattr(fingerprint, "run_nmap", fake)
+        with pytest.raises(KeyboardInterrupt):
+            posture.run(c, row, cve.Database("own", settings.cve_db_file), None)
+        saved = c.execute("SELECT chunks, chunks_done, note FROM posture_scans WHERE id = ?", (row["id"],)).fetchone()
+        assert (saved["chunks"], saved["chunks_done"], saved["note"]) == (3, 1, "")
+        assert posture.requeue_running(c) == 1   # progress since the last requeue: back in the queue
+        monkeypatch.setattr(fingerprint, "run_nmap", lambda ip, ports, *a, **k: calls.append(ports) or SCAN_XML)
+        posture.run(c, posture.claim(c), cve.Database("own", settings.cve_db_file), None)
+        assert calls == ["1-10", "11-20", "11-20", "21-25"]   # resumed at the chunk that was interrupted
+        assert c.execute("SELECT status FROM posture_scans WHERE id = ?", (row["id"],)).fetchone()[0] == "done"
+
+
+def test_refresh_fixes_fills_in_fixed_versions_without_changing_the_cves(settings, tmp_path):
+    finding = {"cve": "CVE-2026-0002", "severity": "high", "score": 7.5, "fixed": None, "summary": "x",
+               "url": "", "source": "NVD"}
+    svc = {"port": 80, "proto": "tcp", "service": "http", "product": "Apache httpd", "version": "2.4.66",
+           "cpes": ["cpe:/a:apache:http_server:2.4.66"], "matched": True, "findings": [finding]}
+    cache = tmp_path / "cve.json"
+    key = cve.target_key({"kind": "cpe", "part": "a", "vendor": "apache", "product": "http_server",
+                          "version": "2.4.66"})
+    newer = [{**finding, "fixed": "2.4.67"}, {**finding, "cve": "CVE-2026-0003", "fixed": "2.4.68"}]
+    cache.write_text(json.dumps({key: {"fetched": int(time.time()), "format": cve.FORMAT, "findings": newer}}),
+                     encoding="utf-8")
+    with db.connect(settings.db_path) as c:
+        c.execute("""INSERT INTO posture_scans (domain, ip, ports, status, created, services, cves)
+                     VALUES (?, '192.0.2.10', '80', 'done', '2026-11-08T22:00:00', ?, 1)""", (DOM, json.dumps([svc])))
+        assert posture.refresh_fixes(c, cve.Database("own", cache), None) == {"scans": 1, "findings": 1}
+        stored = json.loads(c.execute("SELECT services FROM posture_scans").fetchone()[0])
+    assert [f["cve"] for f in stored[0]["findings"]] == ["CVE-2026-0002"]   # no CVE added
+    assert stored[0]["findings"][0]["fixed"] == "2.4.67"
 
 
 def test_dropping_a_domain_drops_its_posture(settings):

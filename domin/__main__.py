@@ -1,4 +1,4 @@
-"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-public <db>|
+"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-public <db>|refresh-fixes|
 user-add|user-list|user-passwd|user-role|user-2fa-reset|admin-password}."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import admin, db, importer, jobs, publicsync, users
+from . import admin, cve, db, importer, jobs, posture, publicsync, tools, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -43,7 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     pub = sub.add_parser("import-public", help="replace the inventory with a copy of the public database "
                                                "(own scans are kept; Settings > Sync runs this)")
     pub.add_argument("file", type=Path)
-    ua = sub.add_parser("user-add", help="create a user and print a one-time set-password link")
+    sub.add_parser("refresh-fixes", help="fill in fixed versions on stored posture findings that have none")
+    ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
     ua.add_argument("--role", choices=users.ROLES, default="viewer")
     sub.add_parser("user-list", help="list users")
@@ -84,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "import-public":
         with db.connect(settings.db_path) as conn:
             print(json.dumps(publicsync.import_public(conn, args.file)))
+    elif args.cmd == "refresh-fixes":
+        cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
+        with db.connect(settings.db_path) as conn, tools.http_client() as client:
+            print(json.dumps(posture.refresh_fixes(conn, cve_db, client, settings.nvd_api_key)))
     elif args.cmd == "user-add":
         with db.connect(settings.db_path) as conn:
             try:

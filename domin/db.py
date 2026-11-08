@@ -113,7 +113,9 @@ CREATE TABLE IF NOT EXISTS posture_scans (   -- stage 2: one fingerprint + CVE m
     timing INTEGER NOT NULL DEFAULT 3,
     timeout INTEGER NOT NULL DEFAULT 120,
     params TEXT NOT NULL DEFAULT '',      -- the nmap command line that ran
-    route TEXT NOT NULL DEFAULT ''        -- scan route id from the profile ('' = the default route, 'direct')
+    route TEXT NOT NULL DEFAULT '',       -- scan route id from the profile ('' = the default route, 'direct')
+    chunks INTEGER NOT NULL DEFAULT 0,    -- port chunks in this scan (one nmap run each)
+    chunks_done INTEGER NOT NULL DEFAULT 0  -- chunks finished; services/raw hold their results (resume point)
 );
 CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, picked per posture scan
     name TEXT PRIMARY KEY,
@@ -186,7 +188,8 @@ def init(path: Path) -> None:
         have = {r["name"] for r in conn.execute("PRAGMA table_info(posture_scans)")}
         for col, ddl in (("profile", "TEXT NOT NULL DEFAULT ''"), ("intensity", "INTEGER NOT NULL DEFAULT 2"),
                          ("timing", "INTEGER NOT NULL DEFAULT 3"), ("timeout", "INTEGER NOT NULL DEFAULT 120"),
-                         ("params", "TEXT NOT NULL DEFAULT ''"), ("route", "TEXT NOT NULL DEFAULT ''")):
+                         ("params", "TEXT NOT NULL DEFAULT ''"), ("route", "TEXT NOT NULL DEFAULT ''"),
+                         ("chunks", "INTEGER NOT NULL DEFAULT 0"), ("chunks_done", "INTEGER NOT NULL DEFAULT 0")):
             if col not in have:
                 conn.execute(f"ALTER TABLE posture_scans ADD COLUMN {col} {ddl}")
         if "route" not in {r["name"] for r in conn.execute("PRAGMA table_info(posture_profiles)")}:

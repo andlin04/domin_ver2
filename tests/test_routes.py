@@ -528,7 +528,8 @@ def test_profile_route_is_used_by_a_posture_scan_and_recorded(settings, monkeypa
             posture.enqueue(c, DOM, one, posture.profile(c, name), "ana")
             c.commit()
             assert run_queue(settings) == 1
-    assert seen[0]["host"].startswith("de-") and seen[1]["host"] == "127.0.0.1" and seen[2] is None
+    # one nmap run per port chunk: viade 1, default 4, plain 1
+    assert seen[0]["host"].startswith("de-") and {v["host"] for v in seen[1:5]} == {"127.0.0.1"} and seen[5] is None
     with db.connect(settings.db_path) as c:
         rows = [dict(r) for r in c.execute("SELECT profile, route, params FROM posture_scans ORDER BY id")]
     assert [r["route"] for r in rows] == ["r2", "", "direct"]
@@ -549,9 +550,10 @@ def test_default_follows_the_default_route_and_a_deleted_route_fails_closed(sett
         proxy.put(c, proxy.check_shared({"posture": "r2"}, cfg2))
         posture.enqueue(c, DOM, one, posture.profile(c, "default"), "ana")   # queued on Default
     assert run_queue(settings) == 1 and seen[-1]["host"].startswith("de-")   # the default as it is at run time
+    runs = len(seen)
     with db.connect(settings.db_path) as c:
-        c.execute("UPDATE posture_scans SET status = 'queued', route = 'r9' WHERE id = 1")
-    assert run_queue(settings) == 1 and len(seen) == 1   # a route that is gone: no scan
+        c.execute("UPDATE posture_scans SET status = 'queued', route = 'r9', chunks_done = 0 WHERE id = 1")
+    assert run_queue(settings) == 1 and len(seen) == runs   # a route that is gone: no scan
     with db.connect(settings.db_path) as c:
         row = c.execute("SELECT status, error, params FROM posture_scans WHERE id = 1").fetchone()
     assert row["status"] == "failed" and row["error"] == "route: the scan route no longer exists (Settings · Routes)"

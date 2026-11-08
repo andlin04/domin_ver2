@@ -26,7 +26,7 @@
         <input name="intensity" type="number" min="0" max="9" value="{{ form.get('intensity', 2) }}"></label>
       <label class="field">Timing <small>T1 slow … T4 fast</small>
         <input name="timing" type="number" min="1" max="4" value="{{ form.get('timing', 3) }}"></label>
-      <label class="field">Timeout per address (s)
+      <label class="field">Timeout per 10 ports (s)
         <input name="timeout" type="number" min="10" max="900" value="{{ form.get('timeout', 120) }}"></label>
       <label class="field">Route <small>Default: the preferred route (Settings · Routes); a route marked disabled
         fails the scan, one marked last test failed may</small>

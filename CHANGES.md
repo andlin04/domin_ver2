@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: posture scans resume where they stopped; fixed versions on stored results
+
+- A posture scan runs its ports in chunks of 10, one nmap run each, and stores each chunk's result (columns
+  `chunks`, `chunks_done`; migrated in place). After a worker restart it resumes at the next chunk. A requeued scan
+  that made no progress before the next restart fails ("worker restarted twice"). The progress dialog shows
+  "part x of y done". The profile timeout is now the limit per 10-port run.
+- `python -m domin refresh-fixes`: fills in fixed versions on stored findings that have none, from a fresh CVE
+  look-up of the same CPEs; the CVE list of a scan stays as it was.
+- Rollback: revert this change (the two columns stay, unused).
+
 ## 2026-11-08: updates that leave scans running
 
 - `deploy/update.sh`: code-only update from a tar on stdin (`git archive HEAD domin deploy | ssh <host> 'sudo bash

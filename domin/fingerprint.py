@@ -21,6 +21,7 @@ import socket
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 
 from . import cve, proxy
 
@@ -172,28 +173,81 @@ def _dedupe(findings: list[dict]) -> list[dict]:
     return out
 
 
+CHUNK_PORTS = 10   # ports per nmap run: a scan resumes after its last finished chunk
+
+
+def port_chunks(ports: str, size: int = CHUNK_PORTS) -> list[str]:
+    """The port list in its own order, without repeats, split into nmap port lists of at most `size` ports;
+    consecutive ports collapse into a range ("1-10")."""
+    seen: set[int] = set()
+    order: list[int] = []
+    for part in (ports or "").split(","):
+        lo, _, hi = part.partition("-")
+        if lo.isdigit() and (not hi or hi.isdigit()):
+            for p in range(int(lo), int(hi or lo) + 1):
+                if p not in seen:
+                    seen.add(p)
+                    order.append(p)
+    return [_port_spec(order[i:i + size]) for i in range(0, len(order), size)]
+
+
+def _port_spec(ports: list[int]) -> str:
+    parts, start = [], 0
+    for i in range(1, len(ports) + 1):
+        if i == len(ports) or ports[i] != ports[i - 1] + 1:
+            lo, hi = ports[start], ports[i - 1]
+            parts.append(str(lo) if lo == hi else f"{lo}-{hi}")
+            start = i
+    return ",".join(parts)
+
+
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
          timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
-         timing: int = 3, via: dict | None = None) -> dict:
+         timing: int = 3, via: dict | None = None, resume: dict | None = None,
+         on_chunk: Callable[[dict], None] | None = None) -> dict:
     """Fingerprint one host and match each service's CPEs against the CVE layer.
+
+    The ports are scanned in chunks of CHUNK_PORTS, one nmap run each (timeout is the limit per run). After each
+    chunk on_chunk gets the progress {chunks, chunks_done, services, raw}; passing that back as `resume` skips the
+    chunks already done, so an interrupted scan picks up where it stopped.
 
     Returns {target, ip, services, note, error, raw, params}. Each service carries its CPEs' findings
     (deduped, worst first) and a `matched` flag (did any CPE yield a cve target to look up). params is
-    the nmap command line that ran, plus the route ("via Office: socks5 192.0.2.10:1080",
+    the nmap command line (the whole port list), plus the route ("via Office: socks5 192.0.2.10:1080",
     "via Mullvad: mullvad se-got-wg-socks5-001 (se, follow host)") when via (the hop, proxy.hop) is on."""
     via = via if via and via.get("enabled") else None
+    chunks = port_chunks(ports) or [ports]
     params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
+    if len(chunks) > 1:
+        params += f" (in {len(chunks)} runs of up to {CHUNK_PORTS} ports)"
     if via:
         params += f" via {proxy.route(via)}"
-    try:
-        xml = run_nmap(ip, ports, timeout, nmap_bin, intensity, timing, via=via)
-    except FileNotFoundError:
-        return {"target": display or ip, "ip": ip, "services": [], "note": "", "params": params,
-                "error": "nmap is not installed on this host."}
-    except NmapError as exc:
-        return {"target": display or ip, "ip": ip, "services": [], "note": "", "error": str(exc), "params": params}
+    resume = resume or {}
+    done = min(int(resume.get("chunks_done") or 0), len(chunks))
+    found = {(s["port"], s["proto"]): s for s in resume.get("services") or []}
+    raw = [resume["raw"]] if resume.get("raw") else []
+    late: list[str] = []
+    for i in range(done, len(chunks)):
+        try:
+            xml = run_nmap(ip, chunks[i], timeout, nmap_bin, intensity, timing, via=via)
+        except FileNotFoundError:
+            return {"target": display or ip, "ip": ip, "services": [], "note": "", "params": params,
+                    "error": "nmap is not installed on this host."}
+        except NmapError as exc:
+            return {"target": display or ip, "ip": ip, "services": [], "note": "", "error": str(exc),
+                    "params": params, "raw": "\n".join(raw)}
+        if timed_out(xml):
+            late.append(chunks[i])
+        for s in parse_xml(xml):
+            found[(s["port"], s["proto"])] = s
+        raw.append(xml)
+        if on_chunk:
+            on_chunk({"chunks": len(chunks), "chunks_done": i + 1, "services": sorted(found.values(),
+                      key=lambda s: s["port"]), "raw": "\n".join(raw)})
+    xml = "\n".join(raw)
 
-    services = parse_xml(xml)
+    services = sorted(({k: v for k, v in s.items() if k not in ("findings", "matched")} for s in found.values()),
+                      key=lambda s: s["port"])
     cache: dict[str, dict] = {}
     for s in services:
         targets = [a for t in (parse_cpe(c) for c in s["cpes"]) if t for a in with_aliases(t)]
@@ -206,9 +260,11 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
             findings.extend(cache[key]["findings"])
         s["findings"] = _dedupe(findings)
     error = ""
-    if timed_out(xml):   # nmap gave up on the host: missing ports are unknown, not closed
-        error = (f"Timed out: nmap stopped after the {timeout} s per-host limit, so the result is incomplete. "
-                 "Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer timeout or fewer ports.")
+    if late or timed_out(resume.get("raw") or ""):   # nmap gave up on the host: missing ports are unknown, not closed
+        where = f" on ports {', '.join(late)}" if late else ""
+        error = (f"Timed out{where}: nmap stopped after the {timeout} s limit per run of {CHUNK_PORTS} ports, so the "
+                 "result is incomplete. Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer "
+                 "timeout or fewer ports.")
     note = "" if services or error else "No open TCP ports found in the scanned range."
     return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": error, "raw": xml,
             "params": params}

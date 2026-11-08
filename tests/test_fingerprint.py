@@ -90,6 +90,30 @@ def test_scan_matches_cpes_to_cves(tmp_path, monkeypatch):
     assert by_port[9999]["matched"] is False and by_port[9999]["findings"] == []   # no cpe
 
 
+def test_ports_split_into_chunks_in_their_own_order():
+    assert fingerprint.port_chunks("22,80,1-12,22") == ["22,80,1-8", "9-12"]
+    assert fingerprint.port_chunks("443") == ["443"]
+    assert len(fingerprint.port_chunks("1-1024")) == 103
+
+
+def test_a_scan_resumes_after_its_last_finished_chunk(tmp_path, monkeypatch):
+    ran = []
+
+    def fake(ip, ports, *a, **k):
+        ran.append(ports)
+        return SCAN_XML if ports == "9-12" else "<nmaprun><host><ports/></host></nmaprun>"
+    monkeypatch.setattr(fingerprint, "run_nmap", fake)
+    seen = []
+    earlier = [{"port": 21, "proto": "tcp", "service": "ftp", "product": "", "version": "", "cpes": []}]
+    res = fingerprint.scan("172.20.4.50", cve_db=cve.Database("own", tmp_path / "d.json"), client=None,
+                           ports="21,80,1-12", resume={"chunks_done": 1, "services": earlier, "raw": "<nmaprun/>"},
+                           on_chunk=seen.append)
+    assert ran == ["9-12"]   # the first chunk (21,80,1-8) was done before the restart
+    assert [s["port"] for s in res["services"]] == [21, 22, 80, 9999]
+    assert seen[-1]["chunks"] == 2 and seen[-1]["chunks_done"] == 2 and len(seen[-1]["services"]) == 4
+    assert res["raw"].startswith("<nmaprun/>") and "(in 2 runs of up to 10 ports)" in res["params"]
+
+
 def test_scan_reports_missing_nmap(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise FileNotFoundError

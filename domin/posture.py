@@ -137,8 +137,9 @@ def progress(conn: sqlite3.Connection, ids: list[int]) -> dict:
     """Progress of a set of posture_scans rows (one request's batch) for the progress dialog: counts, the addresses
     running now, seconds since the first was queued, and one item per row with its result."""
     rows = [dict(r) for r in conn.execute(
-        f"""SELECT id, domain, ip, hosts, status, created, started, finished, services, open_ports, cves, high, error
-            FROM posture_scans WHERE id IN ({",".join("?" * len(ids))}) ORDER BY id""", ids)] if ids else []
+        f"""SELECT id, domain, ip, hosts, status, created, started, finished, services, open_ports, cves, high, error,
+                   chunks, chunks_done FROM posture_scans WHERE id IN ({",".join("?" * len(ids))}) ORDER BY id""",
+        ids)] if ids else []
     count = {s: sum(1 for r in rows if r["status"] == s) for s in ("queued", "running", "done", "failed")}
     finished = count["queued"] + count["running"] == 0
     elapsed = 0
@@ -148,7 +149,7 @@ def progress(conn: sqlite3.Connection, ids: list[int]) -> dict:
         elapsed = max(0, int((end - start).total_seconds()))
     items = [{"id": r["id"], "domain": r["domain"], "ip": r["ip"], "host": (r["hosts"] or "").split(",")[0],
               "status": r["status"], "finished": r["finished"] or "", "open_ports": r["open_ports"], "cves": r["cves"],
-              "high": r["high"], "error": r["error"] or "",
+              "high": r["high"], "error": r["error"] or "", "chunks": r["chunks"], "chunks_done": r["chunks_done"],
               "worst": _worst(json.loads(r["services"] or "[]")) if r["status"] == "done" else ""} for r in rows]
     return {"ids": [r["id"] for r in rows], "total": len(rows), **count, "finished": finished, "elapsed": elapsed,
             "current": [i["host"] or i["ip"] for i in items if i["status"] == "running"], "items": items}
@@ -191,12 +192,20 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
                                             "params": f"via {proxy.describe(r) or 'a deleted route'}"})
         log.info("posture %s %s: route: %s", row["domain"], row["ip"], exc)
         return
+    def saved(p: dict) -> None:   # each finished chunk is the resume point; progress clears the requeue mark
+        conn.execute("UPDATE posture_scans SET chunks = ?, chunks_done = ?, services = ?, open_ports = ?, raw = ?, "
+                     "note = '' WHERE id = ?", (p["chunks"], p["chunks_done"], json.dumps(p["services"]),
+                                                len(p["services"]), p["raw"], row["id"]))
+        conn.commit()
+
+    resume = {"chunks_done": row.get("chunks_done") or 0, "services": json.loads(row.get("services") or "[]"),
+              "raw": row.get("raw") or ""}
     try:
         with proxy.cve_client(proxy.cve_hop(conn, cfg, r, via, client), client) as lookups:
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],
                                    display=row["hosts"].split(",")[0] or row["ip"],
                                    intensity=row.get("intensity", 2), timing=row.get("timing", 3),
-                                   timeout=row.get("timeout", 120), via=via)
+                                   timeout=row.get("timeout", 120), via=via, resume=resume, on_chunk=saved)
     except Exception as exc:   # one bad host must not stop the queue
         log.exception("posture scan %s failed", row["ip"])
         res = {"error": f"internal error ({type(exc).__name__})"}
@@ -204,12 +213,42 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     log.info("posture %s %s: %s", row["domain"], row["ip"], res.get("error") or "done")
 
 
+def refresh_fixes(conn: sqlite3.Connection, cve_db: cve.Database, client: httpx.Client | None,
+                  api_key: str = "") -> dict:
+    """Fill in fixed versions on stored findings that have none (NVD matches stored before NVD fixed versions were
+    read), from a fresh CVE look-up of the same CPEs. Only the `fixed` field changes: which CVEs a scan found stays
+    as it was, so the Changes panel keeps its history. Returns {scans, findings} updated."""
+    lookups: dict[str, dict] = {}
+    scans = updated = 0
+    for r in conn.execute("SELECT id, services FROM posture_scans WHERE status = 'done' AND cves > 0").fetchall():
+        services, n = json.loads(r["services"] or "[]"), 0
+        for s in services:
+            if not any(not f.get("fixed") for f in s.get("findings") or []):
+                continue
+            fixed: dict[str, str] = {}
+            for t in (a for c in s.get("cpes") or [] if (p := fingerprint.parse_cpe(c))
+                      for a in fingerprint.with_aliases(p)):
+                key = cve.target_key(t)
+                if key not in lookups:
+                    lookups[key] = cve.lookup(cve_db, t, client, api_key)
+                fixed.update({f["cve"]: f["fixed"] for f in lookups[key]["findings"] if f.get("fixed")})
+            for f in s.get("findings") or []:
+                if not f.get("fixed") and fixed.get(f["cve"]):
+                    f["fixed"] = fixed[f["cve"]]
+                    n += 1
+        if n:
+            conn.execute("UPDATE posture_scans SET services = ? WHERE id = ?", (json.dumps(services), r["id"]))
+            conn.commit()
+            scans, updated = scans + 1, updated + n
+    return {"scans": scans, "findings": updated}
+
+
 REQUEUED = "requeued after a worker restart"
 
 
 def requeue_running(conn: sqlite3.Connection) -> int:
-    """Rows a crash or restart left running go back to the queue (a scan changes nothing on the target, so it can
-    start over) and keep their place. A row that was already requeued once fails instead, so a scan that takes the
+    """Rows a crash or restart left running go back to the queue, keep their place and resume after their last
+    finished port chunk. A row requeued before that made no progress since fails instead, so a scan that takes the
     worker down cannot loop. Returns how many were requeued."""
     conn.execute("UPDATE posture_scans SET status = 'failed', finished = ?, error = 'worker restarted twice' "
                  "WHERE status = 'running' AND note = ?", (db.now(), REQUEUED))
