@@ -526,15 +526,3 @@ def test_posture_page_carries_trend_data(settings):
             raw = re.search(r'id="posture-data">(.*?)</script>', h.get(url).text).group(1)
             data = json.loads(raw)
             assert [t["critical"] for t in data["trend"]] == [1, 0] and set(data) >= {"hosts", "fix", "age"}
-
-
-def test_overview_leads_with_the_posture_alarm_when_signed_in(settings, nmap):
-    with app_client(settings) as h:
-        assert "posture-alarm" not in h.get("/").text                     # anonymous: no posture figures
-        csrf = sign_in(h, "ana")
-        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
-        run_queue(settings)
-        page = h.get("/").text
-    assert "posture-alarm" in page and "alarm-card" in page and "1</b> critical" in page
-    order = [page.index(x) for x in ("posture-alarm", 'class="kpis"', 'id="domains"', 'id="countries"', 'id="perDay"')]
-    assert order == sorted(order)

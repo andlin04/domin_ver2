@@ -225,13 +225,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             domains = db.domains_overview(c)
             recent = jobs.recent(c, 8)
             src = drill_src(c, False)
-        user, _ = viewer(request)
-        alarm = None
-        if user:   # signed in: the posture headline across all domains comes first
-            with conn() as c:
-                alarm = posture.report(posture.current(c))["kpi"]
         return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent,
-                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src, posture_kpi=alarm)
+                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src)
 
     @lru_cache(maxsize=2)
     def drill_preview(version: str) -> list[dict]:

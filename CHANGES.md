@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: inventory and admin pages back to their previous layout
+
+- Inventory, domain page layout, Operations, Settings, Users and Account return to the layout before the entry below;
+  the posture report and the Posture page keep their changes. Kept: the Users role pick-list fix.
+- Posture expandables (address, CVE, scan details) show a chevron that turns down when open.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: views ordered by what needs attention, posture report charts
 
 - Posture report (Posture page, domain page): KPIs (critical, high, addresses with high+, fix available, stale /

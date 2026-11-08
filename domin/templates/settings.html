@@ -15,15 +15,50 @@
 <form method="post" action="{{ base }}/settings">
   <input type="hidden" name="csrf" value="{{ csrf }}">
 
-  <p class="settings-save"><button class="btn primary" type="submit">Save settings</button>
-    <span class="muted small-print">One save for every section below.</span></p>
+  <section class="card">
+    <h2>Domain inventory scope <small>governs the domain scanner (crt.sh / DNS / RDAP)</small></h2>
+    <p class="kpi-line"><b>{{ inv_counts.in_scope }}</b> of {{ inv_counts.total }} known domains are in scope.</p>
+    <p class="muted">A scan or refresh of a domain outside the allow-list (or on the deny-list) is refused. This
+      engine is never limited by IP address or geolocation.</p>
+    <div class="grid g2">
+      {{ area("domains_allow", "Allow (a suffix matches its subdomains; empty = all)", scope.domains_allow) }}
+      {{ area("domains_deny", "Deny", scope.domains_deny) }}
+    </div>
+  </section>
 
   <section class="card">
-    <h2>Security posture scope <small>which addresses posture scans and the host fingerprint may probe</small></h2>
+    <h2>Scan limits <small>rate limits for the public domain scanner</small></h2>
+    <label class="tick"><input type="checkbox" name="scan_limits_off"
+      {% if scope.scan_limits_off %}checked{% endif %}> Disable scan limits — retry any domain freely</label>
+    <p class="muted">When on, the scan box skips the once-per-day, per-client hour/day, daily-total and queue limits,
+      so a domain can be re-scanned as often as you like. Leave it off on an instance exposed to the public.</p>
+  </section>
+
+  <section class="card">
+    <h2>Internal domains <small>looked up over your own DNS only</small></h2>
+    <p class="muted">A scan of a name under one of these domains asks only the internal DNS servers below: no public
+      resolvers, no certificate logs (crt.sh), no amass and no RDAP owner look-up. You get your own addresses and no
+      internal name leaves the network. Only LAN addresses are kept (private ranges; public, link-local and loopback
+      answers your DNS forwarded upstream are dropped). Applies to the next scan, no restart.</p>
+    <div class="grid g2">
+      <label class="field">Internal domains <small>one per line, e.g. corp.example, home.arpa; covers subdomains</small>
+        <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>
+      <label class="field">Internal DNS servers <small>IP addresses, one per line</small>
+        <textarea name="internal_dns" rows="4" spellcheck="false" autocapitalize="off">{{ internal_dns|join('\n') }}</textarea></label>
+      <label class="field">Internal networks <small>CIDR, one per line, e.g. 172.20.0.0/24; at most 8192 addresses</small>
+        <textarea name="internal_nets" rows="4" spellcheck="false" autocapitalize="off">{{ internal_nets|join('\n') }}</textarea></label>
+    </div>
+    <p class="muted small-print">Host names are found by DNS queries to the servers above: a zone transfer when the server
+      allows one, a reverse look-up of every address in these networks (empty = the /24 of each DNS server and of the
+      domain itself), the zone's MX/NS records and common names.</p>
+  </section>
+
+  <section class="card">
+    <h2>Security posture scope <small>governs the Host fingerprint tool on the Security page</small></h2>
     <p class="kpi-line"><b>{{ posture_counts.in_scope }}</b> of {{ posture_counts.total }} inventoried host names,
       and {{ posture_counts.countries_in_scope }} of {{ posture_counts.countries }} countries, are in scope.</p>
-    <p class="muted">Posture scans need both the IP ranges and the countries below to allow an address; the ad hoc host
-      fingerprint checks the IP ranges. Neither affects the domain scanner.</p>
+    <p class="muted">IP ranges limit which addresses the Host fingerprint scan may probe (geolocation is held for the
+      wider posture tools); they never affect the domain scanner above.</p>
     <div class="grid g2">
       {{ area("ip_allow", "Allow IP ranges (CIDR or address; empty = all)", scope.ip_allow) }}
       {{ area("ip_deny", "Deny IP ranges", scope.ip_deny) }}
@@ -52,45 +87,6 @@
       {% if scope.require_2fa[r] %}checked{% endif %}> {{ r }}</label>
     {% endfor %}
   </section>
-
-  <section class="card">
-    <h2>Domain inventory scope <small>governs the domain scanner (crt.sh / DNS / RDAP)</small></h2>
-    <p class="kpi-line"><b>{{ inv_counts.in_scope }}</b> of {{ inv_counts.total }} known domains are in scope.</p>
-    <p class="muted">A scan or refresh of a domain outside the allow-list (or on the deny-list) is refused. This
-      engine is never limited by IP address or geolocation.</p>
-    <div class="grid g2">
-      {{ area("domains_allow", "Allow (a suffix matches its subdomains; empty = all)", scope.domains_allow) }}
-      {{ area("domains_deny", "Deny", scope.domains_deny) }}
-    </div>
-  </section>
-
-  <section class="card {{ 'warn-card' if scope.scan_limits_off }}">
-    <h2>Scan limits <small>rate limits for the public domain scanner</small></h2>
-    <label class="tick"><input type="checkbox" name="scan_limits_off"
-      {% if scope.scan_limits_off %}checked{% endif %}> Disable scan limits — retry any domain freely</label>
-    <p class="muted">When on, the scan box skips the once-per-day, per-client hour/day, daily-total and queue limits,
-      so a domain can be re-scanned as often as you like. Leave it off on an instance exposed to the public.</p>
-  </section>
-
-  <section class="card">
-    <h2>Internal domains <small>looked up over your own DNS only</small></h2>
-    <p class="muted">A scan of a name under one of these domains asks only the internal DNS servers below: no public
-      resolvers, no certificate logs (crt.sh), no amass and no RDAP owner look-up. You get your own addresses and no
-      internal name leaves the network. Only LAN addresses are kept (private ranges; public, link-local and loopback
-      answers your DNS forwarded upstream are dropped). Applies to the next scan, no restart.</p>
-    <div class="grid g2">
-      <label class="field">Internal domains <small>one per line, e.g. corp.example, home.arpa; covers subdomains</small>
-        <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>
-      <label class="field">Internal DNS servers <small>IP addresses, one per line</small>
-        <textarea name="internal_dns" rows="4" spellcheck="false" autocapitalize="off">{{ internal_dns|join('\n') }}</textarea></label>
-      <label class="field">Internal networks <small>CIDR, one per line, e.g. 172.20.0.0/24; at most 8192 addresses</small>
-        <textarea name="internal_nets" rows="4" spellcheck="false" autocapitalize="off">{{ internal_nets|join('\n') }}</textarea></label>
-    </div>
-    <p class="muted small-print">Host names are found by DNS queries to the servers above: a zone transfer when the server
-      allows one, a reverse look-up of every address in these networks (empty = the /24 of each DNS server and of the
-      domain itself), the zone's MX/NS records and common names.</p>
-  </section>
-
 
   <p><button class="btn primary" type="submit">Save settings</button></p>
 </form>

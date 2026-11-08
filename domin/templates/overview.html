@@ -15,25 +15,31 @@
   </form>
 </section>
 
-{% if posture_kpi %}{% set pk = posture_kpi %}
-<section class="card posture-alarm {{ 'alarm-card' if pk.critical or pk.high }}">
-  <h2>Security posture <small>{{ pk.addresses }} scanned address(es), all domains</small></h2>
-  {% if pk.addresses %}
-  <p class="kpi-line"><b class="{{ 'down' if pk.critical }}">{{ pk.critical }}</b> critical ·
-    <b class="{{ 'down' if pk.high }}">{{ pk.high }}</b> high CVEs on {{ pk.exposed }} address(es) ·
-    fix available for {{ pk.fixable }} of {{ pk.cves }}{% if pk.stale or pk.failed %} ·
-    <span class="flat">{{ pk.stale }} stale, {{ pk.failed }} failed</span>{% endif %}
-    <a class="btn small" href="{{ admin_base }}/security">Open Posture</a></p>
-  {% else %}<p class="muted">No posture scans yet. <a href="{{ admin_base }}/security">Open Posture</a> to scan a domain.</p>{% endif %}
-</section>
-{% endif %}
-
 <section class="kpis">
   <div class="kpi"><span>Domains</span><b>{{ "{:,}".format(t.domains) }}</b></div>
   <div class="kpi"><span>Scans</span><b>{{ "{:,}".format(t.scans) }}</b></div>
   <div class="kpi"><span>Host names <i>latest scans</i></span><b>{{ "{:,}".format(t.hosts) }}</b></div>
   <div class="kpi"><span>Addresses <i>latest scans</i></span><b>{{ "{:,}".format(t.ips) }}</b></div>
   <div class="kpi"><span>History</span><b class="small">{{ (t.first_scan or '')[:10] }} → {{ (t.last_scan or '')[:10] }}</b></div>
+</section>
+
+<section class="grid g2">
+  <div class="card wide">
+    <h2>Scans per day <small>finished scans</small></h2>
+    <div class="chart h220"><canvas id="perDay"></canvas></div>
+  </div>
+  <div class="card wide">
+    <h2>EU share per day <small>addresses in an EU country, all scans that day</small></h2>
+    <div class="chart h200"><canvas id="eu"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Hosting countries <small>distinct addresses, latest scan per domain</small></h2>
+    <div class="chart h320"><canvas id="countries"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Top providers <small>network name, distinct addresses</small></h2>
+    <div class="chart h320"><canvas id="netnames"></canvas></div>
+  </div>
 </section>
 
 {% if recent %}
@@ -91,25 +97,6 @@
       </tbody>
     </table>
   </div>
-  </div>
-</section>
-
-<section class="grid g2">
-  <div class="card">
-    <h2>Hosting countries <small>distinct addresses, latest scan per domain</small></h2>
-    <div class="chart h320"><canvas id="countries"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Top providers <small>network name, distinct addresses</small></h2>
-    <div class="chart h320"><canvas id="netnames"></canvas></div>
-  </div>
-  <div class="card wide">
-    <h2>EU share per day <small>addresses in an EU country, all scans that day</small></h2>
-    <div class="chart h200"><canvas id="eu"></canvas></div>
-  </div>
-  <div class="card wide">
-    <h2>Scans per day <small>finished scans</small></h2>
-    <div class="chart h220"><canvas id="perDay"></canvas></div>
   </div>
 </section>
 <datalist id="domain-list">{% for d in domains %}<option value="{{ d.name }}">{% endfor %}</datalist>

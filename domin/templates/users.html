@@ -21,8 +21,7 @@
 </section>
 
 <section class="card">
-  {% set no2fa = users|rejectattr('has_totp')|rejectattr('disabled')|list|length %}
-  <h2>All users <small>{{ users|length }}{% if no2fa %} · <span class="flat">{{ no2fa }} active without two-factor</span>{% endif %}</small></h2>
+  <h2>All users <small>{{ users|length }}</small></h2>
   <div class="table-wrap"><table>
     <thead><tr><th>Name</th><th>Role</th><th>2FA</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead>
     <tbody>{% for us in users %}<tr>
@@ -35,8 +34,8 @@
             {% for r in roles %}<option value="{{ r }}"{% if r == us.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
           </select></form>
       </td>
-      <td>{% if us.has_totp %}<span class="pill ok">on</span>{% else %}<span class="pill warn">off</span>{% endif %}</td>
-      <td>{% if us.disabled %}<span class="pill bad">disabled</span>{% else %}active{% endif %}</td>
+      <td>{{ 'on' if us.has_totp else '–' }}</td>
+      <td>{{ 'disabled' if us.disabled else 'active' }}</td>
       <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
       <td class="row-actions">
         <form method="post" action="{{ base }}/users/{{ us.id }}/reset-password" class="inline">

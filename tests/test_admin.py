@@ -270,31 +270,8 @@ def test_admin_sets_internal_domains_on_the_settings_page(settings):
         assert r.status_code == 422 and "need at least one internal DNS server" in r.text
 
 
-def test_operations_page_leads_with_jobs_and_folds_the_log(settings):
-    with client(settings) as h:
-        csrf = sign_in(h)
-        page = h.get(BASE).text
-        order = [page.index(x) for x in ("Scan jobs <small>", 'id="tuning"', "Traffic <small", 'id="visits"',
-                                         "Recent visits <small>")]
-        assert order == sorted(order) and '<details class="card fold" id="tuning">' in page
-        assert "scan worker is paused" not in page
-        form = {k: str(v) for k, (_, lo, _) in admin.TUNABLE.items() if lo is not None for v in [lo]}
-        h.post(BASE + "/tune", data={**form, "csrf": csrf, "scans_paused": "on"})
-        assert "scan worker is paused" in h.get(BASE).text
-
-
-def test_settings_put_security_guardrails_and_save_first(settings):
-    with client(settings) as h:
-        sign_in(h)
-        page = h.get(BASE + "/settings").text
-        order = [page.index(x) for x in ("Save settings", "Security posture scope", "Require two-factor",
-                                         "Domain inventory scope", "Scan limits", "Internal domains")]
-        assert order == sorted(order) and page.count('type="submit">Save settings') == 2
-
-
 def test_users_page_has_no_inline_handlers(settings):
     with client(settings) as h:
         sign_in(h)
         page = h.get(BASE + "/users").text
     assert "onchange=" not in page and 'name="role" data-autosubmit' in page
-    assert "1 active without two-factor" in page
