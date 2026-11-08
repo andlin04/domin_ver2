@@ -2,6 +2,27 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: views ordered by what needs attention, posture report charts
+
+- Posture report (Posture page, domain page): KPIs (critical, high, addresses with high+, fix available, stale /
+  failed), then three charts: **Riskiest addresses** (top 10, CVEs stacked by severity; a click opens that address),
+  **Fix available?** (distinct CVEs per severity, fix published vs no fix yet) and **Critical & high over time**
+  (distinct CVEs per day with a finished scan, from the posture scan history). Findings by address follow; **Scan age**
+  and **Exposed services** (ranked bars, were pies) close the report. The severity and worst-finding pies are gone
+  (covered by the KPIs, the new charts and the list). An empty chart shows a sentence instead.
+- Posture page: the scan controls come before the authorised-use notice.
+- Inventory (signed in): a security posture line (critical / high CVEs, fixable, stale / failed) leads the page; the
+  domains table and recent jobs come before the charts.
+- Domain page: "Changes since" sits right under the KPIs, before the charts.
+- Operations: scan jobs first (failed before finished), a red line when the worker is paused, Tuning folded, traffic
+  after, the recent-visits log and jobs-per-day table folded.
+- Settings: a Save button at the top; posture scope and two-factor first; the Scan limits card turns amber when the
+  limits are off; the posture scope text now says countries apply too.
+- Users: the role pick-list applies itself again (the inline handler was blocked by the CSP); 2FA and disabled show as
+  pills, with a count of active users without two-factor. Account: two-factor before the password form.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: posture findings per address, expandable CVEs with fix flags
 
 - The posture report (Posture page and the domain page) lists findings per address, worst first, all collapsed.

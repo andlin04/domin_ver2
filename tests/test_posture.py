@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -378,7 +379,8 @@ def test_report_summarises_worst_first():
     assert rep["kpi"]["high"] == 1 and rep["kpi"]["exposed"] == 1 and rep["kpi"]["stale"] == 1
     assert rep["vulns"][0]["targets"] == [("172.20.4.50", "www.corp.example", 80)]
     assert rep["vulns"][0]["products"] == ["nginx 1.24.0"]
-    assert {"label": "high", "n": 1} in rep["charts"]["sev"] and {"label": "none", "n": 1} in rep["charts"]["worst"]
+    assert rep["charts"]["fix"] == [{"label": "high", "fix": 1, "nofix": 0}]
+    assert {"label": "over 30 days", "n": 1} in rep["charts"]["age"]
     assert [r["ip"] for r in posture.report(rows, host="nas.corp.example")["rows"]] == ["172.20.4.60"]
 
 
@@ -416,7 +418,12 @@ def test_report_renders_collapsed_host_headlines_with_nested_cves():
     heads = re.findall(r'<details class="svc posture-detail"[^>]*>', html)
     assert len(heads) == 2 and not [d for d in re.findall(r"<details[^>]*>", html) if " open" in d]
     assert html.index('id="pa-172-20-4-50"') < html.index('id="pa-172-20-4-60"')  # worst host first
-    assert "1 of 2 fixable" in html and "no fix published yet" in html and "Fix available for 1 of 3" in html
+    assert "1 of 2 fixable" in html and "no fix published yet" in html
+    assert re.search(r"Fix available</span><b>1 <i>of 3 CVEs", html)
+    # where to act (charts), then the findings, then coverage (scan age, services)
+    order = [html.index(x) for x in ('id="pc-hosts"', 'id="pc-fix"', 'id="pc-trend"', "Findings by address <small>",
+                                     'id="pc-age"', 'id="pc-services"')]
+    assert order == sorted(order) and "<script>" not in html
     assert re.search(r'<details class="cve-item">\s*<summary class="cve-head">\s*<b class="mono">CVE-2099-0001', html)
     assert "Made-up flaw CVE-2099-0001 in the parser." in html and "fix: 2 versions" in html
     assert "2.1, 3.0.1" in html and "no fix yet" in html
@@ -430,8 +437,8 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
-        order = [page.index(x) for x in ("Scan / renew", "Critical CVEs", "CVEs by severity",
-                                         "Findings by address <small>")]
+        order = [page.index(x) for x in ("Scan / renew", "Authorized use only", "Critical CVEs", "Riskiest addresses",
+                                         "Findings by address <small>", "Scan age")]
         assert order == sorted(order)
         assert 'id="posture-data"' in page and "CVE-2024-9999" in page
         assert "Vulnerabilities <small>" not in page and "Services &amp; scan details" in page
@@ -455,3 +462,79 @@ def test_authorised_use_notice_can_be_dismissed_for_good(settings):
     with app_client(settings) as h:
         sign_in(h, "ana")
         assert "Authorized use only" in h.get("/admin/security").text
+
+
+# ---- report charts: data shape, empty cases, trend ----
+
+def test_report_chart_data_shape():
+    ch = posture.report(report_rows())["charts"]
+    assert [h["ip"] for h in ch["hosts"]] == ["172.20.4.50", "172.20.4.60"]   # riskiest first
+    assert ch["hosts"][0] == {"label": "www.corp.example", "ip": "172.20.4.50", "anchor": "pa-172-20-4-50",
+                              "critical": 1, "high": 0, "medium": 0, "low": 1, "unknown": 0}
+    assert ch["fix"] == [{"label": "critical", "fix": 1, "nofix": 0}, {"label": "medium", "fix": 0, "nofix": 1},
+                         {"label": "low", "fix": 0, "nofix": 1}]
+    assert [a["label"] for a in ch["age"]] == list(posture.AGE_BUCKETS)
+    assert sum(a["n"] for a in ch["age"]) == 2 and ch["services"][0]["n"] == 1
+
+
+def test_report_charts_are_empty_without_data():
+    assert posture.report([])["charts"] == {"hosts": [], "fix": [], "age": [], "services": []}
+    clean = [{"ip": "172.20.4.60", "hosts": "nas.corp.example", "status": "failed", "high": 0, "cves": 0,
+              "open_ports": 0, "finished": "2999-01-01T00:00:00", "pending": None, "services": []}]
+    ch = posture.report(clean)["charts"]
+    assert ch["hosts"] == [] and ch["fix"] == [] and {"label": "failed", "n": 1} in ch["age"]
+
+
+def test_riskiest_addresses_rank_by_severity_and_stop_at_ten():
+    rows = [{"ip": f"172.20.4.{i}", "hosts": "", "status": "done", "high": 0, "cves": 1, "open_ports": 1,
+             "finished": "2999-01-01T00:00:00", "pending": None,
+             "services": [{"port": 80, "service": "http", "findings": [
+                 {"cve": f"CVE-2099-{i:04d}", "severity": "critical" if i == 7 else "low", "score": None}]}]}
+            for i in range(1, 13)]
+    hosts = posture.report(rows)["charts"]["hosts"]
+    assert len(hosts) == posture.TOP_HOSTS and hosts[0]["ip"] == "172.20.4.7" and hosts[0]["label"] == "172.20.4.7"
+
+
+def add_done(c, ip, day, findings, hosts="www.corp.example"):
+    services = [{"port": 443, "service": "https", "findings": [{"cve": cid, "severity": sev} for cid, sev in findings]}]
+    c.execute("""INSERT INTO posture_scans (domain, ip, hosts, ports, status, created, finished, services)
+                 VALUES (?, ?, ?, '443', 'done', ?, ?, ?)""", (DOM, ip, hosts, day, day, json.dumps(services)))
+
+
+def test_trend_counts_critical_and_high_per_scan_day(settings):
+    with db.connect(settings.db_path) as c:
+        add_done(c, "172.20.4.50", "2026-10-01T10:00:00", [("CVE-2099-0001", "critical"), ("CVE-2099-0002", "high")])
+        assert posture.trend(c, DOM) == []                                    # one day: no trend yet
+        add_done(c, "172.20.4.60", "2026-10-01T11:00:00", [("CVE-2099-0002", "high")], hosts="nas.corp.example")
+        add_done(c, "172.20.4.50", "2026-10-05T10:00:00", [("CVE-2099-0002", "high")])   # critical patched
+        c.execute("""INSERT INTO posture_scans (domain, ip, ports, status, created, finished)
+                     VALUES (?, '172.20.4.60', '443', 'failed', '2026-10-06', '2026-10-06T00:00:00')""", (DOM,))
+        assert posture.trend(c, DOM) == [{"day": "2026-10-01", "critical": 1, "high": 1},
+                                         {"day": "2026-10-05", "critical": 0, "high": 1}]
+        assert posture.trend(c, "other.example") == []
+        assert [t["critical"] for t in posture.trend(c, DOM, host="www.corp.example")] == [1, 0]
+        assert posture.trend(c, DOM, host="nas.corp.example") == []          # its only scan day
+
+
+def test_posture_page_carries_trend_data(settings):
+    with db.connect(settings.db_path) as c:
+        add_done(c, "172.20.4.50", "2026-10-01T10:00:00", [("CVE-2099-0001", "critical")])
+        add_done(c, "172.20.4.50", "2026-10-02T10:00:00", [])
+    with app_client(settings) as h:
+        sign_in(h, "vee")
+        for url in (f"/admin/security?domain={DOM}", f"/d/{DOM}"):
+            raw = re.search(r'id="posture-data">(.*?)</script>', h.get(url).text).group(1)
+            data = json.loads(raw)
+            assert [t["critical"] for t in data["trend"]] == [1, 0] and set(data) >= {"hosts", "fix", "age"}
+
+
+def test_overview_leads_with_the_posture_alarm_when_signed_in(settings, nmap):
+    with app_client(settings) as h:
+        assert "posture-alarm" not in h.get("/").text                     # anonymous: no posture figures
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        run_queue(settings)
+        page = h.get("/").text
+    assert "posture-alarm" in page and "alarm-card" in page and "1</b> critical" in page
+    order = [page.index(x) for x in ("posture-alarm", 'class="kpis"', 'id="domains"', 'id="countries"', 'id="perDay"')]
+    assert order == sorted(order)

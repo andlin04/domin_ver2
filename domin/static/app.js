@@ -486,33 +486,103 @@ function postureProgress() {
 }
 postureProgress();
 
-// posture report pies: severity colours follow the pills
-function posturePies() {
+// posture report charts (data: #posture-data, posture.report + trend). Severity colours come from the --sev-* vars,
+// read at render time like every chart colour; an empty series shows a sentence instead of an empty canvas.
+function postureCharts() {
   const el = document.getElementById("posture-data");
   if (!el) return;
   const d = JSON.parse(el.textContent);
-  const sev = { critical: "#991b1b", high: css("--down"), medium: css("--flat"), low: css("--up"), unknown: "#64748b",
-                none: "#10b981", "not scanned": "#94a3b8" };
-  const pie = (id, rows, colours) => {
+  const SEV = ["critical", "high", "medium", "low", "unknown"];
+  const sevColour = (s) => css(`--sev-${s}`);
+  const gap = { borderColor: css("--surface"), borderWidth: 1, borderRadius: 3, maxBarThickness: 22 };
+  const canvas = (id, rows, empty) => {
     const c = document.getElementById(id);
-    if (!c) return;
-    if (!rows?.length) { c.parentElement.innerHTML = '<p class="muted">Nothing to show</p>'; return; }
-    new Chart(c, {
-      type: "doughnut",
-      data: { labels: rows.map((r) => r.label), datasets: [{ data: rows.map((r) => r.n), borderWidth: 0,
-              backgroundColor: colours ? rows.map((r) => colours[r.label] || "#64748b") : palette() }] },
-      options: { cutout: "55%", plugins: { legend: { position: "right" } } },
-    });
+    if (c && !rows?.length) { c.parentElement.innerHTML = `<p class="muted chart-empty">${esc(empty)}</p>`; return null; }
+    return c;
   };
-  pie("pc-sev", d.sev, sev);
-  pie("pc-worst", d.worst, sev);
-  pie("pc-services", d.services);
+  const ints = { beginAtZero: true, ticks: { precision: 0 } };
+  const short = (s) => (s.length > 26 ? `${s.slice(0, 25)}…` : s);
+
+  // where to act first: the addresses with the most severe CVEs, stacked by severity; a click opens the address
+  const hosts = d.hosts || [];
+  let c = canvas("pc-hosts", hosts, "No CVEs on any scanned address.");
+  if (c) {
+    const used = SEV.filter((s) => hosts.some((h) => h[s]));
+    new Chart(c, {
+      type: "bar",
+      data: { labels: hosts.map((h) => h.label),
+              datasets: used.map((s) => ({ label: s, data: hosts.map((h) => h[s]), backgroundColor: sevColour(s), ...gap })) },
+      options: { indexAxis: "y", plugins: { legend: { position: "top" },
+                 tooltip: { callbacks: { title: (it) => `${hosts[it[0].dataIndex].label} (${hosts[it[0].dataIndex].ip})` } } },
+                 scales: { x: { stacked: true, ...ints }, y: { stacked: true, grid: { display: false }, ticks: { callback: (v) => short(hosts[v].label) } } },
+                 onHover: (ev, els) => { ev.native.target.style.cursor = els.length ? "pointer" : ""; },
+                 onClick: (_, els) => {
+                   const box = els.length && document.getElementById(hosts[els[0].index].anchor);
+                   if (!box) return;
+                   box.open = true;
+                   box.scrollIntoView({ behavior: "smooth", block: "start" });
+                 } },
+    });
+  }
+
+  // what an update removes today (accent) versus what waits on a vendor (grey): emphasis on the actionable part
+  const fix = d.fix || [];
+  c = canvas("pc-fix", fix, "No CVEs.");
+  if (c) {
+    new Chart(c, {
+      type: "bar",
+      data: { labels: fix.map((r) => r.label),
+              datasets: [{ label: "Fix published", data: fix.map((r) => r.fix), backgroundColor: css("--accent"), ...gap },
+                         { label: "No fix yet", data: fix.map((r) => r.nofix), backgroundColor: css("--sev-unknown"), ...gap }] },
+      options: { indexAxis: "y", plugins: { legend: { position: "top" } },
+                 scales: { x: { stacked: true, ...ints }, y: { stacked: true, grid: { display: false } } } },
+    });
+  }
+
+  // better or worse: distinct critical and high CVEs per day with a finished scan
+  const tr = d.trend || [];
+  c = canvas("pc-trend", tr, "The trend appears once scans have finished on two or more days.");
+  if (c) {
+    const line = (s) => ({ label: s, data: tr.map((r) => r[s]), borderColor: sevColour(s), backgroundColor: sevColour(s),
+                           borderWidth: 2, tension: .2, pointRadius: tr.length > 40 ? 0 : 4, pointHoverRadius: 6 });
+    new Chart(c, {
+      type: "line",
+      data: { labels: tr.map((r) => r.day), datasets: [line("critical"), line("high")] },
+      options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "top" } },
+                 scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: ints } },
+    });
+  }
+
+  // how current the picture is: fresh results good, stale a warning, failed a fault
+  const age = (d.age || []).some((r) => r.n) ? d.age : [];
+  c = canvas("pc-age", age, "No results yet.");
+  if (c) {
+    const tone = { "under 7 days": css("--up"), failed: css("--down") };
+    new Chart(c, {
+      type: "bar",
+      data: { labels: age.map((r) => r.label), datasets: [{ label: "Addresses", data: age.map((r) => r.n), ...gap,
+              backgroundColor: age.map((r) => tone[r.label] || (r.label.startsWith("over") ? css("--flat") : css("--sev-unknown"))) }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } },
+                 scales: { x: ints, y: { grid: { display: false } } } },
+    });
+  }
+
+  // what is listening: ranked bars, one hue
+  const svc = d.services || [];
+  c = canvas("pc-services", svc, "No open ports found.");
+  if (c) {
+    new Chart(c, {
+      type: "bar",
+      data: { labels: svc.map((r) => r.label), datasets: [{ label: "Open ports", data: svc.map((r) => r.n), backgroundColor: css("--accent"), ...gap }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: ints, y: { grid: { display: false } } } },
+    });
+  }
 }
 
 const page = document.body.dataset.page;
 if (page === "tools") toolsPage();
 if (chartDefaults()) {
-  posturePies();
+  postureCharts();
   if (page === "overview") overviewCharts();
   if (page === "domain") domainCharts();
   if (page === "all") allCharts();

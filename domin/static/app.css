@@ -295,7 +295,16 @@ dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inheri
 .kpi.warn b { color: var(--flat); }
 .kpi b i { font-size: .8rem; font-style: normal; color: var(--muted); font-weight: 400; }
 .posture-charts { margin-bottom: 1rem; }
-.chart.pie { height: 210px; }
+/* chart severity scale, checked for colour-vision separation on both surfaces; legends and axis labels name each one */
+:root { --sev-critical: #a83a9e; --sev-high: #e04a2f; --sev-medium: #c99a00; --sev-low: #3987e5; --sev-unknown: #7d8590; }
+.chart-empty { margin: 0; padding: 2rem .5rem; text-align: center; }
+.alarm-card { border-color: var(--down); }
+.posture-alarm .kpi-line { margin: 0; }
+.posture-alarm .btn { margin-left: .75rem; }
+.settings-save { margin: 0; display: flex; gap: .75rem; align-items: center; }
+details.fold > summary { cursor: pointer; }
+details.fold > summary h2 { display: inline; margin: 0; }
+details.fold[open] > summary { margin-bottom: .75rem; }
 .posture-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; cursor: pointer; padding: .35rem 0; }
 .posture-head .hosts { color: var(--muted); }
 .posture-head form.renew { margin-left: auto; }

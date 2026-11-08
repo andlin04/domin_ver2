@@ -1,4 +1,5 @@
-{# Posture report: rep = posture.report(...); renew_base = admin base; can_run = analyst or admin; csrf #}
+{# Posture report: rep = posture.report(...) (+ charts.trend); renew_base = admin base; can_run = analyst or admin; csrf.
+   Order: alarms (KPIs), where to act (riskiest addresses, fixable, trend), the findings, then coverage. #}
 {% set k = rep.kpi %}
 {% if not rep.rows %}
 <p class="muted card">No posture scans yet.</p>
@@ -7,24 +8,24 @@
   <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
   <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
   <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
-  <div class="kpi"><span>Distinct CVEs</span><b>{{ k.cves }}</b></div>
-  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }}</i></b></div>
-  <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
+  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }} CVEs</i></b></div>
   <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
+  <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
   {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
 </section>
 
 <section class="grid g3 posture-charts">
-  <div class="card"><h2>CVEs by severity <small>distinct CVEs</small></h2><div class="chart pie"><canvas id="pc-sev"></canvas></div></div>
-  <div class="card"><h2>Addresses by worst finding</h2><div class="chart pie"><canvas id="pc-worst"></canvas></div></div>
-  <div class="card"><h2>Exposed services <small>open ports by service</small></h2><div class="chart pie"><canvas id="pc-services"></canvas></div></div>
+  <div class="card"><h2>Riskiest addresses <small>CVEs by severity · click to open</small></h2>
+    <div class="chart h260"><canvas id="pc-hosts" role="img" aria-label="Distinct CVEs per severity for the riskiest addresses; the same figures are in Findings by address"></canvas></div></div>
+  <div class="card"><h2>Fix available? <small>distinct CVEs per severity</small></h2>
+    <div class="chart h260"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
+  <div class="card"><h2>Critical &amp; high over time <small>distinct CVEs, per scan day</small></h2>
+    <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct critical and high CVEs per day with a finished scan"></canvas></div></div>
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
 <section class="card">
   <h2>Findings by address <small>{{ rep.rows|length }}, worst first — open one for its CVEs, open a CVE for its description</small></h2>
-  {% if k.cves %}<p class="small-print muted">{% if k.fixable %}Fix available for {{ k.fixable }} of {{ k.cves }} distinct CVEs: an update fixes these.
-    {% else %}No fixed version published yet for any of the {{ k.cves }}; updates cannot lower this number today.{% endif %}</p>{% endif %}
   {% for p in rep.rows %}
   <details class="svc posture-detail" id="pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}">
     <summary class="posture-head">
@@ -83,5 +84,12 @@
     </details>
   </details>
   {% endfor %}
+</section>
+
+<section class="grid g2 posture-charts">
+  <div class="card"><h2>Scan age <small>addresses by age of their current result</small></h2>
+    <div class="chart h200"><canvas id="pc-age" role="img" aria-label="Addresses by age of their current posture result"></canvas></div></div>
+  <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
+    <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
 </section>
 {% endif %}

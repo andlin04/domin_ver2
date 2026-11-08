@@ -225,8 +225,13 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             domains = db.domains_overview(c)
             recent = jobs.recent(c, 8)
             src = drill_src(c, False)
+        user, _ = viewer(request)
+        alarm = None
+        if user:   # signed in: the posture headline across all domains comes first
+            with conn() as c:
+                alarm = posture.report(posture.current(c))["kpi"]
         return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent,
-                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src)
+                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src, posture_kpi=alarm)
 
     @lru_cache(maxsize=2)
     def drill_preview(version: str) -> list[dict]:
@@ -255,11 +260,12 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
                   "asns": db.breakdown(rows, "asn", 10)}
         user, csrf = viewer(request)
-        posture_rows, host_tags, suggested, tag_counts = [], {}, {}, {}
+        posture_rows, posture_trend, host_tags, suggested, tag_counts = [], [], {}, {}, {}
         tag = request.query_params.get("tag", "")
         if user:   # posture results and host tags are signed-in reports
             with conn() as c:
                 posture_rows = posture.current(c, d["name"])
+                posture_trend = posture.trend(c, d["name"])
                 host_tags = tags.for_hosts(c, sorted({r["host"] for r in rows}))
             suggested = tags.suggestions(rows, posture_rows, host_tags)
             for t in (t for ts in host_tags.values() for t in ts):
@@ -268,10 +274,12 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 rows = [r for r in rows if tag in host_tags.get(r["host"], [])]
             else:
                 tag = ""
+        posture_report = posture.report(posture_rows)
+        posture_report["charts"]["trend"] = posture_trend
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
-                    posture_report=posture.report(posture_rows), host_tags=host_tags, suggested=suggested,
+                    posture_report=posture_report, host_tags=host_tags, suggested=suggested,
                     tag_counts=dict(sorted(tag_counts.items())), tag=tag)
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -903,8 +911,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             dom = dom if dom in known else ""
             hosts = posture.hosts(c, dom) if dom else []
             host = host if host in hosts else ""
+            rep = posture.report(posture.current(c, dom), host)
+            rep["charts"]["trend"] = posture.trend(c, dom, host)
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       report=posture.report(posture.current(c, dom), host), profiles=posture.profiles(c),
+                       report=rep, profiles=posture.profiles(c),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 

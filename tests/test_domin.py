@@ -685,3 +685,9 @@ def test_owner_lookup_does_not_hold_the_write_lock(settings):
     with db.connect(settings.db_path) as c:
         scanner.Enricher(c, lookup=lambda ip: dict(rdap)).get("9.9.9.1")
         assert not c.in_transaction
+
+
+def test_domain_page_shows_changes_before_the_charts(settings):
+    with TestClient(create_app(settings)) as h:
+        page = h.get("/d/example.se").text
+    assert page.index("Changes since") < page.index("Footprint over time") < page.index("Records <small>")

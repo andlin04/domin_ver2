@@ -20,15 +20,61 @@
 <section class="hero">
   <div>
     <h1>Operations</h1>
-    <p class="muted">Last {{ stats.days }} days, people only ({{ stats.bots }} bot requests left out). No IP addresses
-      are stored: a visitor is a hash that changes every day.</p>
+    <p class="muted">Scan jobs and the worker first, then site traffic.</p>
   </div>
   <form method="post" action="{{ base }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn" type="submit">Sign out</button></form>
 </section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% for name, label, lo, hi, value in tunable if name == 'scans_paused' and value %}
+<p class="note bad" role="alert">The scan worker is paused: queued jobs wait. Untick it under <a href="#tuning">Tuning</a> to resume.</p>
+{% endfor %}
+<section class="card">
+  <h2>Scan jobs <small>{{ jobs.open|length }} open</small></h2>
+  <ul class="jobs">
+    {% for j in jobs.open + jobs.done|selectattr('status', 'in', ['failed'])|list + jobs.done|rejectattr('status', 'in', ['failed'])|list %}
+    <li><span class="pill {{ j.status }}">{{ j.status }}</span>
+      <a href="/d/{{ j.domain }}">{{ j.domain }}</a>
+      <span class="muted">{{ j.created[:16].replace('T', ' ') }}</span>
+      {% if j.status == 'running' %}<span class="muted">{{ j.progress }}</span>{% endif %}
+      {% if j.error %}<span class="bad-text">{{ j.error }}</span>{% endif %}
+      {% if j.status in ('queued', 'running') %}
+      <form method="post" action="{{ base }}/jobs/{{ j.id }}/cancel" data-confirm="{{ 'Stop' if j.status == 'running' else 'Cancel' }} the scan of {{ j.domain }}?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">{{ 'Kill' if j.status == 'running' else 'Cancel' }}</button></form>
+      {% elif j.status in ('failed', 'cancelled') %}
+      <form method="post" action="{{ base }}/jobs/{{ j.id }}/retry">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Retry</button></form>
+      {% endif %}</li>
+    {% else %}<li class="muted">No jobs</li>{% endfor %}
+  </ul>
+  {% if jobs.per_day %}
+  <details class="raw"><summary>Jobs per day</summary>
+  <div class="table-wrap short"><table>
+    <thead><tr><th>Day</th><th class="num">Jobs</th><th class="num">Done</th><th class="num">Failed</th>
+      <th class="num">Cancelled</th><th class="num">Clients</th></tr></thead>
+    <tbody>{% for d in jobs.per_day %}<tr><td>{{ d.day }}</td><td class="num">{{ d.jobs }}</td><td class="num">{{ d.done }}</td>
+      <td class="num">{{ d.failed }}</td><td class="num">{{ d.cancelled }}</td><td class="num">{{ d.clients }}</td></tr>{% endfor %}</tbody>
+  </table></div></details>
+  {% endif %}
+</section>
+<details class="card fold" id="tuning">
+  <summary><h2>Tuning <small>limits and the worker pause; applies at once; server defaults come from /etc/domin.env</small></h2></summary>
+  <form method="post" action="{{ base }}/tune" class="tune">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for name, label, lo, hi, value in tunable %}
+    {% if lo is none %}
+    <label class="tick"><input type="checkbox" name="{{ name }}"{% if value %} checked{% endif %}> {{ label }}</label>
+    {% else %}
+    <label>{{ label }} <input type="number" name="{{ name }}" value="{{ value }}" min="{{ lo }}" max="{{ hi }}" required></label>
+    {% endif %}
+    {% endfor %}
+    <button class="btn primary" type="submit">Save</button>
+  </form>
+</details>
 
+<h2 class="section-title">Traffic <small class="muted">last {{ stats.days }} days, people only ({{ stats.bots }} bot
+  requests left out); no IP addresses are stored: a visitor is a hash that changes every day</small></h2>
 <section class="kpis">
   <div class="kpi"><span>Visitors</span><b>{{ k.visitors }}</b></div>
   <div class="kpi"><span>Page views</span><b>{{ k.views }}</b></div>
@@ -52,8 +98,8 @@
   {{ top("Countries", "visitor country" if stats.geo else "no country table loaded: python -m domin geoip", stats.countries) }}
 </section>
 
-<section class="card">
-  <h2>Recent visits <small>pages in order, time spent on each</small></h2>
+<details class="card fold">
+  <summary><h2>Recent visits <small>{{ stats.sessions|length }}, pages in order, time spent on each</small></h2></summary>
   {% if stats.sessions %}
   <div class="table-wrap"><table>
     <thead><tr><th>Start</th><th>Visitor</th><th>Country</th><th>From</th><th class="num">Length</th><th>Path</th></tr></thead>
@@ -64,50 +110,7 @@
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<p class="muted">No visits yet</p>{% endif %}
-</section>
-
-<section class="card">
-  <h2>Scan jobs <small>{{ jobs.open|length }} open</small></h2>
-  <ul class="jobs">
-    {% for j in jobs.open + jobs.done %}
-    <li><span class="pill {{ j.status }}">{{ j.status }}</span>
-      <a href="/d/{{ j.domain }}">{{ j.domain }}</a>
-      <span class="muted">{{ j.created[:16].replace('T', ' ') }}</span>
-      {% if j.status == 'running' %}<span class="muted">{{ j.progress }}</span>{% endif %}
-      {% if j.error %}<span class="bad-text">{{ j.error }}</span>{% endif %}
-      {% if j.status in ('queued', 'running') %}
-      <form method="post" action="{{ base }}/jobs/{{ j.id }}/cancel" data-confirm="{{ 'Stop' if j.status == 'running' else 'Cancel' }} the scan of {{ j.domain }}?">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">{{ 'Kill' if j.status == 'running' else 'Cancel' }}</button></form>
-      {% elif j.status in ('failed', 'cancelled') %}
-      <form method="post" action="{{ base }}/jobs/{{ j.id }}/retry">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Retry</button></form>
-      {% endif %}</li>
-    {% else %}<li class="muted">No jobs</li>{% endfor %}
-  </ul>
-  {% if jobs.per_day %}
-  <div class="table-wrap short"><table>
-    <thead><tr><th>Day</th><th class="num">Jobs</th><th class="num">Done</th><th class="num">Failed</th>
-      <th class="num">Cancelled</th><th class="num">Clients</th></tr></thead>
-    <tbody>{% for d in jobs.per_day %}<tr><td>{{ d.day }}</td><td class="num">{{ d.jobs }}</td><td class="num">{{ d.done }}</td>
-      <td class="num">{{ d.failed }}</td><td class="num">{{ d.cancelled }}</td><td class="num">{{ d.clients }}</td></tr>{% endfor %}</tbody>
-  </table></div>
-  {% endif %}
-</section>
-
-<section class="card">
-  <h2>Tuning <small>applies at once; server defaults come from /etc/domin.env</small></h2>
-  <form method="post" action="{{ base }}/tune" class="tune">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% for name, label, lo, hi, value in tunable %}
-    {% if lo is none %}
-    <label class="tick"><input type="checkbox" name="{{ name }}"{% if value %} checked{% endif %}> {{ label }}</label>
-    {% else %}
-    <label>{{ label }} <input type="number" name="{{ name }}" value="{{ value }}" min="{{ lo }}" max="{{ hi }}" required></label>
-    {% endif %}
-    {% endfor %}
-    <button class="btn primary" type="submit">Save</button>
-  </form>
-</section>
+</details>
 {% if stats.geo %}<p class="muted small-print">Country data: <a href="https://db-ip.com">IP Geolocation by DB-IP</a> (CC BY 4.0).</p>{% endif %}
 <script type="application/json" id="page-data">{{ stats.per_day|tojson }}</script>
 {% endblock %}

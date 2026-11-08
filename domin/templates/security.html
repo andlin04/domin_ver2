@@ -3,22 +3,10 @@
 {% block page %}security{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Security posture</h1>
-  <p class="muted">What is exposed and vulnerable across the inventoried domains: worst findings first.
+  <p class="muted">What is exposed and vulnerable, worst first.
     {% if posture_domain %}Showing <b>{{ posture_domain }}</b>{% if posture_host %} · host <b>{{ posture_host }}</b>{% endif %}.
     {% else %}Showing all domains.{% endif %}</p></div></section>
 {% set sub = "posture" %}{% include "_posture_nav.html" %}
-{% if show_notice %}
-<section class="card warn-card notice-banner">
-  <form method="post" action="{{ base }}/security/dismiss-notice" class="dismiss">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="link-btn" type="submit" title="Hide this notice for good">Dismiss</button></form>
-  <h2>Authorized use only</h2>
-  <p>This area is for authorised vulnerability management of infrastructure you own or are explicitly permitted to
-    assess. Keep the scope limited to the domains and address ranges you control (Settings), and keep a record of
-    your authorisation for each assessment.</p>
-</section>
-{% endif %}
-
 <section class="card controls">
   <form method="get" action="{{ base }}/security" class="inline posture-pick">
     <label class="field">Domain
@@ -61,6 +49,18 @@
 {% with pp_base=base, pp_domain=posture_domain, pp_pending=report.kpi.pending %}
 {% include "_posture_progress.html" %}
 {% endwith %}
+
+{% if show_notice %}
+<section class="card warn-card notice-banner">
+  <form method="post" action="{{ base }}/security/dismiss-notice" class="dismiss">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="link-btn" type="submit" title="Hide this notice for good">Dismiss</button></form>
+  <h2>Authorized use only</h2>
+  <p>This area is for authorised vulnerability management of infrastructure you own or are explicitly permitted to
+    assess. Keep the scope limited to the domains and address ranges you control (Settings), and keep a record of
+    your authorisation for each assessment.</p>
+</section>
+{% endif %}
 
 {% with rep=report, renew_base=base, can_run=user.role in ('admin', 'analyst'), show_domain=not posture_domain %}
 {% include "_posture_report.html" %}

@@ -22,20 +22,6 @@
 
 <section class="grid g2">
   <div class="card">
-    <h2>Change password</h2>
-    <form method="post" action="{{ base }}/account/password" class="stack">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="password" name="current" placeholder="Current password" autocomplete="current-password" required
-             aria-label="Current password">
-      <input type="password" name="new" placeholder="New password" autocomplete="new-password" required
-             minlength="12" aria-label="New password">
-      <input type="password" name="confirm" placeholder="Repeat new password" autocomplete="new-password" required
-             minlength="12" aria-label="Repeat new password">
-      <button class="btn primary" type="submit">Change password</button>
-    </form>
-  </div>
-
-  <div class="card">
     <h2>Two-factor</h2>
     {% if user.has_totp %}
     <p class="note ok">Two-factor is on. {{ user.recovery|length }} recovery code(s) left.</p>
@@ -63,6 +49,20 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="btn primary" type="submit">Set up two-factor</button></form>
     {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Change password</h2>
+    <form method="post" action="{{ base }}/account/password" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="password" name="current" placeholder="Current password" autocomplete="current-password" required
+             aria-label="Current password">
+      <input type="password" name="new" placeholder="New password" autocomplete="new-password" required
+             minlength="12" aria-label="New password">
+      <input type="password" name="confirm" placeholder="Repeat new password" autocomplete="new-password" required
+             minlength="12" aria-label="Repeat new password">
+      <button class="btn primary" type="submit">Change password</button>
+    </form>
   </div>
 </section>
 {% endblock %}
