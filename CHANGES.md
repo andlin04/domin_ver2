@@ -2,6 +2,20 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: posture findings per address, expandable CVEs with fix flags
+
+- The posture report (Posture page and the domain page) lists findings per address, worst first, all collapsed.
+  Each headline shows the worst severity, CVE counts per severity, "N of M fixable" or "no fix published yet",
+  open ports, last scan / stale and **Renew**.
+- Opening an address lists its CVEs (id, severity, CVSS, product and port, fix flag: "fix: N versions" or
+  "no fix yet"). Opening a CVE shows its description, the fixed-in versions and NVD / OSV links.
+- Services, scan parameters and raw nmap output sit in a collapsed "Services & scan details" under each address.
+- The flat Vulnerabilities table is gone; a new KPI shows "Fix available: N of M" distinct CVEs.
+- CVE descriptions are kept up to 1000 characters (was 200) for new look-ups; cached entries keep the short text
+  until they are looked up again.
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: posture scans show a progress dialog
 
 - **Scan / renew** and the per-address **Renew** (Posture page and the domain page) now queue the scans in the

@@ -1,7 +1,9 @@
 import re
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
+import jinja2
 import pytest
 from fastapi.testclient import TestClient
 from test_fingerprint import PW, SCAN_XML, transport
@@ -380,16 +382,60 @@ def test_report_summarises_worst_first():
     assert [r["ip"] for r in posture.report(rows, host="nas.corp.example")["rows"]] == ["172.20.4.60"]
 
 
+def report_rows():
+    def f(cve_id, sev, score, fixed):
+        return {"cve": cve_id, "severity": sev, "score": score, "summary": f"Made-up flaw {cve_id} in the parser.",
+                "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}", "fixed": fixed}
+    return [{"ip": "172.20.4.60", "hosts": "nas.corp.example", "status": "done", "high": 0, "cves": 1,
+             "open_ports": 1, "finished": "2999-01-01T00:00:00", "pending": None, "domain": DOM,
+             "services": [{"port": 22, "proto": "tcp", "service": "ssh", "product": "fakessh", "version": "1.0",
+                           "matched": True, "findings": [f("CVE-2099-0003", "medium", 5.0, None)]}]},
+            {"ip": "172.20.4.50", "hosts": "www.corp.example", "status": "done", "high": 1, "cves": 2,
+             "open_ports": 1, "finished": "2999-01-01T00:00:00", "pending": None, "domain": DOM,
+             "services": [{"port": 443, "proto": "tcp", "service": "https", "product": "fakehttpd", "version": "2.0",
+                           "matched": True, "findings": [f("CVE-2099-0001", "critical", 9.8, "2.1 / 3.0.1"),
+                                                         f("GHSA-fake-0002", "low", 2.0, None)]}]}]
+
+
+def test_report_rows_carry_their_cves_with_fix_counts():
+    rep = posture.report(report_rows())
+    www, nas = rep["rows"]
+    assert www["ip"] == "172.20.4.50" and [v["cve"] for v in www["vulns"]] == ["CVE-2099-0001", "GHSA-fake-0002"]
+    assert www["vulns"][0]["fixes"] == ["2.1", "3.0.1"] and www["vulns"][1]["fixes"] == []
+    assert www["fixable"] == 1 and www["sev_n"] == {"critical": 1, "low": 1} and nas["fixable"] == 0
+    assert www["vulns"][0]["where"] == [("fakehttpd 2.0", 443, "tcp")]
+    assert www["vulns"][1]["links"][0] == ("OSV", "https://osv.dev/vulnerability/GHSA-fake-0002")
+    assert rep["kpi"]["fixable"] == 1 and rep["kpi"]["cves"] == 3
+
+
+def test_report_renders_collapsed_host_headlines_with_nested_cves():
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(Path(posture.__file__).parent / "templates"),
+                             autoescape=True)
+    html = env.get_template("_posture_report.html").render(rep=posture.report(report_rows()), can_run=True,
+                                                           renew_base="/admin", csrf="t", show_domain=False)
+    heads = re.findall(r'<details class="svc posture-detail"[^>]*>', html)
+    assert len(heads) == 2 and not [d for d in re.findall(r"<details[^>]*>", html) if " open" in d]
+    assert html.index('id="pa-172-20-4-50"') < html.index('id="pa-172-20-4-60"')  # worst host first
+    assert "1 of 2 fixable" in html and "no fix published yet" in html and "Fix available for 1 of 3" in html
+    assert re.search(r'<details class="cve-item">\s*<summary class="cve-head">\s*<b class="mono">CVE-2099-0001', html)
+    assert "Made-up flaw CVE-2099-0001 in the parser." in html and "fix: 2 versions" in html
+    assert "2.1, 3.0.1" in html and "no fix yet" in html
+    assert "https://nvd.nist.gov/vuln/detail/CVE-2099-0001" in html and "Services &amp; scan details" in html
+    assert html.index("CVE-2099-0001") < html.index("Services &amp; scan details")
+
+
 def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
-        order = [page.index(x) for x in ("Scan / renew", "Critical CVEs", "CVEs by severity", "Vulnerabilities",
-                                         "Addresses <small>")]
+        order = [page.index(x) for x in ("Scan / renew", "Critical CVEs", "CVEs by severity",
+                                         "Findings by address <small>")]
         assert order == sorted(order)
         assert 'id="posture-data"' in page and "CVE-2024-9999" in page
+        assert "Vulnerabilities <small>" not in page and "Services &amp; scan details" in page
+        assert not [d for d in re.findall(r'<details class="svc posture-detail"[^>]*>', page) if " open" in d]
         dom_page = h.get(f"/d/{DOM}").text
         assert dom_page.index("Security posture") < dom_page.index("Records <small>")
         assert "CVE look-up" in page and "Product (CPE)" in h.get("/admin/security/lookup").text

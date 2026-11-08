@@ -312,5 +312,14 @@ form.tag .pill { text-transform: none; text-decoration: none; }
 .tag-groups .pill.active { background: color-mix(in srgb, var(--up) 20%, transparent); color: var(--up); }
 details.raw { margin: .4rem 0 .8rem; }
 details.raw summary { cursor: pointer; }
+.pill.fix-yes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.pill.fix-no { background: var(--surface-2); color: var(--muted); }
+.cve-list { margin: .3rem 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius); }
+details.cve-item { border-top: 1px solid var(--border); }
+details.cve-item:first-child { border-top: 0; }
+.cve-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; cursor: pointer; padding: .35rem .6rem; }
+.cve-head .num { min-width: 2.2rem; color: var(--muted); }
+.cve-body { padding: .2rem .8rem .6rem 1.6rem; background: var(--surface-2); }
+.cve-body p { margin: .35rem 0; }
 pre.raw-out { max-height: 24rem; overflow: auto; white-space: pre; font: .78rem/1.35 ui-monospace, "SF Mono", Consolas, monospace;
   background: rgba(0, 0, 0, .25); padding: .6rem .8rem; border-radius: 6px; }

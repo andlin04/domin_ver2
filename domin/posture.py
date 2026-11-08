@@ -214,10 +214,27 @@ SEVERITIES = ("critical", "high", "medium", "low", "unknown")
 STALE_DAYS = 30
 
 
+def fixes(f: dict) -> list[str]:
+    """Fixed versions published for a finding ("fixed" holds them joined by " / "); empty = no fix published yet."""
+    return [x.strip() for x in (f.get("fixed") or "").split(" / ") if x.strip()]
+
+
+def links(f: dict) -> list[tuple[str, str]]:
+    """Reference links for a finding: NVD for CVE ids, OSV for other ids, plus the source's own page."""
+    vid = f["cve"]
+    out = [("NVD", f"https://nvd.nist.gov/vuln/detail/{vid}") if vid.startswith("CVE-")
+           else ("OSV", f"https://osv.dev/vulnerability/{vid}")]
+    url = f.get("url") or ""
+    if url.startswith("https://") and url not in (u for _, u in out):
+        out.append(("OSV" if "osv.dev" in url else "NVD" if "nvd.nist.gov" in url else "Source", url))
+    return out
+
+
 def report(rows: list[dict], host: str = "") -> dict:
     """Summary of current posture rows for the report: KPIs, chart series and one vulnerability table (each CVE once,
     worst first, with the addresses and host names it affects). Rows gain `worst` (their worst severity, "none" for
-    a clean scan, "" when nothing finished). host narrows the rows to one host name."""
+    a clean scan, "" when nothing finished), `vulns` (their CVEs once, worst first, with fixes and links), `sev_n`
+    and `fixable`. A CVE counts as fixable when a fixed version is published for it. host narrows the rows."""
     if host:
         rows = [r for r in rows if host in (r.get("hosts") or "").split(",")]
     cutoff = (datetime.now() - timedelta(days=STALE_DAYS)).isoformat(timespec="seconds")
@@ -226,16 +243,25 @@ def report(rows: list[dict], host: str = "") -> dict:
     worst_n = dict.fromkeys((*SEVERITIES, "none", "not scanned"), 0)
     for r in rows:
         sevs = set()
+        own: dict[str, dict] = {}  # this address's CVEs, each once with the product/port pairs it affects
         for s in r["services"]:
             label = s.get("service") or "unknown"
             services[label] = services.get(label, 0) + 1
+            prod = f"{s.get('product') or label} {s.get('version') or ''}".strip()
             for f in s.get("findings") or []:
                 sevs.add(f["severity"])
-                v = vulns.setdefault(f["cve"], {**f, "targets": [], "products": set()})
+                v = vulns.setdefault(f["cve"], {**f, "targets": [], "products": set(), "fixes": fixes(f)})
                 tgt = (r["ip"], (r.get("hosts") or "").split(",")[0], s["port"])
                 if tgt not in v["targets"]:
                     v["targets"].append(tgt)
-                v["products"].add(f"{s.get('product') or label} {s.get('version') or ''}".strip())
+                v["products"].add(prod)
+                # fixable only when a fixed version is published for every affected product (portal semantics)
+                v["fixable"] = v.get("fixable", True) and bool(fixes(f))
+                o = own.setdefault(f["cve"], {**f, "where": [], "fixes": fixes(f), "links": links(f)})
+                o["where"].append((prod, s["port"], s.get("proto") or "tcp"))
+        r["vulns"] = sorted(own.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
+        r["sev_n"] = {x: n for x in SEVERITIES if (n := sum(1 for v in r["vulns"] if v["severity"] == x))}
+        r["fixable"] = sum(1 for v in r["vulns"] if v["fixes"])
         done = r["status"] == "done"
         r["worst"] = next((x for x in SEVERITIES if x in sevs), "none") if done else ""
         r["stale"] = bool(r.get("finished") and r["finished"] < cutoff)
@@ -250,6 +276,7 @@ def report(rows: list[dict], host: str = "") -> dict:
         "rows": rows, "vulns": table, "by_sev": by_sev,
         "kpi": {"addresses": len(rows), "exposed": sum(1 for r in rows if r["worst"] in ("critical", "high")),
                 "cves": len(table), "critical": by_sev["critical"], "high": by_sev["high"],
+                "fixable": sum(1 for v in table if v["fixable"]),
                 "open_ports": sum(r["open_ports"] for r in rows if r["status"] == "done"),
                 "failed": sum(1 for r in rows if r["status"] == "failed"),
                 "pending": sum(1 for r in rows if r.get("pending") or r["status"] in ("queued", "running")),

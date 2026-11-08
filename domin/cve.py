@@ -72,7 +72,7 @@ def rank(severity: str, score: float | None) -> tuple[int, float]:
 def _finding(cve: str, severity: str, score: float | None, fixed: str | None, summary: str, url: str,
              source: str) -> dict:
     return {"cve": cve, "severity": severity, "score": score, "fixed": fixed,
-            "summary": " ".join((summary or "").split())[:200], "url": url, "source": source}
+            "summary": " ".join((summary or "").split())[:1000], "url": url, "source": source}
 
 
 def osv_cves(client: httpx.Client, ecosystem: str, name: str, version: str) -> list[dict]:

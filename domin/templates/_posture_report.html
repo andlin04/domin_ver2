@@ -8,6 +8,7 @@
   <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
   <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
   <div class="kpi"><span>Distinct CVEs</span><b>{{ k.cves }}</b></div>
+  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }}</i></b></div>
   <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
   <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
   {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
@@ -21,36 +22,18 @@
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
 <section class="card">
-  <div class="card-head">
-    <h2>Vulnerabilities <small>{{ rep.vulns|length }} distinct, worst first</small></h2>
-    {% if rep.vulns|length > 8 %}<input class="filter" placeholder="Filter CVE, product, host…" data-filter="#vulns" aria-label="Filter vulnerabilities">{% endif %}
-  </div>
-  {% if rep.vulns %}
-  <div class="table-wrap"><table id="vulns" class="sortable">
-    <thead><tr><th data-sort="text">Severity</th><th data-sort="num" class="num">CVSS</th><th data-sort="text">CVE</th>
-      <th data-sort="text">Affected product</th><th data-sort="text">Where</th><th data-sort="text">Fixed in</th><th>Summary</th></tr></thead>
-    <tbody>{% for v in rep.vulns %}<tr>
-      <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
-      <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '—' }}</td>
-      <td><a href="{{ v.url }}" rel="noopener noreferrer" target="_blank">{{ v.cve }}</a></td>
-      <td>{{ v.products|join(', ') }}</td>
-      <td class="small-print">{% for ip, h, port in v.targets %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}">{{ h or ip }}:{{ port }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
-      <td>{{ v.fixed or '—' }}</td>
-      <td><div class="lines2" title="{{ v.summary }}">{{ v.summary }}</div></td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-  {% else %}<p class="muted">No known CVEs on the scanned services.</p>{% endif %}
-</section>
-
-<section class="card">
-  <h2>Addresses <small>{{ rep.rows|length }}, worst first — open one for its services, CVEs and scan details</small></h2>
+  <h2>Findings by address <small>{{ rep.rows|length }}, worst first — open one for its CVEs, open a CVE for its description</small></h2>
+  {% if k.cves %}<p class="small-print muted">{% if k.fixable %}Fix available for {{ k.fixable }} of {{ k.cves }} distinct CVEs: an update fixes these.
+    {% else %}No fixed version published yet for any of the {{ k.cves }}; updates cannot lower this number today.{% endif %}</p>{% endif %}
   {% for p in rep.rows %}
-  <details class="svc posture-detail" id="pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}" {% if rep.rows|length == 1 %}open{% endif %}>
+  <details class="svc posture-detail" id="pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}">
     <summary class="posture-head">
       <span class="pill sev-{{ p.worst if p.worst in ('critical','high','medium','low') else 'unknown' }}">{{ p.worst or p.status }}</span>
       <b>{{ p.ip }}</b> <span class="hosts">{{ p.hosts.replace(',', ', ') }}</span>
       {% if show_domain %}<small class="muted">{{ p.domain }}</small>{% endif %}
-      <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% if p.high %} · {{ p.high }} high+{% endif %}{% endif %}
+      {% for s, n in p.sev_n.items() %}<span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}
+      {% if p.vulns %}<span class="pill {{ 'fix-yes' if p.fixable else 'fix-no' }}">{% if p.fixable %}{{ p.fixable }} of {{ p.vulns|length }} fixable{% else %}no fix published yet{% endif %}</span>{% endif %}
+      <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% endif %}
         · {{ (p.finished or p.created)[:16].replace('T', ' ') }}{% if p.stale %} <em class="flat">stale</em>{% endif %}
         {% if p.pending %} · <em>renew {{ p.pending }}</em>{% endif %}</span>
       {% if can_run and not p.pending and p.status not in ('queued', 'running') %}
@@ -62,19 +45,42 @@
     </summary>
     {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
     {% if p.note %}<p class="note" role="status">{{ p.note }}</p>{% endif %}
-    {% if p.services %}
-    <div class="table-wrap"><table>
-      <thead><tr><th>Port</th><th>Service</th><th>Product / version</th><th>CVEs</th><th>Worst</th></tr></thead>
-      <tbody>{% for svc in p.services %}{% set f0 = svc.findings[0] if svc.findings else none %}<tr>
-        <td class="mono">{{ svc.port }}/{{ svc.proto }}</td><td>{{ svc.service or 'unknown' }}</td>
-        <td>{{ svc.product }} {{ svc.version }}</td>
-        <td>{% if svc.findings %}{% for f in svc.findings %}<a href="{{ f.url }}" rel="noopener noreferrer" target="_blank" title="{{ f.summary }}">{{ f.cve }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
-          {% elif svc.matched %}<span class="muted">none known</span>{% else %}<span class="muted">no CPE to match</span>{% endif %}</td>
-        <td>{% if f0 %}<span class="pill sev-{{ f0.severity }}">{{ f0.severity }}{% if f0.score is not none %} {{ '%.1f'|format(f0.score) }}{% endif %}</span>{% endif %}</td>
-      </tr>{% endfor %}</tbody>
-    </table></div>
-    {% endif %}
-    {% include "_posture_raw.html" %}
+    {% if p.vulns %}
+    <div class="cve-list">
+      {% for v in p.vulns %}
+      <details class="cve-item">
+        <summary class="cve-head">
+          <b class="mono">{{ v.cve }}</b>
+          <span class="pill sev-{{ v.severity }}">{{ v.severity }}</span>
+          <span class="num">{{ '%.1f'|format(v.score) if v.score is not none else '—' }}</span>
+          <span class="small-print">{% for prod, port, proto in v.where %}{{ prod }} · {{ port }}/{{ proto }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          {% if v.fixes %}<span class="pill fix-yes" title="Fixed in {{ v.fixes|join(', ') }}">fix: {{ v.fixes|length }} version{{ 's' if v.fixes|length > 1 }}</span>
+          {% else %}<span class="pill fix-no">no fix yet</span>{% endif %}
+        </summary>
+        <div class="cve-body">
+          <p>{{ v.summary or 'No description stored.' }}</p>
+          <p class="small-print">Fixed in: {% if v.fixes %}<span class="mono">{{ v.fixes|join(', ') }}</span>{% else %}<span class="muted">no fixed version published yet</span>{% endif %}</p>
+          <p class="small-print">{% for name, url in v.links %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+    {% elif p.status == 'done' %}<p class="muted small-print">No known CVEs on the scanned services.</p>{% endif %}
+    <details class="raw scan-details">
+      <summary>Services &amp; scan details <small class="muted">{{ p.services|length }} service(s)</small></summary>
+      {% if p.services %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Port</th><th>Service</th><th>Product / version</th><th>CVEs</th><th>Worst</th></tr></thead>
+        <tbody>{% for svc in p.services %}{% set f0 = svc.findings[0] if svc.findings else none %}<tr>
+          <td class="mono">{{ svc.port }}/{{ svc.proto }}</td><td>{{ svc.service or 'unknown' }}</td>
+          <td>{{ svc.product }} {{ svc.version }}</td>
+          <td>{% if svc.findings %}{{ svc.findings|length }}{% elif svc.matched %}<span class="muted">none known</span>{% else %}<span class="muted">no CPE to match</span>{% endif %}</td>
+          <td>{% if f0 %}<span class="pill sev-{{ f0.severity }}">{{ f0.severity }}{% if f0.score is not none %} {{ '%.1f'|format(f0.score) }}{% endif %}</span>{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      {% endif %}
+      {% include "_posture_raw.html" %}
+    </details>
   </details>
   {% endfor %}
 </section>
