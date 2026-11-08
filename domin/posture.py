@@ -185,7 +185,8 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     try:   # the profile's route, copied at queueing ('' = the default route as it is now)
         r = proxy.pick(cfg, row.get("route") or "")
         via = proxy.hop(conn, r, row["ip"], row["country"], client)
-    except proxy.ProxyError as exc:   # fail closed: never a direct scan instead
+    except proxy.ProxyError as exc:   # fail closed: never a direct scan instead (gone, disabled, can't carry it)
+        r = r or proxy.find(cfg, row.get("route") or cfg["posture"])
         _finish(conn, row["id"], "failed", {"error": f"route: {exc}",
                                             "params": f"via {proxy.describe(r) or 'a deleted route'}"})
         log.info("posture %s %s: route: %s", row["domain"], row["ip"], exc)

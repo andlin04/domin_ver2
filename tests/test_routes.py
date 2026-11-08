@@ -381,7 +381,7 @@ def test_admin_saves_mullvad_route_and_tunnel_request_has_no_secrets(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
         page = h.get("/admin/security/scan-settings").text
-        assert "Tunnel state not checked" in page and "4 relays" in page and "Sweden (se, 2)" in page
+        assert "not set up (save a Mullvad account number" in page and "4 relays" in page and "Sweden (se, 2)" in page
         for bad, msg in ((route_form(mullvad_fallback="xx"), "Fallback country"),
                          (route_form(mullvad_mode="fixed"), "Pick the Mullvad country")):
             r = h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **bad})
@@ -397,15 +397,16 @@ def test_admin_saves_mullvad_route_and_tunnel_request_has_no_secrets(settings):
         assert ("Posture scans (default): Mullvad: mullvad, follow host (fallback se) · Inventory jobs: direct · "
                 "CVE look-ups: direct") in page
         assert ACCOUNT not in page and KEY not in page and page.count("saved; blank keeps it") == 2
-        assert "Mullvad tunnel down" in page
-        assert "a request is waiting for the host" in page
+        assert "✗ not up" in page and "Mullvad (unavailable: tunnel not up)" in page
+        assert "A request is waiting for the host" in page
         flag.unlink()
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **page_form(mullvad_address="10.64.0.2/32")},
                    follow_redirects=False)
         assert "ok=saved" in r.headers["location"] and not flag.exists()   # unchanged: no new request
         (settings.db_path.parent / mullvad.STATUS_FILE).write_text(
             json.dumps({"at": "2026-11-08T10:00:00", "ok": True, "message": "tunnel up via se-got-wg-001"}))
-        assert "2026-11-08T10:00:00: tunnel up via se-got-wg-001" in h.get("/admin/security/scan-settings").text
+        assert "Last apply 2026-11-08 10:00:00: done.</b> Tunnel up via se-got-wg-001." in h.get(
+            "/admin/security/scan-settings").text
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **page_form(mullvad_account="12")})
         assert r.status_code == 422 and "16 digits" in r.text
         assert h.post("/admin/security/scan-settings/tunnel", data={"csrf": csrf},
@@ -554,7 +555,7 @@ def test_delete_is_refused_while_a_route_is_in_use(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
         page = h.get("/admin/security/scan-settings").text
-        assert "scan profile viade" in page
+        assert "profiles: viade" in page
         r = h.post("/admin/security/scan-settings/routes/r2/delete", data={"csrf": csrf})
         assert r.status_code == 409 and "Germany is in use (scan profile viade)" in r.text
     with app_client(settings) as h:
@@ -604,3 +605,162 @@ def test_tunnel_script_syntax():
     if not bash or os.name == "nt" and "System32" in bash:
         pytest.skip("no bash")
     assert subprocess.run([bash, "-n", str(script)], capture_output=True).returncode == 0
+
+
+def test_tunnel_service_reads_the_proxy_environment():
+    unit = (Path(__file__).parent.parent / "deploy" / "domin-mullvad.service").read_text()
+    assert "EnvironmentFile=-/etc/domin.env" in unit
+    script = (Path(__file__).parent.parent / "deploy" / "mullvad-tunnel.sh").read_text()
+    assert "fail no-handshake" in script and "HTTPS_PROXY" not in script.split("set -Eeuo")[1]   # never printed
+
+
+# ---- this host, kind choices, route status ----
+
+def status_file(settings, **kw) -> None:
+    (settings.db_path.parent / mullvad.STATUS_FILE).write_text(json.dumps(kw))
+
+
+def answering(monkeypatch, *addrs: tuple[str, int]) -> None:
+    """The SOCKS5 greeting succeeds at these addresses only (no socket is opened)."""
+    def fake(cfg, timeout=proxy.TIMEOUT):
+        if (cfg["host"], int(cfg["port"])) in addrs:
+            return f"SOCKS5 at {cfg['host']}:{cfg['port']} OK (no authentication)"
+        raise proxy.ProxyError(f"cannot reach the proxy at {cfg['host']}:{cfg['port']}: Connection refused")
+    monkeypatch.setattr(proxy, "handshake", fake)
+
+
+def test_status_messages_in_plain_words():
+    old = mullvad.explain({"at": "2026-11-08T20:56:01", "ok": False,
+                           "message": "key registration: the Mullvad API did not answer"})   # no code: an older file
+    assert old["text"].startswith("Mullvad's API (api.mullvad.net) could not be reached from this host")
+    assert "/etc/domin.env" in old["next"] and old["detail"] == ""
+    hs = mullvad.explain({"at": "x", "ok": False, "code": "no-handshake", "message": "tunnel configured but ..."})
+    assert "UDP 51820" in hs["text"] and "taken down" in hs["text"] and "outbound UDP 51820" in hs["next"]
+    refused = mullvad.explain({"at": "x", "ok": False, "code": "refused", "message": "key registration refused: bad"})
+    assert refused["detail"] == "key registration refused: bad" and "account number" in refused["next"]
+    assert mullvad.explain({"at": "x", "ok": True, "code": "up", "message": "tunnel up via se-got-wg-001"})["text"] \
+        == "Tunnel up via se-got-wg-001."
+    assert mullvad.explain({"at": "x", "ok": False, "code": "new", "message": "odd"})["text"] == "odd"
+    assert mullvad.explain({}) == {}
+    t = {"up": True, "handshake": 0, "relay": "se-got-wg-001"}
+    assert "no handshake" in mullvad.tunnel_summary({"tunnel": t}, False)["text"]
+    assert mullvad.tunnel_summary({"tunnel": {**t, "handshake": 1}}, True) == {
+        "ok": True, "text": "up via se-got-wg-001; Mullvad's SOCKS5 inside it (10.64.0.1:1080) answers"}
+    assert mullvad.tunnel_summary({}, False)["text"].startswith("not set up")
+
+
+def test_status_file_with_tunnel_facts(settings):
+    status_file(settings, at="2026-11-08T21:00:00", ok=False, code="no-handshake", message="m",
+                tunnel={"up": False, "handshake": "nope", "relay": "se-got-wg-001", "wg": True, "checked": "t"})
+    got = mullvad.apply_status(settings.db_path.parent)
+    assert got["code"] == "no-handshake" and got["tunnel"]["handshake"] == 0 and got["tunnel"]["wg"]
+    assert got["pending"] is False
+
+
+def test_host_check_states(settings, monkeypatch):
+    monkeypatch.setattr(proxy.shutil, "which", lambda name: None)
+    with db.connect(settings.db_path) as c:
+        cap = proxy.host_check(c, settings.db_path.parent)
+    assert not cap["proxychains"] and not cap["wg"] and not cap["tor"]["ok"] and not cap["tunnel"]["ok"]
+    assert cap["tor"]["addr"] == "127.0.0.1:9050" and cap["relays"]["count"] == 4 and not cap["relays"]["stale"]
+    proxy._probes.clear()
+    monkeypatch.setattr(proxy.shutil, "which", lambda name: f"/usr/bin/{name}")
+    answering(monkeypatch, ("127.0.0.1", 9050), mullvad.IN_TUNNEL)
+    status_file(settings, at="t", ok=True, code="up", message="tunnel up via se-got-wg-001",
+                tunnel={"up": True, "handshake": 1700000000, "relay": "se-got-wg-001", "wg": True})
+    with db.connect(settings.db_path) as c:
+        cap = proxy.host_check(c, settings.db_path.parent)
+    assert cap["proxychains"] and cap["wg"] and cap["tor"]["ok"] and cap["tunnel"]["ok"]
+    assert "se-got-wg-001" in cap["tunnel"]["text"]
+
+
+def test_probes_are_cached(monkeypatch):
+    calls = []
+    monkeypatch.setattr(proxy, "handshake", lambda cfg, timeout=0: calls.append(1) or "ok")
+    assert proxy.probe("127.0.0.1", 9050) == proxy.probe("127.0.0.1", 9050) == (True, "ok") and len(calls) == 1
+    proxy.probe("127.0.0.1", 9050, fresh=True)
+    assert len(calls) == 2
+
+
+def test_kind_choices_and_prefill():
+    down = {"proxychains": True, "tor": {"ok": False, "addr": "127.0.0.1:9050"}, "tunnel": {"ok": False}}
+    got = {k["value"]: k for k in proxy.kinds(down)}
+    assert got["custom"]["ok"] and got["tor"]["ok"] and not got["mullvad"]["ok"]
+    assert got["tor"]["label"] == "Tor (not reachable)" and got["tor"]["state"] == "bad"
+    assert got["mullvad"]["label"] == "Mullvad (unavailable: tunnel not up)"
+    assert {k["value"]: k["ok"] for k in proxy.kinds(down, "mullvad")}["mullvad"]   # an existing Mullvad route
+    up = {**down, "tor": {"ok": True, "addr": "127.0.0.1:9050"}, "tunnel": {"ok": True}, "proxychains": False}
+    got = {k["value"]: k for k in proxy.kinds(up)}
+    assert got["mullvad"]["ok"] and got["mullvad"]["label"] == "Mullvad" and got["tor"]["state"] == "warn"
+
+
+def test_route_form_kind_select_is_selectable(settings, monkeypatch):
+    with app_client(settings) as h:
+        sign_in(h, "adm")
+        page = h.get("/admin/security/scan-settings").text
+        select = page.split('name="kind" data-kind-select>')[1].split("</select>")[0]
+        assert '<option value="custom" selected>Custom proxy</option>' in select
+        assert '<option value="tor" >Tor (not reachable)</option>' in select   # selectable, with the reason
+        assert '<option value="mullvad"  disabled>Mullvad (unavailable: tunnel not up)</option>' in select
+        assert "<select name=\"kind\" data-kind-select disabled" not in page
+        for kind in ("custom", "tor", "mullvad"):   # every kind's fields are in the page (the script only hides)
+            assert f'<div data-kind="{kind}">' in page
+        assert 'name="tor_host" value="127.0.0.1"' in page and 'name="tor_port" type="number" min="1" max="65535" ' \
+            'value="9050"' in page
+        assert '<option value="se" selected>Sweden (se)</option>' in page   # fallback prefilled
+        assert '<option value="auto" selected>automatic</option>' in page
+        assert 'name="enabled" checked' in page
+        answering(monkeypatch, mullvad.IN_TUNNEL)
+        status_file(settings, at="t", ok=True, code="up", message="tunnel up via se-got-wg-001",
+                    tunnel={"up": True, "handshake": 1700000000, "relay": "se-got-wg-001", "wg": True})
+        select = h.get("/admin/security/scan-settings").text.split("data-kind-select>")[1].split("</select>")[0]
+        assert '<option value="mullvad" >Mullvad</option>' in select
+
+
+def test_route_enabled_verified_and_fail_closed(settings, monkeypatch):
+    seen = []
+    monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: seen.append(k.get("via")) or SCAN_XML)
+    with db.connect(settings.db_path) as c:
+        two_routes(c)   # r1 Tor (the default), r2 Germany (profile viade)
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        page = h.get("/admin/security/scan-settings").text
+        assert page.count('<span class="pill">not tested</span>') == 2 and page.count("✓ on") == 2
+        assert '<input type="radio" name="posture" value="r1" form="default-form"\n        checked>' in page
+        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
+        assert "Test route: Tor: cannot reach the proxy" in r.text and '<span class="pill bad">✗ ' in r.text
+        assert "Tor is last test failed but in use (Default for posture, profile default)" in r.text
+        answering(monkeypatch, ("127.0.0.1", 9050))
+        r = h.post("/admin/security/scan-settings/test", data={"csrf": csrf, "route": "r1"})
+        assert '<span class="pill ok" title="SOCKS5 at 127.0.0.1:9050 OK (no authentication)">✓ ' in r.text
+        assert h.post("/admin/security/scan-settings/routes/r2/enabled", data={"csrf": csrf, "on": "0"},
+                      follow_redirects=False).status_code == 303
+        page = h.get("/admin/security/scan-settings").text
+        assert '<span class="pill bad">off</span>' in page and ">Turn on</button>" in page
+        assert "Germany is disabled but in use (profile viade): scans on it fail until it is enabled." in page
+        assert "Germany (disabled)" in h.get("/admin/security/profiles").text
+        assert h.post("/admin/security/scan-settings/default", data={"csrf": csrf, "posture": "r2"},
+                      follow_redirects=False).status_code == 303
+        assert h.post("/admin/security/scan-settings", data={"csrf": csrf, "inventory": "direct", "cve": "direct",
+                                                             "doh": proxy.DOH}, follow_redirects=False
+                      ).status_code == 303   # the shared form leaves the preferred route alone
+    with db.connect(settings.db_path) as c:
+        cfg2 = proxy.get(c)
+        assert cfg2["posture"] == "r2" and proxy.tests(c)["r1"]["ok"]
+        assert proxy.label(cfg2) == "Germany (disabled: scans fail)"
+        posture.enqueue(c, DOM, [{"ip": "198.51.100.7", "hosts": ["www.routes.example"], "country": "Sweden"}],
+                        posture.profile(c, "viade"), "ana")
+    assert run_queue(settings) == 1 and seen == []   # disabled: no scan at all, never a direct one
+    with db.connect(settings.db_path) as c:
+        row = c.execute("SELECT status, error, params FROM posture_scans").fetchone()
+        assert row["status"] == "failed" and row["error"] == ("route: the scan route Germany is disabled "
+                                                              "(Settings · Routes)")
+        assert row["params"] == "via Germany: mullvad, fixed de"
+        proxy.save_route(c, {"id": "r1", "name": "Tor", "kind": "tor", "tor_host": "127.0.0.1", "tor_port": "9051"})
+        assert "r1" not in proxy.tests(c)   # changed settings: not verified any more
+        proxy.save_route(c, {"id": "r2", "name": "Germany", "kind": "mullvad", "mullvad_mode": "fixed",
+                             "mullvad_country": "de"})
+        assert not proxy.find(proxy.get(c), "r2")["enabled"]   # a save without the page's box keeps it off
+        proxy.save_route(c, {"id": "r2", "name": "Germany", "kind": "mullvad", "mullvad_mode": "fixed",
+                             "mullvad_country": "de", "enabled_shown": "1", "enabled": "on"})
+        assert proxy.find(proxy.get(c), "r2")["enabled"]

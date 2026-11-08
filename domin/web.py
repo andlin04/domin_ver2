@@ -532,6 +532,7 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "tunnel-requested": "Saved. The tunnel settings were handed to the host; its result shows below.",
            "relays": "Mullvad relay list refreshed.", "route-saved": "Route saved.", "route-deleted": "Route removed.",
+           "default-saved": "Preferred route saved: the default for posture scans.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
@@ -913,7 +914,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes),
+                       report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes, proxy.tests(c)),
                        scan_route=proxy.label(routes, default.get("route", "")),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
@@ -1035,7 +1036,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):
         with conn() as c:
             rows = posture.profiles(c)
-            routes = proxy.names(proxy.get(c))
+            routes = proxy.names(proxy.get(c), proxy.tests(c))
         return shell(request, "profiles.html", u, s, status, profiles=rows, error=error, form=form or {},
                      default_ports=fingerprint.DEFAULT_PORTS, route_names=routes)
 
@@ -1085,41 +1086,78 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     route_page = base + "/security/scan-settings"
 
     def scan_settings_view(request, c, u, s, status: int = 200, error: str = "", form: dict | None = None,
-                           test: tuple[bool, str] | None = None, tunnel: tuple[bool, str] | None = None,
-                           edit: dict | None = None):
+                           test: tuple[bool, str] | None = None, edit: dict | None = None):
         """form: a refused shared save; edit: the route form (a refused save, or ?edit=<id>). Never a password,
         account number or key."""
         saved = proxy.get(c)
         cfg = proxy.public(saved)
         tun = mullvad.tunnel_public(mullvad.get_tunnel(c))
         if form:
-            cfg.update({k: form.get(k, "") for k in (*proxy.USES, "doh")})
+            cfg.update({k: form.get(k, "") for k in (*proxy.USES, "doh") if k in form})
             tun.update(address=form.get("mullvad_address", ""), entry=form.get("mullvad_entry", ""))
+        cap = proxy.host_check(c, state_dir)   # socket probes are cached: quick
+        relays, _ = mullvad.load(c)
+        countries = mullvad.countries(relays)
         if edit is None:
             old = proxy.find(saved, request.query_params.get("edit", ""))
-            edit = proxy.public_route(old) if old else {**proxy.ROUTE_DEFAULT}
-        rows = [{**r, "details": proxy.details(r), "uses": proxy.in_use(c, saved, r["id"])} for r in cfg["routes"]]
-        relays, fetched = mullvad.load(c)
-        a = mullvad.age(fetched)
+            edit = proxy.public_route(old) if old else {   # a new route: the usual values prefilled
+                **proxy.ROUTE_DEFAULT, "mullvad_fallback": proxy.MULLVAD_FALLBACK
+                if any(cc == proxy.MULLVAD_FALLBACK for cc, _, _ in countries) else ""}
+        done = proxy.tests(c)
+        profiles = {p["name"]: p.get("route", "") for p in posture.profiles(c)}
+        rows, warnings = [], []
+        for r in cfg["routes"]:
+            roles = [name for use, name in proxy.ROLES.items() if saved[use] == r["id"]]
+            used_by = [n for n, rid in profiles.items() if rid == r["id"] or (not rid and saved["posture"] == r["id"])]
+            row = {**r, "details": proxy.details(r), "roles": roles, "profiles": used_by, "test": done.get(r["id"]),
+                   "warning": proxy.warning(r, done.get(r["id"]))}
+            rows.append(row)
+            if row["warning"] and (roles or used_by):
+                uses = roles + [f"profile {p}" for p in used_by]
+                warnings.append(f"{r['name']} is {row['warning']} but in use ({', '.join(uses)}): "
+                                + ("scans on it fail until it is enabled." if not r["enabled"] else
+                                   "run Test again, or pick another route there."))
+        apply = cap["apply"]
         return shell(request, "scan_settings.html", u, s, status, cfg=cfg, rows=rows, edit=edit, types=proxy.TYPES,
-                     kinds=proxy.KINDS, error=error, test=test, state=proxy.state_line(saved),
-                     modes=mullvad.MODE_NAMES, countries=mullvad.countries(relays), cities=mullvad.cities(relays),
-                     relay_count=len(relays),
-                     relay_age=(f"{int(a.total_seconds() // 3600)} h" if a is not None else ""),
-                     relays_stale=a is None or a > mullvad.MAX_AGE, tun=tun, tunnel=tunnel,
-                     apply=mullvad.apply_status(state_dir))
+                     kinds=proxy.KINDS, kind_choices=proxy.kinds(cap, edit.get("kind", "")), cap=cap,
+                     warnings=warnings, route_names=proxy.names(saved, done), error=error, test=test,
+                     state=proxy.state_line(saved),
+                     modes=mullvad.MODE_NAMES, countries=countries, cities=mullvad.cities(relays),
+                     tun=tun, apply=apply, last=mullvad.explain(apply))
 
     @app.get(route_page, response_class=HTMLResponse, include_in_schema=False)
-    def scan_settings_page(request: Request):
+    def scan_settings_page(request: Request):   # a sync route (thread pool): host_check may wait on a socket
         with conn() as c:
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            check = (any(r["kind"] == "mullvad" for r in proxy.get(c)["routes"])
-                     or any(mullvad.get_tunnel(c).values()))
-        tunnel = proxy.tunnel_state() if check else None   # a sync route: runs in the thread pool
+            return scan_settings_view(request, c, u, s)
+
+    @app.post(route_page + "/default", include_in_schema=False)
+    async def scan_route_default(request: Request):
+        """The preferred route: the default for posture scans (profiles on Default, ad-hoc fingerprints)."""
+        data = await form(request)
         with conn() as c:
-            return scan_settings_view(request, c, u, s, tunnel=tunnel)
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                proxy.put(c, proxy.check_shared({"posture": data.get("posture") or proxy.DIRECT}, proxy.get(c)))
+            except ValueError as exc:
+                return scan_settings_view(request, c, u, s, 422, str(exc))
+        return back(route_page, "default-saved")
+
+    @app.post(route_page + "/routes/{rid}/enabled", include_in_schema=False)
+    async def scan_route_enabled(request: Request, rid: str):
+        """Turn a route on or off; off: every scan on it fails closed with that reason."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            if not proxy.set_enabled(c, rid, data.get("on") == "1"):
+                return scan_settings_view(request, c, u, s, 404, "That route no longer exists.")
+        return back(route_page, "route-saved")
 
     @app.post(route_page, include_in_schema=False)
     async def scan_settings_save(request: Request):
@@ -1153,8 +1191,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 proxy.save_route(c, data)
             except ValueError as exc:
                 old = proxy.find(proxy.get(c), (data.get("id") or "").strip())
-                edit = {**proxy.ROUTE_DEFAULT, **{k: data.get(k, "") for k in proxy.ROUTE_DEFAULT if k != "password"},
-                        "password_saved": bool(old and old.get("password"))}
+                edit = {**proxy.ROUTE_DEFAULT, **{k: data.get(k, "") for k in proxy.ROUTE_DEFAULT
+                                                  if k not in ("password", "enabled")},
+                        "enabled": data.get("enabled") == "on", "password_saved": bool(old and old.get("password"))}
                 return scan_settings_view(request, c, u, s, 422, str(exc), edit=edit)
         return back(route_page, "route-saved")
 
@@ -1206,19 +1245,20 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if redirect:
                 return redirect
             r = proxy.find(proxy.get(c), (data.get("route") or "").strip())
-        tunnel = None
         if not r:
             result = (False, "Pick a saved route to test (Direct has nothing to test).")
         elif r["kind"] == "mullvad":
-            tunnel = await run_in_threadpool(proxy.tunnel_state)
-            result = (tunnel[0], f"{r['name']}: {tunnel[1]}")
+            ok, msg = await run_in_threadpool(proxy.tunnel_state)
+            result = (ok, f"{r['name']}: {msg}")
         else:
             try:
                 result = (True, f"{r['name']}: " + await run_in_threadpool(proxy.handshake, proxy.greet_target(r)))
             except proxy.ProxyError as exc:
                 result = (False, f"{r['name']}: {exc}")
         with conn() as c:
-            return scan_settings_view(request, c, u, s, test=result, tunnel=tunnel)
+            if r:   # the row's Verified column
+                proxy.record_test(c, r["id"], result[0], result[1].split(": ", 1)[1])
+            return scan_settings_view(request, c, u, s, test=result)
 
     @app.post(base + "/security/scan", include_in_schema=False)
     async def security_scan(request: Request):

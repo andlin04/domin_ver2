@@ -1,29 +1,72 @@
 {% extends "base.html" %}
 {% block title %}Routes · domin{% endblock %}
 {% block page %}settings{% endblock %}
+{% macro when(t) %}{{ (t or '')|replace('T', ' ') }}{% endmacro %}
 {% block content %}
 <section class="hero"><div><h1>Routes</h1>
-  <p class="muted">Named routes posture scans and inventory jobs take to the internet: a custom proxy, Tor or Mullvad;
-    Direct is built in. A scan profile picks its route (Default: the default route below). Posture scans run nmap
-    under proxychains4; inventory jobs send their look-ups through the route and resolve names over DNS-over-HTTPS
-    through it. When the route can't be used, the scan fails; it never falls back to a direct scan. Internal zones
-    always stay direct. Applies to the next scan, no restart.</p></div></section>
+  <p class="muted">How posture scans and inventory jobs reach the internet: Direct, or a named route (a custom proxy,
+    Tor or Mullvad). The preferred route is the default for posture scans; a scan profile can pick another one. A scan
+    whose route can't be used fails with the reason; it never falls back to a direct scan. Internal zones always stay
+    direct. Changes apply to the next scan.</p></div></section>
 
 {% set sub = "scan-settings" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if test %}<p class="note {{ 'ok' if test[0] else 'bad' }}" role="status">Test route: {{ test[1] }}</p>{% endif %}
-<p class="note scan-state" role="status">{{ state }}</p>
+{% for w in warnings %}<p class="note bad" role="alert">{{ w }}</p>{% endfor %}
 
-<section class="card">
-  <h2>Routes <small>{{ rows|length }} + Direct</small></h2>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Kind</th><th>Settings</th><th>Used by</th><th></th></tr></thead>
+<section class="card" id="host">
+  <h2>This host <small>what each kind of route needs; checked when the page loads</small></h2>
+  <div class="table-wrap"><table class="checks">
     <tbody>
-    <tr><td><b>Direct</b></td><td>built in</td><td>no proxy</td><td></td><td></td></tr>
+    <tr><td>proxychains4</td>
+      <td>{% if cap.proxychains %}<span class="pill ok">✓ installed</span>{% else %}<span class="pill bad">✗ missing</span>{% endif %}</td>
+      <td>{% if cap.proxychains %}posture scans can go through any route{% else %}posture scans can't use any route: apt install proxychains4{% endif %}</td></tr>
+    <tr><td>Tor</td>
+      <td>{% if cap.tor.ok %}<span class="pill ok">✓ answers</span>{% else %}<span class="pill bad">✗ not reachable</span>{% endif %}</td>
+      <td>{% if cap.tor.ok %}the tor client's SOCKS5 at <span class="mono">{{ cap.tor.addr }}</span> answers{% else %}{{ cap.tor.message }}: is tor installed and running? (apt install tor){% endif %}</td></tr>
+    <tr><td>wireguard-tools</td>
+      <td>{% if cap.wg %}<span class="pill ok">✓ installed</span>{% else %}<span class="pill bad">✗ missing</span>{% endif %}</td>
+      <td>{% if cap.wg %}the Mullvad tunnel can be set up{% else %}the Mullvad tunnel needs it: apt install wireguard-tools{% endif %}</td></tr>
+    <tr><td>Mullvad tunnel</td>
+      <td>{% if cap.tunnel.ok %}<span class="pill ok">✓ up</span>{% else %}<span class="pill bad">✗ not up</span>{% endif %}</td>
+      <td>{{ cap.tunnel.text }}{% if not cap.tunnel.ok %}; Mullvad routes can't be used{% endif %}</td></tr>
+    <tr><td>Mullvad relay list</td>
+      <td>{% if cap.relays.count %}<span class="pill {{ 'warn' if cap.relays.stale else 'ok' }}">{{ cap.relays.count }} relays</span>{% else %}<span class="pill">none</span>{% endif %}</td>
+      <td>{% if cap.relays.count %}{{ cap.relays.age }} old{% if cap.relays.stale %}, refreshed at the next scan{% endif %}{% else %}not fetched yet (Refresh relay list, below){% endif %}</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card" id="routes">
+  <h2>Routes <small>{{ rows|length }} + Direct</small></h2>
+  <form method="post" action="{{ base }}/security/scan-settings/default" id="default-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"></form>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Preferred</th><th>Name</th><th>Kind and settings</th><th>Enabled</th><th>Verified</th>
+      <th>Used by</th><th></th></tr></thead>
+    <tbody>
+    <tr><td><label class="tick"><input type="radio" name="posture" value="direct" form="default-form"
+        {% if cfg.posture == 'direct' %}checked{% endif %}>{% if cfg.posture == 'direct' %} <span class="pill ok">default</span>{% endif %}</label></td>
+      <td><b>Direct</b></td><td>built in: no proxy</td><td><span class="pill ok">always</span></td><td></td>
+      <td>{% if cfg.posture == 'direct' %}<span class="pill">Default for posture</span>{% endif %}
+        {% if cfg.inventory == 'direct' %}<span class="pill">Inventory</span>{% endif %}
+        {% if cfg.cve == 'direct' %}<span class="pill">CVE look-ups</span>{% endif %}</td><td></td></tr>
     {% for r in rows %}<tr>
-      <td><b>{{ r.name }}</b></td><td>{{ kinds[r.kind] }}</td><td class="mono">{{ r.details }}</td>
-      <td>{{ r.uses|join(', ') or '—' }}</td>
+      <td><label class="tick"><input type="radio" name="posture" value="{{ r.id }}" form="default-form"
+        {% if cfg.posture == r.id %}checked{% endif %}>{% if cfg.posture == r.id %} <span class="pill {{ 'bad' if r.warning else 'ok' }}">default</span>{% endif %}</label></td>
+      <td><b>{{ r.name }}</b></td>
+      <td>{{ kinds[r.kind] }} <span class="mono">{{ r.details }}</span></td>
+      <td><form method="post" action="{{ base }}/security/scan-settings/routes/{{ r.id }}/enabled" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="on" value="{{ '0' if r.enabled else '1' }}">
+          {% if r.enabled %}<span class="pill ok">✓ on</span>{% else %}<span class="pill bad">off</span>{% endif %}
+          <button class="btn small" type="submit">{{ 'Turn off' if r.enabled else 'Turn on' }}</button></form></td>
+      <td>{% if not r.test %}<span class="pill">not tested</span>
+        {% elif r.test.ok %}<span class="pill ok" title="{{ r.test.message }}">✓ {{ when(r.test.at) }}</span>
+        {% else %}<span class="pill bad">✗ {{ when(r.test.at) }}</span><br><small class="bad-text">{{ r.test.message }}</small>{% endif %}</td>
+      <td>{% for role in r.roles %}<span class="pill">{{ role }}</span> {% endfor %}
+        {% if r.profiles %}<small>profiles: {{ r.profiles|join(', ') }}</small>{% endif %}
+        {% if not r.roles and not r.profiles %}<span class="muted">nothing</span>{% endif %}</td>
       <td>
         <a class="btn small" href="{{ base }}/security/scan-settings?edit={{ r.id }}#route-form">Edit</a>
         <form method="post" action="{{ base }}/security/scan-settings/test" class="inline">
@@ -36,21 +79,31 @@
       </td>
     </tr>{% endfor %}</tbody>
   </table></div>
-  <p class="muted">Test: custom proxy and Tor connect and complete the greeting (SOCKS5: with the user name and
-    password); Mullvad checks the in-tunnel SOCKS5. No request to any target. A route in use can't be deleted.</p>
+  <p><button class="btn" type="submit" form="default-form">Make the ticked route the preferred one</button></p>
+  <p class="muted">Preferred: the default for posture scans whose profile says Default, and for ad-hoc fingerprints.
+    Off: every scan on the route fails with that reason. Test: custom proxy and Tor connect and complete the SOCKS5
+    greeting (with the user name and password); Mullvad checks the SOCKS5 inside the tunnel. No request to any
+    target. Changing a route clears its Verified mark. A route in use can't be deleted.</p>
+  <p class="muted">{{ state }}</p>
 </section>
 
 <section class="card" id="route-form">
   <h2>{% if edit.id %}Change route {{ edit.name }}{% else %}Add a route{% endif %}</h2>
-  <form method="post" action="{{ base }}/security/scan-settings/routes">
+  <form method="post" action="{{ base }}/security/scan-settings/routes" data-route-form>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ edit.id }}">
+  <input type="hidden" name="enabled_shown" value="1">
   <div class="grid g3">
     <label class="field">Name <small>letters, digits, spaces, . _ ( ) -</small>
       <input name="name" value="{{ edit.name }}" required maxlength="40" autocomplete="off"></label>
-    <label class="field">Kind <small>only that kind's fields are used</small>
-      <select name="kind">{% for k, name in kinds.items() %}<option value="{{ k }}" {% if edit.kind == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label class="field">Kind <small>only the fields of the chosen kind are used</small>
+      <select name="kind" data-kind-select>{% for k in kind_choices %}<option value="{{ k.value }}" {% if edit.kind == k.value %}selected{% endif %}{% if not k.ok %} disabled{% endif %}>{{ k.label }}</option>{% endfor %}</select></label>
+    <label class="tick"><input type="checkbox" name="enabled" {% if edit.enabled %}checked{% endif %}> Enabled
+      <small class="muted">off: scans on it fail</small></label>
   </div>
+  <ul class="kinds">{% for k in kind_choices %}<li><span class="pill {{ k.state }}">{{ k.name }}</span> {{ k.note }}</li>{% endfor %}
+    {% if not cap.proxychains %}<li class="bad-text">proxychains4 is missing on this host: posture scans can't use any route until it is installed.</li>{% endif %}</ul>
 
+  <div data-kind="custom">
   <h3>Custom proxy <small>socks5 / socks4 / http</small></h3>
   <div class="grid g3">
     <label class="field">Type
@@ -69,8 +122,10 @@
   </div>
   <p class="muted">socks4 can't carry HTTPS look-ups (CVE look-ups, inventory jobs). The password is stored in plain
     text in the database (readable by the service account only).</p>
+  </div>
 
-  <h3>Tor <small>the local tor client's SOCKS5</small></h3>
+  <div data-kind="tor">
+  <h3>Tor <small>the local tor client's SOCKS5; 127.0.0.1:9050 is tor's default</small></h3>
   <div class="grid g3">
     <label class="field">Address <input name="tor_host" value="{{ edit.tor_host }}" maxlength="253" spellcheck="false"
       autocapitalize="off"></label>
@@ -78,22 +133,25 @@
   </div>
   <p class="muted">One exit for all scans: no per-host country with Tor. Exits block many ports and scans are slow.
     Private addresses can't go through Tor.</p>
+  </div>
 
-  <h3>Mullvad <small>a relay's SOCKS5 inside the host's Mullvad tunnel, per target</small></h3>
+  <div data-kind="mullvad">
+  <h3>Mullvad <small>a relay's SOCKS5 inside this host's Mullvad tunnel, per target</small></h3>
   <div class="grid g3">
-    <label class="field">Breakout
+    <label class="field">Breakout <small>Automatic suits most scans</small>
       <select name="mullvad_mode">{% for k, name in modes.items() %}<option value="{{ k }}" {% if edit.mullvad_mode == k %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
-    <label class="field">Fixed country
+    <label class="field">Fixed country <small>only for Fixed</small>
       <select name="mullvad_country"><option value="">—</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if edit.mullvad_country == cc %}selected{% endif %}>{{ name }} ({{ cc }}, {{ n }})</option>{% endfor %}</select></label>
     <label class="field">Fixed city <small>optional</small>
       <select name="mullvad_city"><option value="">any</option>{% for cc, code, name in cities %}<option value="{{ code }}" {% if edit.mullvad_city == code %}selected{% endif %}>{{ cc }}: {{ name }}</option>{% endfor %}</select></label>
     <label class="field">Fallback country
       <select name="mullvad_fallback"><option value="">none</option>{% for cc, name, n in countries %}<option value="{{ cc }}" {% if edit.mullvad_fallback == cc %}selected{% endif %}>{{ name }} ({{ cc }})</option>{% endfor %}</select></label>
   </div>
-  <p class="muted"><b>Follow host</b>: a relay in the address's country (DB-IP), else the fallback country, else the
-    scan fails. <b>Fixed</b>: the country (and city) above. <b>Automatic</b>: the address's country, else the fallback,
-    else any relay. Inventory jobs use the fixed or fallback country (automatic without a fallback: any relay). A relay
-    is picked at random among the active ones. Private addresses can't go through Mullvad.</p>
+  <p class="muted"><b>Automatic</b>: the address's country, else the fallback, else any relay. <b>Follow host</b>: a
+    relay in the address's country (DB-IP), else the fallback country, else the scan fails. <b>Fixed</b>: the country
+    (and city) above. Inventory jobs use the fixed or fallback country (automatic without a fallback: any relay). A
+    relay is picked at random among the active ones. Private addresses can't go through Mullvad.</p>
+  </div>
   <p><button class="btn primary" type="submit">Save route</button>
     {% if edit.id %}<a class="btn" href="{{ base }}/security/scan-settings#route-form">Add a new one instead</a>{% endif %}</p>
   </form>
@@ -101,42 +159,47 @@
 
 <form method="post" action="{{ base }}/security/scan-settings">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<section class="card">
+<section class="card" id="shared">
   <h2>Shared settings <small>one set per host</small></h2>
   <div class="grid g3">
-    <label class="field">Default route <small>posture scans whose profile says Default; ad-hoc fingerprints</small>
-      <select name="posture"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.posture == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
     <label class="field">Route for inventory jobs <small>external zones; amass is skipped when routed</small>
-      <select name="inventory"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.inventory == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+      <select name="inventory">{% for rid, name in route_names.items() if rid %}<option value="{{ rid }}" {% if cfg.inventory == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">CVE look-ups through <small>OSV, NVD; the scan's own hop when it is the scan's route</small>
-      <select name="cve"><option value="direct">Direct</option>{% for r in cfg.routes %}<option value="{{ r.id }}" {% if cfg.cve == r.id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+      <select name="cve">{% for rid, name in route_names.items() if rid %}<option value="{{ rid }}" {% if cfg.cve == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
+      <input name="doh" value="{{ cfg.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
   </div>
-  <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
-    <input name="doh" value="{{ cfg.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
-  <p class="muted">A CVE look-up route that can't be used gives the local CVE database only, never a direct look-up.</p>
+  <p class="muted">The default for posture scans is the preferred route (Routes, above). A CVE look-up route that
+    can't be used gives the local CVE database only, never a direct look-up.</p>
 
-  <h3>Mullvad tunnel</h3>
-  <p class="note {{ 'ok' if tunnel and tunnel[0] else 'bad' if tunnel else '' }}" role="status">
-    {% if tunnel %}{{ tunnel[1] }}{% else %}Tunnel state not checked.{% endif %}</p>
-  <p class="muted">Relay list: {% if relay_count %}{{ relay_count }} relays, {{ relay_age }} old{% if relays_stale %} (refreshed at the next scan){% endif %}{% else %}not fetched yet{% endif %}.</p>
+  <h3 id="tunnel">Mullvad tunnel <small>needed by Mullvad routes; set up by the host (domin-mullvad service)</small></h3>
+  <p>Saved: account number {% if tun.account_saved %}<span class="pill ok">✓ saved</span>{% else %}<span class="pill">none</span>{% endif %}
+    · WireGuard key {% if tun.key_saved %}<span class="pill ok">✓ saved</span>{% else %}<span class="pill">none</span>{% endif %}
+    {% if tun.address %}· tunnel address <span class="mono">{{ tun.address }}</span>{% endif %}</p>
+  {% if last %}<div class="note {{ 'ok' if last.ok else 'bad' }}" role="status">
+    <b>Last apply {{ when(apply.at) }}: {{ 'done' if last.ok else 'failed' }}.</b> {{ last.text }}
+    {% if last.next %}<br>Next: {{ last.next }}{% endif %}
+    {% if last.detail %}<br><small>The host said: {{ last.detail }}</small>{% endif %}</div>
+  {% else %}<p class="muted">The host has not applied any tunnel settings yet.</p>{% endif %}
+  {% if apply.pending %}<p class="note" role="status">A request is waiting for the host (domin-mullvad.path picks it up
+    within seconds; if it stays, the path unit is not installed: run install.sh).</p>{% endif %}
   <div class="grid g3">
-    <label class="field">Account number <small>{% if tun.account_saved %}saved; blank keeps it{% else %}16 digits; optional with a key{% endif %}</small>
+    <label class="field">Account number <small>{% if tun.account_saved %}saved; blank keeps it{% else %}16 digits; the host makes and registers a key{% endif %}</small>
       <input name="mullvad_account" type="password" maxlength="19" inputmode="numeric" autocomplete="off"></label>
-    <label class="field">WireGuard private key <small>{% if tun.key_saved %}saved; blank keeps it{% else %}from a Mullvad WireGuard config; optional{% endif %}</small>
+    <label class="field">WireGuard private key <small>{% if tun.key_saved %}saved; blank keeps it{% else %}optional, instead of the account number: from a Mullvad WireGuard config{% endif %}</small>
       <input name="mullvad_key" type="password" maxlength="44" autocomplete="off" spellcheck="false"></label>
-    <label class="field">Tunnel address <small>Address = ... with the key</small>
+    <label class="field">Tunnel address <small>only with a key: Address = ... in that config</small>
       <input name="mullvad_address" value="{{ tun.address }}" maxlength="120" spellcheck="false" autocapitalize="off"
         placeholder="10.64.0.2/32"></label>
-    <label class="field">Entry country <small>optional; the tunnel's relay</small>
+    <label class="field">Entry country <small>optional; where the tunnel's relay is</small>
       <input name="mullvad_entry" value="{{ tun.entry }}" maxlength="2" spellcheck="false" autocapitalize="off"
         placeholder="se"></label>
     {% if tun.account_saved %}<label class="tick"><input type="checkbox" name="clear_mullvad_account"> Clear the saved account number</label>{% endif %}
     {% if tun.key_saved %}<label class="tick"><input type="checkbox" name="clear_mullvad_key"> Clear the saved key</label>{% endif %}
   </div>
-  <p class="muted">A private key is used as it is; with only an account number the host generates a key and registers
-    it with Mullvad. Saving changed credentials asks the host to apply them (mullvad-tunnel.sh through the
-    domin-mullvad path unit). They are stored in the database and never shown again.
-    Last apply: {% if apply.at %}<span class="{{ 'ok' if apply.ok else 'bad' }}">{{ apply.at }}: {{ apply.message }}</span>{% else %}none yet{% endif %}{% if apply.pending %} · a request is waiting for the host{% endif %}.</p>
+  <p class="muted">The tunnel needs outbound UDP 51820 from this host to a Mullvad relay; a host that reaches the
+    internet only through an HTTP proxy can't keep it up. Saving changed credentials asks the host to apply them;
+    they are stored in the database and never shown again.</p>
   <p><button class="btn primary" type="submit">Save shared settings</button></p>
 </section>
 </form>

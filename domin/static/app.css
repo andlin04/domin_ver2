@@ -335,3 +335,9 @@ details.cve-item:first-child { border-top: 0; }
   transform: rotate(45deg); border-color: var(--text); }
 pre.raw-out { max-height: 24rem; overflow: auto; white-space: pre; font: .78rem/1.35 ui-monospace, "SF Mono", Consolas, monospace;
   background: rgba(0, 0, 0, .25); padding: .6rem .8rem; border-radius: 6px; }
+/* Routes page: the host checks, the kind list, tick boxes and radios outside .tune */
+label.tick { display: inline-flex; align-items: center; gap: .45rem; color: var(--text); }
+ul.kinds { margin: .75rem 0 1.1rem; padding: 0; list-style: none; display: grid; gap: .3rem; color: var(--muted); }
+ul.kinds .pill { min-width: 7.5rem; text-align: center; margin-right: .4rem; }
+table.checks td:first-child { font-weight: 600; white-space: nowrap; }
+table.checks td:last-child { white-space: normal; min-width: 18rem; }

@@ -96,7 +96,7 @@ def test_only_admins_see_and_change_routes(settings):
                       follow_redirects=False).status_code == 303
         page = h.get("/admin/security/scan-settings").text
         assert "Posture scans (default): Office: socks5 192.0.2.10:1080 · Inventory jobs: direct" in page
-        assert "default route" in page and SECRET not in page
+        assert "Default for posture</span>" in page and SECRET not in page
         edit = h.get("/admin/security/scan-settings?edit=r1").text
         assert "Change route Office" in edit and "saved; blank keeps it" in edit and SECRET not in edit
         assert "Scans go through Office: socks5 192.0.2.10:1080" in h.get(f"/admin/security?domain={DOM}").text
@@ -110,7 +110,7 @@ def test_only_admins_see_and_change_routes(settings):
             csrf = sign_in(h, name)
             assert ">Routes</a>" not in h.get("/admin/security/profiles").text
             assert h.get("/admin/security/scan-settings").status_code == 404
-            for path in ("", "/routes", "/routes/r1/delete", "/test"):
+            for path in ("", "/routes", "/routes/r1/delete", "/test", "/default", "/routes/r1/enabled"):
                 assert h.post(f"/admin/security/scan-settings{path}", data={"csrf": csrf, **form(id="r1", port="2")}
                               ).status_code == 404
     with db.connect(settings.db_path) as c:

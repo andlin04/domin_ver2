@@ -18,3 +18,4 @@ def no_proxy_connect(monkeypatch):
     def refused(addr, timeout=None, *a, **k):
         raise ConnectionRefusedError(111, "Connection refused (tests)")
     monkeypatch.setattr(proxy.socket, "create_connection", refused)
+    proxy._probes.clear()   # cached probe results must not leak from one test into the next

@@ -2,6 +2,34 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: clearer routes page, Mullvad setup fixes
+
+- Routes page, top: **This host**: proxychains4 and wireguard-tools installed, the tor client's SOCKS5 answering,
+  the Mullvad tunnel (up / no handshake / not up, with the reason) and the relay list's age. Quick checks: a PATH
+  look-up, a SOCKS5 greeting with a short timeout cached for 30 s, and the status file the root script writes; the
+  web app runs nothing.
+- Each route row: a **Preferred** radio (the default for posture scans; replaces the Default route pick-list in the
+  shared settings), **Enabled** on/off, **Verified** (✓ with the time of the last successful Test, ✗ with the error,
+  or not tested; changing a route clears it), and what uses it (Default for posture, Inventory, CVE look-ups,
+  profiles). A disabled or failed route in use gets a warning at the top; pick-lists on the Routes and Scan profiles
+  pages mark it "(disabled)" or "(last test failed)". Scans on a disabled route fail closed: "route: the scan route
+  <name> is disabled".
+- Add a route: the Kind list says what works on this host. Tor is prefilled with 127.0.0.1:9050 and marked "not
+  reachable" when nothing answers there; Mullvad can't be picked (with the reason) until the tunnel is up and is
+  prefilled with Automatic and fallback country se; Custom proxy always. Only the chosen kind's fields are shown
+  (app.js); without the script all fields show and work.
+- Mullvad tunnel: shows which credential is saved (never the value), the last apply's time and result in plain words
+  with the next step (for example "Mullvad's API could not be reached from this host: the setup service has no
+  internet or proxy").
+- `domin-mullvad.service` reads `/etc/domin.env` (`EnvironmentFile=-`), so the script's calls to Mullvad's API go
+  through the host's HTTPS proxy. `mullvad-tunnel.sh` waits up to 15 s for a WireGuard handshake after bringing the
+  tunnel up; without one it takes the tunnel down again and reports that outbound UDP 51820 is likely blocked
+  (proxy-only egress). The status file gets a result code and the tunnel facts (up, last handshake, relay,
+  wireguard-tools); `mullvad-tunnel.sh status` refreshes them.
+- The service unit changed: run `deploy/install.sh` (it re-installs `domin-mullvad.service` and reloads systemd).
+
+No migration. Rollback: redeploy the previous build.
+
 ## 2026-11-08: named scan routes, chosen per scan profile
 
 - Settings · **Routes** (was Scan settings; URL unchanged, admin only): a list of named routes, each a custom proxy

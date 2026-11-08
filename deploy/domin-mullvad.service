@@ -7,4 +7,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# HTTP_PROXY / HTTPS_PROXY / NO_PROXY for a host that reaches the internet only through a proxy (curl uses them for
+# Mullvad's API); the script never prints them
+EnvironmentFile=-/etc/domin.env
 ExecStart=/bin/bash /opt/domin/app/deploy/mullvad-tunnel.sh apply

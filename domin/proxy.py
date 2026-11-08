@@ -22,14 +22,17 @@ import ipaddress
 import json
 import random
 import re
+import shutil
 import socket
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import httpx
 
-from . import admin, mullvad, tools
+from . import admin, db, mullvad, tools
 
 KEY = "scan_routes"
 LEGACY_KEY = "scan_proxy"   # the single route before named routes: read for the migration only
@@ -37,10 +40,13 @@ TYPES = ("socks5", "socks4", "http")
 KINDS = {"custom": "Custom proxy", "tor": "Tor", "mullvad": "Mullvad"}
 DIRECT = "direct"
 USES = {"posture": "default route", "inventory": "inventory jobs", "cve": "CVE look-ups"}
+ROLES = {"posture": "Default for posture", "inventory": "Inventory", "cve": "CVE look-ups"}   # the Routes table
 DOH = "https://dns.quad9.net/dns-query"
-ROUTE_DEFAULT = {"id": "", "name": "", "kind": "custom", "type": "socks5", "host": "", "port": 1080, "username": "",
-                 "password": "", "tor_host": "127.0.0.1", "tor_port": 9050, "mullvad_mode": "auto",
+ROUTE_DEFAULT = {"id": "", "name": "", "kind": "custom", "enabled": True, "type": "socks5", "host": "", "port": 1080,
+                 "username": "", "password": "", "tor_host": "127.0.0.1", "tor_port": 9050, "mullvad_mode": "auto",
                  "mullvad_country": "", "mullvad_city": "", "mullvad_fallback": ""}
+TESTS_KEY = "scan_route_tests"   # {route id: {at, ok, message}}: the last Test per route; dropped when it changes
+MULLVAD_FALLBACK = "se"   # prefilled for a new Mullvad route
 DEFAULT = {"routes": [], "next": 1, "posture": DIRECT, "inventory": DIRECT, "cve": DIRECT, "doh": DOH}
 LEGACY_DEFAULT = {"route": "direct", "posture": True, "inventory": False, "cve": False, "doh": DOH,
                   **{k: v for k, v in ROUTE_DEFAULT.items() if k not in ("id", "name", "kind")}}
@@ -113,15 +119,32 @@ def pick(cfg: dict, rid: str = "", use: str = "posture") -> dict | None:
     if rid == DIRECT:
         return None
     if r := find(cfg, rid):
+        if not r.get("enabled", True):
+            raise ProxyError(f"the scan route {r['name']} is disabled (Settings · Routes)")
         return r
     raise ProxyError("the scan route no longer exists (Settings · Routes)")
 
 
-def names(cfg: dict) -> dict[str, str]:
-    """Display names by route id, for pickers and lists ('' = Default)."""
-    default = find(cfg, cfg["posture"])
-    return {"": f"Default ({default['name'] if default else 'Direct'})", DIRECT: "Direct",
-            **{r["id"]: r["name"] for r in cfg["routes"]}}
+def warning(r: dict | None, test: dict | None = None) -> str:
+    """Why a route should not be picked ('' = fine): disabled, or its last Test failed."""
+    if not r:
+        return ""
+    if not r.get("enabled", True):
+        return "disabled"
+    if test and not test.get("ok"):
+        return "last test failed"
+    return ""
+
+
+def names(cfg: dict, tests: dict | None = None) -> dict[str, str]:
+    """Display names by route id, for pickers and lists ('' = Default); a disabled or failed route says so."""
+    def name(r: dict | None) -> str:
+        if not r:
+            return "Direct"
+        w = warning(r, (tests or {}).get(r["id"]))
+        return f"{r['name']} ({w})" if w else r["name"]
+    return {"": f"Default ({name(find(cfg, cfg['posture']))})", DIRECT: "Direct",
+            **{r["id"]: name(r) for r in cfg["routes"]}}
 
 
 def label(cfg: dict, rid: str = "", use: str = "posture") -> str:
@@ -129,7 +152,8 @@ def label(cfg: dict, rid: str = "", use: str = "posture") -> str:
     try:
         return describe(pick(cfg, rid, use), use == "inventory")
     except ProxyError:
-        return "a deleted route (scans fail)"
+        r = find(cfg, rid or cfg[use])
+        return f"{r['name']} (disabled: scans fail)" if r else "a deleted route (scans fail)"
 
 
 def public(cfg: dict) -> dict:
@@ -188,7 +212,10 @@ def check_route(form: dict[str, str], cfg: dict, countries: set[str] | None = No
     kind = (form.get("kind") or "").strip()
     if kind not in KINDS:
         raise ValueError("Kind: custom proxy, Tor or Mullvad.")
-    r = {**ROUTE_DEFAULT, "id": rid or f"r{cfg['next']}", "name": name, "kind": kind}
+    # the page's form says whether the Enabled box was shown (an unticked box is not sent); else keep it as it was
+    enabled = form.get("enabled") == "on" if "enabled_shown" in form else bool(old.get("enabled", True)) if old \
+        else True
+    r = {**ROUTE_DEFAULT, "id": rid or f"r{cfg['next']}", "name": name, "kind": kind, "enabled": enabled}
     if kind == "custom":
         typ = (form.get("type") or "").strip()
         host = (form.get("host") or "").strip()
@@ -244,11 +271,42 @@ def save_route(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
     r = check_route(form, cfg, _countries(conn))
     if old := find(cfg, r["id"]):
         cfg["routes"][cfg["routes"].index(old)] = r
+        if {**old, "name": "", "enabled": True} != {**r, "name": "", "enabled": True}:
+            forget_test(conn, r["id"])   # changed settings: the last Test no longer says anything
     else:
         cfg["routes"].append(r)
         cfg["next"] += 1
+        forget_test(conn, r["id"])
     put(conn, cfg)
     return r
+
+
+def set_enabled(conn: sqlite3.Connection, rid: str, on: bool) -> dict | None:
+    """Turn a route on or off (off: scans on it fail closed); None when it no longer exists."""
+    cfg = get(conn)
+    if not (r := find(cfg, rid)):
+        return None
+    r["enabled"] = on
+    put(conn, cfg)
+    return r
+
+
+# ---- last Test per route ----
+
+def tests(conn: sqlite3.Connection) -> dict[str, dict]:
+    return json.loads(admin.kv_get(conn, TESTS_KEY) or "{}")
+
+
+def record_test(conn: sqlite3.Connection, rid: str, ok: bool, message: str) -> None:
+    got = tests(conn)
+    got[rid] = {"at": db.now(), "ok": ok, "message": message[:300]}
+    admin.kv_set(conn, TESTS_KEY, json.dumps(got))
+
+
+def forget_test(conn: sqlite3.Connection, rid: str) -> None:
+    got = tests(conn)
+    if got.pop(rid, None) is not None:
+        admin.kv_set(conn, TESTS_KEY, json.dumps(got))
 
 
 def delete_route(conn: sqlite3.Connection, rid: str) -> str:
@@ -261,15 +319,18 @@ def delete_route(conn: sqlite3.Connection, rid: str) -> str:
         return f"{r['name']} is in use ({', '.join(uses)}): pick another route there first."
     cfg["routes"].remove(r)
     put(conn, cfg)
+    forget_test(conn, rid)
     return ""
 
 
 def check_shared(form: dict[str, str], cfg: dict) -> dict:
     """Validate the shared choices (default posture route, inventory route, CVE look-up route, DoH server) into new
-    settings; raises ValueError."""
+    settings; raises ValueError. A choice missing from the form stays as it is."""
     out = dict(cfg)
     ids = {r["id"] for r in cfg["routes"]} | {DIRECT}
     for use in USES:
+        if use not in form:
+            continue
         rid = (form.get(use) or DIRECT).strip()
         if rid not in ids:
             raise ValueError(f"Route for {USES[use]}: pick one from the list.")
@@ -448,11 +509,75 @@ def greet_target(r: dict) -> dict:
 def tunnel_state(timeout: float = 1.5) -> tuple[bool, str]:
     """Whether Mullvad's in-tunnel SOCKS5 (10.64.0.1:1080) answers a handshake: the tunnel is up."""
     host, port = mullvad.IN_TUNNEL
+    ok, msg = probe(host, port, timeout, fresh=True)
+    return (True, f"Mullvad tunnel up (SOCKS5 at {host}:{port} answers)") if ok else \
+        (False, f"Mullvad tunnel down ({msg})")
+
+
+# ---- this host: what each kind of route needs (the "This host" card) ----
+
+PROBE_TTL = 30.0   # seconds a socket probe is reused, so the page stays quick
+_probes: dict[tuple[str, int], tuple[float, bool, str]] = {}
+
+
+def probe(host: str, port: int, timeout: float = 1.0, fresh: bool = False) -> tuple[bool, str]:
+    """A SOCKS5 greeting at host:port, cached PROBE_TTL seconds: (answers, one line). No request to any target."""
+    key = (host, int(port))
+    got = _probes.get(key)
+    if got and not fresh and time.monotonic() - got[0] < PROBE_TTL:
+        return got[1], got[2]
     try:
-        handshake({"type": "socks5", "host": host, "port": port}, timeout)
-        return True, f"Mullvad tunnel up (SOCKS5 at {host}:{port} answers)"
+        ok, msg = True, handshake({"type": "socks5", "host": host, "port": port}, timeout)
     except ProxyError as exc:
-        return False, f"Mullvad tunnel down ({exc})"
+        ok, msg = False, str(exc)
+    _probes[key] = (time.monotonic(), ok, msg)
+    return ok, msg
+
+
+def host_check(conn: sqlite3.Connection, state_dir: Path) -> dict:
+    """What this host can do: proxychains4 and wireguard-tools installed (a PATH look-up, nothing is run), the tor
+    client's SOCKS5 answering, the Mullvad tunnel (the root script's status file, and the in-tunnel SOCKS5 answering)
+    and the relay list's age. The web app never runs wg: the tunnel facts come from the status file."""
+    cfg = get(conn)
+    tor = next((r for r in cfg["routes"] if r["kind"] == "tor"), ROUTE_DEFAULT)
+    tor_ok, tor_msg = probe(tor["tor_host"], tor["tor_port"])
+    status = mullvad.apply_status(state_dir)
+    facts = status.get("tunnel") or {}
+    wanted = bool(facts.get("up") or any(r["kind"] == "mullvad" for r in cfg["routes"])
+                  or any(mullvad.get_tunnel(conn).values()))
+    socks_ok = wanted and probe(*mullvad.IN_TUNNEL, timeout=1.5)[0]
+    relays, fetched = mullvad.load(conn)
+    a = mullvad.age(fetched)
+    return {"proxychains": bool(shutil.which("proxychains4")),
+            "tor": {"addr": f"{_addr(tor['tor_host'])}:{tor['tor_port']}", "ok": tor_ok, "message": tor_msg},
+            "wg": bool(shutil.which("wg") or facts.get("wg")),
+            "tunnel": mullvad.tunnel_summary(status, socks_ok),
+            "relays": {"count": len(relays), "age": f"{int(a.total_seconds() // 3600)} h" if a is not None else "",
+                       "stale": a is None or a > mullvad.MAX_AGE},
+            "apply": status}
+
+
+def kinds(cap: dict, current: str = "") -> list[dict]:
+    """The kind choices for the route form: {value, name, ok (selectable), label (the option's text), note}. Mullvad
+    is selectable only while the tunnel is up, or when the route being changed is a Mullvad route already. state: the
+    pill (ok, warn: works but proxychains4 is missing for posture scans, bad: does not work here)."""
+    tor, tun = cap["tor"], cap["tunnel"]
+    out = [
+        {"value": "custom", "name": KINDS["custom"], "ok": True, "label": KINDS["custom"],
+         "note": "a SOCKS5, SOCKS4 or HTTP proxy you run"},
+        {"value": "tor", "name": KINDS["tor"], "ok": True,
+         "label": KINDS["tor"] + ("" if tor["ok"] else " (not reachable)"),
+         "note": f"the local tor client at {tor['addr']} answers" if tor["ok"] else
+                 f"not reachable: no tor SOCKS5 answers at {tor['addr']} (apt install tor, or change the address "
+                 "below)"},
+        {"value": "mullvad", "name": KINDS["mullvad"], "ok": tun["ok"] or current == "mullvad",
+         "label": KINDS["mullvad"] + ("" if tun["ok"] else " (unavailable: tunnel not up)"),
+         "note": "the Mullvad tunnel is up" if tun["ok"] else
+                 "unavailable until the Mullvad tunnel is up (This host, and Mullvad tunnel below)"},
+    ]
+    for k, works in zip(out, (True, tor["ok"], tun["ok"]), strict=True):
+        k["state"] = "bad" if not works else "ok" if cap["proxychains"] else "warn"
+    return out
 
 
 def http_proxy(cfg: dict) -> httpx.Proxy:

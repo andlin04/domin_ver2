@@ -22,9 +22,16 @@
 #   relay list:       https://api.mullvad.net/www/relays/all/  (type wireguard, active, ipv4_addr_in, pubkey)
 # The account number goes to curl on stdin, never on a command line; neither it nor the private key is printed.
 #
+# The API calls use curl, which takes HTTPS_PROXY / NO_PROXY from the environment: domin-mullvad.service reads
+# /etc/domin.env for a host that reaches the internet only through a proxy. The tunnel itself needs outbound UDP 51820
+# to the relay, which no HTTP proxy carries: without a handshake within HANDSHAKE_WAIT seconds the tunnel is taken
+# down again and the status says so.
+#
 # Writes /etc/systemd/system/{domin-worker,domin}.service.d/20-routes.conf (IPAddressAllow=10.64.0.0/10, and
-# 127.0.0.1/32 for a local tor client): the services refuse every non-public address otherwise. A status line for the
-# Routes page goes to $DATA/mullvad.status (no secrets).
+# 127.0.0.1/32 for a local tor client): the services refuse every non-public address otherwise. The Routes page reads
+# $DATA/mullvad.status (no secrets): the last apply {at, ok, code, message} (code: up, down, api, refused, relays,
+# no-relay, no-handshake, no-socks, packages, credentials, step; the page explains each) and the tunnel facts
+# {up, handshake, relay, wg, checked}, which `status` refreshes too.
 set -Eeuo pipefail
 umask 077
 
@@ -41,21 +48,59 @@ REG_FILE=$WG/mullvad.registered     # "<account sha256> <public key> <address>" 
 STATUS=$DATA/mullvad.status
 REQUEST=$DATA/mullvad.request
 IN_TUNNEL=10.64.0.1
+HANDSHAKE_WAIT=15   # seconds for the first WireGuard handshake with the relay
 STEP=start
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 
-status_file() {  # ok(true|false) message: the page's "last apply" line
+tunnel_facts() {  # sets T_UP T_HS T_RELAY T_WG for the status file; never fails
+  T_WG=false T_UP=false T_HS=0 T_RELAY=
+  if command -v wg >/dev/null 2>&1; then T_WG=true; fi
+  if systemctl is-active -q wg-quick@mullvad 2>/dev/null; then
+    T_UP=true
+    T_HS=$(handshake_at)
+    T_RELAY=$(sed -n 's/^# \([a-z0-9-]*\)$/\1/p' "$CONF" 2>/dev/null | tail -1 || true)
+  fi
+  return 0
+}
+
+handshake_at() {  # epoch seconds of the last handshake with the relay, 0 when none
+  local hs
+  hs=$(wg show mullvad latest-handshakes 2>/dev/null | awk '{print $2; exit}' || true)
+  [[ "$hs" =~ ^[0-9]+$ ]] && echo "$hs" || echo 0
+}
+
+status_file() {  # ok(true|false) code message: the page's "last apply" line and the tunnel facts.
+  # No arguments: keep the last apply's result, refresh the tunnel facts only (the status command).
   [ -d "$DATA" ] || return 0
-  python3 -c 'import json, sys, datetime
-print(json.dumps({"at": datetime.datetime.now().isoformat(timespec="seconds"), "ok": sys.argv[1] == "true",
-                  "message": sys.argv[2][:300]}))' "$1" "$2" > "$STATUS.tmp"
+  tunnel_facts
+  python3 - "$STATUS" "${1:-}" "${2:-}" "${3:-}" "$T_UP" "$T_HS" "$T_RELAY" "$T_WG" > "$STATUS.tmp" <<'EOF'
+import datetime, json, sys
+path, ok, code, msg, up, hs, relay, wg = sys.argv[1:]
+now = datetime.datetime.now().isoformat(timespec="seconds")
+try:
+    with open(path) as f:
+        out = json.load(f)
+except (OSError, ValueError):
+    out = {}
+out = out if isinstance(out, dict) else {}
+if ok:
+    out.update(at=now, ok=ok == "true", code=code, message=msg[:300])
+out["tunnel"] = {"up": up == "true", "handshake": int(hs) if hs.isdigit() else 0, "relay": relay, "wg": wg == "true",
+                 "checked": now}
+print(json.dumps(out))
+EOF
   chmod 644 "$STATUS.tmp"
   chown domin:domin "$STATUS.tmp" 2>/dev/null || true
   mv -f "$STATUS.tmp" "$STATUS"
 }
-fail() { echo "mullvad: $1" >&2; status_file false "$1"; exit 1; }
-trap 'status_file false "failed at: $STEP"' ERR
+fail() {  # code message: the page maps the code to plain words and the next step (mullvad.EXPLAIN)
+  trap - ERR
+  echo "mullvad: $2" >&2
+  status_file false "$1" "$2"
+  exit 1
+}
+trap 'status_file false step "failed at: $STEP"' ERR
 
 load_credentials() {  # sets ACCOUNT, PRIV, ADDRESS, ENTRY; prints nothing
   ACCOUNT= PRIV= ADDRESS= ENTRY=
@@ -75,13 +120,13 @@ EOF
   if [ -z "$ACCOUNT" ] && [ -z "$PRIV" ] && [ -f "$ACCOUNT_FILE" ]; then
     read -r owner mode < <(stat -c '%U %a' "$ACCOUNT_FILE")
     [ "$owner" = root ] && { [ "$mode" = 600 ] || [ "$mode" = 400 ]; } ||
-      fail "$ACCOUNT_FILE must be owned by root with mode 0600 or 0400 (is $owner $mode)"
+      fail credentials "$ACCOUNT_FILE must be owned by root with mode 0600 or 0400 (is $owner $mode)"
     ACCOUNT=$(tr -d ' \n' < "$ACCOUNT_FILE")
   fi
   ENTRY=${MULLVAD_COUNTRY:-$ENTRY}
-  [ -z "$ACCOUNT" ] || [[ "$ACCOUNT" =~ ^[0-9]{16}$ ]] || fail "the account number is not 16 digits"
-  [ -z "$PRIV" ] || [[ "$PRIV" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the private key is not a WireGuard key"
-  [ -z "$ENTRY" ] || [[ "$ENTRY" =~ ^[a-z]{2}$ ]] || fail "the entry country is not a two-letter code"
+  [ -z "$ACCOUNT" ] || [[ "$ACCOUNT" =~ ^[0-9]{16}$ ]] || fail credentials "the account number is not 16 digits"
+  [ -z "$PRIV" ] || [[ "$PRIV" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail credentials "the private key is not a WireGuard key"
+  [ -z "$ENTRY" ] || [[ "$ENTRY" =~ ^[a-z]{2}$ ]] || fail credentials "the entry country is not a two-letter code"
   return 0
 }
 
@@ -98,8 +143,8 @@ register() {  # account number mode: a key of our own, registered once per accou
   fi
   STEP="key registration with Mullvad"
   reg=$(printf 'account=%s' "$ACCOUNT" | curl -sSL --max-time 30 https://api.mullvad.net/wg -d @- \
-          --data-urlencode "pubkey=$pub") || fail "key registration: the Mullvad API did not answer"
-  [[ "$reg" =~ ^[0-9a-f:/.,]+$ ]] || fail "key registration refused: ${reg:0:120}"
+          --data-urlencode "pubkey=$pub") || fail api "key registration: the Mullvad API did not answer"
+  [[ "$reg" =~ ^[0-9a-f:/.,]+$ ]] || fail refused "key registration refused: ${reg:0:120}"
   ADDRESS=$reg
   echo "$sum $pub $ADDRESS" > "$REG_FILE"
   chmod 600 "$REG_FILE"
@@ -114,11 +159,11 @@ rs = [r for r in json.load(sys.stdin) if r.get("type") == "wireguard" and r.get(
       and r.get("pubkey") and (not cc or r.get("country_code") == cc)]
 r = random.choice(rs) if rs else None
 print(" ".join((r["hostname"], r["ipv4_addr_in"], r["pubkey"])) if r else "")' "$ENTRY") ||
-    fail "cannot fetch the Mullvad relay list"
+    fail relays "cannot fetch the Mullvad relay list"
   read -r R_HOST R_IP R_PUB <<< "$line"
-  [ -n "${R_HOST:-}" ] || fail "no active WireGuard relay${ENTRY:+ in $ENTRY}"
+  [ -n "${R_HOST:-}" ] || fail no-relay "no active WireGuard relay${ENTRY:+ in $ENTRY}"
   [[ "$R_HOST" =~ ^[a-z0-9-]+$ && "$R_IP" =~ ^[0-9.]+$ && "$R_PUB" =~ ^[A-Za-z0-9+/]{43}=$ ]] ||
-    fail "unexpected relay list entry"
+    fail relays "unexpected relay list entry"
 }
 
 dropins() {  # write | remove: the services' IPAddressAllow for the tunnel and a local tor client
@@ -156,17 +201,19 @@ socket.create_connection((sys.argv[1], 1080), timeout=5).close()' "$IN_TUNNEL" 2
 
 up() {
   STEP="packages"
-  for b in wg wg-quick curl python3; do command -v "$b" >/dev/null || fail "$b is missing (apt install wireguard-tools curl python3)"; done
+  for b in wg wg-quick curl python3; do
+    command -v "$b" >/dev/null || fail packages "$b is missing (apt install wireguard-tools curl python3)"
+  done
   load_credentials
   if [ -n "$PRIV" ]; then
-    [ -n "$ADDRESS" ] || fail "a private key needs its tunnel address (Settings > Routes)"
+    [ -n "$ADDRESS" ] || fail credentials "a private key needs its tunnel address (Settings > Routes)"
   elif [ -n "$ACCOUNT" ]; then
     register
   else
-    fail "no Mullvad credentials (Settings > Routes, or $ACCOUNT_FILE)"
+    fail credentials "no Mullvad credentials (Settings > Routes, or $ACCOUNT_FILE)"
   fi
   ADDRESS=${ADDRESS%%,*}   # IPv4 only: the split tunnel carries 10.64.0.0/10
-  [[ "$ADDRESS" =~ ^[0-9.]+/[0-9]+$ ]] || fail "unexpected tunnel address"
+  [[ "$ADDRESS" =~ ^[0-9.]+/[0-9]+$ ]] || fail credentials "unexpected tunnel address"
   pick_relay
   STEP="WireGuard config"
   install -d -m 700 "$WG"
@@ -188,12 +235,23 @@ up() {
   STEP="wg-quick@mullvad"
   systemctl enable -q wg-quick@mullvad
   systemctl restart wg-quick@mullvad
+  STEP="handshake with the relay"
+  # WireGuard needs outbound UDP to the relay: a host whose only way out is an HTTP proxy never gets a handshake.
+  # No half-up tunnel: without one within HANDSHAKE_WAIT seconds it is taken down again.
+  for _ in $(seq "$HANDSHAKE_WAIT"); do
+    [ "$(handshake_at)" != 0 ] && break
+    sleep 1
+  done
+  if [ "$(handshake_at)" = 0 ]; then
+    systemctl disable -q --now wg-quick@mullvad 2>/dev/null || true
+    fail no-handshake "tunnel configured but no handshake with the relay $R_HOST: this host likely can't send UDP 51820 to the internet (proxy-only egress?)"
+  fi
   STEP="service drop-ins"
   dropins write
   STEP="in-tunnel SOCKS5 check"
   for _ in 1 2 3 4 5; do socks_up && break; sleep 2; done
-  socks_up || fail "tunnel to $R_HOST is up but $IN_TUNNEL:1080 does not answer"
-  status_file true "tunnel up via $R_HOST ($ADDRESS); in-tunnel SOCKS5 answers"
+  socks_up || fail no-socks "tunnel to $R_HOST is up but $IN_TUNNEL:1080 does not answer"
+  status_file true up "tunnel up via $R_HOST ($ADDRESS); in-tunnel SOCKS5 answers"
   echo "mullvad: tunnel up via $R_HOST; $IN_TUNNEL:1080 answers"
 }
 
@@ -201,7 +259,7 @@ down() {
   STEP="down"
   systemctl disable -q --now wg-quick@mullvad 2>/dev/null || true
   dropins remove
-  status_file true "tunnel down"
+  status_file true down "tunnel down"
   echo "mullvad: tunnel down (key and config kept in $WG)"
 }
 
@@ -214,9 +272,11 @@ case "$CMD" in
     if [ -n "$ACCOUNT$PRIV" ]; then up; else down; fi ;;
   allow) dropins write ;;
   status)
-    if systemctl is-active -q wg-quick@mullvad; then
-      echo "interface: up, relay $(sed -n 's/^# \([a-z0-9-]*\)$/\1/p' "$CONF" | tail -1)"
-      echo "last handshake (epoch seconds): $(wg show mullvad latest-handshakes | awk '{print $2}')"
+    tunnel_facts
+    status_file   # the tunnel facts for the Routes page; the last apply's result stays
+    if [ "$T_UP" = true ]; then
+      echo "interface: up, relay ${T_RELAY:-unknown}"
+      echo "last handshake (epoch seconds, 0 = none): $T_HS"
     else
       echo "interface: down"
     fi

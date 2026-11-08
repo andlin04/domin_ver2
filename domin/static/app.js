@@ -372,6 +372,14 @@ $$("form[data-confirm]").forEach((f) => f.addEventListener("submit", (ev) => {
   });
 }));
 
+// route form (Settings · Routes): only the chosen kind's fields; without this script all of them show and work
+$$("form[data-route-form]").forEach((f) => {
+  const kind = $("select[data-kind-select]", f);
+  const show = () => $$("[data-kind]", f).forEach((d) => { d.hidden = d.dataset.kind !== kind.value; });
+  kind.addEventListener("change", show);
+  show();
+});
+
 // a pick-list that applies itself (CSP allows no inline handlers); data-reset names a field to clear first
 document.querySelectorAll("select[data-autosubmit]").forEach((s) => s.addEventListener("change", () => {
   const other = s.dataset.reset && s.form.elements[s.dataset.reset];

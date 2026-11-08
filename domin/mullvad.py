@@ -253,14 +253,88 @@ def request_apply(state_dir: Path) -> Path:
 
 
 def apply_status(state_dir: Path) -> dict:
-    """The tunnel script's last result ({at, ok, message}), {} when it has not run; pending when a request waits."""
+    """The tunnel script's last result ({at, ok, code, message}, and tunnel: {up, handshake, relay, wg, checked}),
+    {} when it has not run; pending when a request waits. Files of earlier builds have no code or tunnel."""
     out: dict = {}
     try:
-        got = json.loads((Path(state_dir) / STATUS_FILE).read_text(encoding="utf-8")[:2000])
+        got = json.loads((Path(state_dir) / STATUS_FILE).read_text(encoding="utf-8")[:4000])
         if isinstance(got, dict):
             out = {"at": str(got.get("at") or "")[:40], "ok": bool(got.get("ok")),
-                   "message": str(got.get("message") or "")[:300]}
+                   "code": str(got.get("code") or "")[:40], "message": str(got.get("message") or "")[:300]}
+            t = got.get("tunnel")
+            if isinstance(t, dict):
+                try:
+                    hs = int(t.get("handshake") or 0)
+                except (TypeError, ValueError):
+                    hs = 0
+                out["tunnel"] = {"up": bool(t.get("up")), "handshake": hs, "wg": bool(t.get("wg")),
+                                 "relay": str(t.get("relay") or "")[:63], "checked": str(t.get("checked") or "")[:40]}
     except (OSError, ValueError):
         pass
     out["pending"] = (Path(state_dir) / REQUEST_FILE).exists()
     return out
+
+
+# What the script's result codes mean, in plain words, with the next step. Older status files have no code: their
+# message is matched by its start (OLD_MESSAGES).
+EXPLAIN = {
+    "up": ("The tunnel is up.", ""),
+    "down": ("The tunnel is off: no Mullvad credentials are saved.", "Save an account number below to set it up."),
+    "api": ("Mullvad's API (api.mullvad.net) could not be reached from this host: the setup service has no internet "
+            "or proxy.",
+            "Re-install domin-mullvad.service (install.sh) so it reads the proxy from /etc/domin.env, then Apply "
+            "tunnel again."),
+    "refused": ("Mullvad refused to register this host's key.",
+                "Check the account number (active, paid, fewer than 5 devices), then save it again."),
+    "relays": ("Mullvad's relay list could not be fetched from this host: the setup service has no internet or "
+               "proxy.",
+               "Re-install domin-mullvad.service (install.sh) so it reads the proxy from /etc/domin.env, then Apply "
+               "tunnel again."),
+    "no-relay": ("No active Mullvad WireGuard relay in the entry country.", "Clear or change the entry country."),
+    "no-handshake": ("The tunnel was configured but the relay never answered (no WireGuard handshake): this host "
+                     "likely can't send UDP 51820 to the internet (proxy-only egress?). The tunnel was taken down "
+                     "again.",
+                     "Allow outbound UDP 51820 from this host in the firewall, or use Tor or a custom proxy instead."),
+    "no-socks": ("The tunnel is up but Mullvad's SOCKS5 inside it (10.64.0.1:1080) does not answer.",
+                 "Apply tunnel again (another relay is picked)."),
+    "packages": ("A program the tunnel needs is missing on this host.",
+                 "apt install wireguard-tools curl python3, then Apply tunnel again."),
+    "credentials": ("The saved credentials can't be used.", "Correct them below and save."),
+    "step": ("The setup script stopped with an error.", "Look at journalctl -u domin-mullvad on the host."),
+}
+OLD_MESSAGES = (("key registration: the Mullvad API did not answer", "api"), ("key registration refused", "refused"),
+                ("cannot fetch the Mullvad relay list", "relays"), ("no active WireGuard relay", "no-relay"),
+                ("tunnel up via", "up"), ("tunnel down", "down"), ("failed at:", "step"),
+                ("no Mullvad credentials", "credentials"))
+
+
+def explain(status: dict) -> dict:
+    """The last apply in plain words: {ok, text, next, detail}; {} when it has not run."""
+    if not status.get("at"):
+        return {}
+    msg = status.get("message") or ""
+    code = status.get("code") or next((c for start, c in OLD_MESSAGES if msg.startswith(start)), "")
+    if code not in EXPLAIN:
+        return {"ok": status.get("ok", False), "text": msg or "No message.", "next": "", "detail": ""}
+    text, step = EXPLAIN[code]
+    if code == "up" and msg:
+        text = msg[0].upper() + msg[1:] + "."
+    return {"ok": status.get("ok", False), "text": text, "next": step,
+            "detail": msg if code in ("refused", "credentials", "packages", "step", "no-relay", "no-socks") else ""}
+
+
+def tunnel_summary(status: dict, socks_ok: bool) -> dict:
+    """The tunnel's state for the page: {ok, text}. ok: the in-tunnel SOCKS5 answers (a Mullvad route can work)."""
+    t = status.get("tunnel") or {}
+    relay = f" via {t['relay']}" if t.get("relay") else ""
+    if socks_ok:
+        return {"ok": True, "text": f"up{relay}; Mullvad's SOCKS5 inside it ({IN_TUNNEL[0]}:{IN_TUNNEL[1]}) answers"}
+    if t.get("up") and not t.get("handshake"):
+        return {"ok": False, "text": f"interface up{relay} but no handshake with the relay: outbound UDP 51820 "
+                                     "blocked?"}
+    if t.get("up"):
+        return {"ok": False, "text": f"interface up{relay}, but Mullvad's SOCKS5 inside it does not answer"}
+    last = explain(status)
+    if last and not last["ok"]:
+        return {"ok": False, "text": f"not up: {last['text'].rstrip('.')}"}
+    return {"ok": False, "text": "not set up (save a Mullvad account number under Mullvad tunnel)"}

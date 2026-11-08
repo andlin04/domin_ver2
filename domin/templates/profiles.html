@@ -28,7 +28,8 @@
         <input name="timing" type="number" min="1" max="4" value="{{ form.get('timing', 3) }}"></label>
       <label class="field">Timeout per address (s)
         <input name="timeout" type="number" min="10" max="900" value="{{ form.get('timeout', 120) }}"></label>
-      <label class="field">Route <small>Default: the default route (Settings · Routes)</small>
+      <label class="field">Route <small>Default: the preferred route (Settings · Routes); a route marked disabled
+        fails the scan, one marked last test failed may</small>
         <select name="route">{% for rid, rname in route_names.items() %}<option value="{{ rid }}" {% if form.get('route', '') == rid %}selected{% endif %}>{{ rname }}</option>{% endfor %}</select></label>
     </div>
     <p><button class="btn primary" type="submit">Save profile</button></p>
