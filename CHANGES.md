@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: host tags with suggested classification
+
+- Signed-in users see a **Tags** column on a domain's records; analysts and admins add a tag (type it, Enter),
+  remove one (×) or accept a **suggested** one (dashed `+ tag`). A host can carry any number of tags; they belong to
+  the host name and persist across scans.
+- Suggestions are rule-based: words in the host name (`www` → webserver, `cam`/`nvr` → iot-device, `nas` → storage,
+  `mx`/`mail` → mailserver, `vpn` → remote-access, `dev`/`test` → non-production, …) and, once a posture scan has run,
+  the open services at the host's addresses (80/443 → webserver, 1883/554 → iot-device, 9100/631 → printer,
+  445 → file-share, database ports → database, …). Nothing is tagged without an analyst's click.
+- **Group by tag**: tag chips with host counts above the records; a chip (or a tag) filters the table to those hosts.
+- Dropping a domain drops its hosts' tags. Anonymous visitors see no tags.
+- Migration: new `host_tags` table at start-up. Rollback: redeploy the previous build (the table is ignored).
+
 ## 2026-11-08: scan profiles, saved scan parameters, raw output pane
 
 - **Security → Scan profiles**: named nmap parameter sets (ports, version intensity 0-9, timing T1-T4, per-address

@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, posture, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, posture, tags, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -255,14 +255,24 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
                   "asns": db.breakdown(rows, "asn", 10)}
         user, csrf = viewer(request)
-        posture_rows = []
-        if user:   # posture results are signed-in reports
+        posture_rows, host_tags, suggested, tag_counts = [], {}, {}, {}
+        tag = request.query_params.get("tag", "")
+        if user:   # posture results and host tags are signed-in reports
             with conn() as c:
                 posture_rows = posture.current(c, d["name"])
+                host_tags = tags.for_hosts(c, sorted({r["host"] for r in rows}))
+            suggested = tags.suggestions(rows, posture_rows, host_tags)
+            for t in (t for ts in host_tags.values() for t in ts):
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+            if tag in tag_counts:
+                rows = [r for r in rows if tag in host_tags.get(r["host"], [])]
+            else:
+                tag = ""
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
-                    posture_rows=posture_rows)
+                    posture_rows=posture_rows, host_tags=host_tags, suggested=suggested,
+                    tag_counts=dict(sorted(tag_counts.items())), tag=tag)
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
         """Host names added / removed at each scan versus the one before it."""
@@ -931,6 +941,31 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return refuse(422, f"No address of {what} to scan{why}.")
             n = posture.enqueue(c, dom, found, prof, u["name"])
         return back(f"{base}/security?domain={dom}", "posture-queued" if n else "posture-pending")
+
+    @app.post(base + "/tags", include_in_schema=False)
+    async def host_tag(request: Request):
+        """Add or remove one tag on a host name of a domain (analyst or admin), then back to the domain page."""
+        data = await form(request)
+        dom = (data.get("domain") or "").strip().lower()
+        host = (data.get("host") or "").strip().lower()
+        tag = (data.get("tag") or "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not users.can(u["role"], "analyst"):
+                raise HTTPException(403, "Tagging hosts needs the analyst role.")
+            if not tags.valid(tag):
+                raise HTTPException(422, "Tag: 1-30 lower-case letters, digits or -.")
+            if not c.execute(f"""SELECT 1 FROM records r JOIN ({db.LATEST}) s ON s.id = r.scan_id
+                                 JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.host = ?""",
+                             (dom, host)).fetchone():
+                raise HTTPException(404, "No such host in that domain's latest scan")
+            if data.get("action") == "remove":
+                tags.remove(c, host, tag)
+            else:
+                tags.add(c, host, tag, u["name"])
+        return back(f"/d/{dom}#records")
 
     def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):
         with conn() as c:

@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, pi
 );
 CREATE INDEX IF NOT EXISTS posture_target ON posture_scans(domain, ip, id);
 CREATE INDEX IF NOT EXISTS posture_status ON posture_scans(status, id);
+CREATE TABLE IF NOT EXISTS host_tags (   -- analyst labels per discovered host name (domin.tags)
+    host TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    added TEXT NOT NULL,
+    added_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (host, tag)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS host_tags_tag ON host_tags(tag, host);
 """
 
 RECORD_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
@@ -226,6 +234,7 @@ def delete_domain(conn: sqlite3.Connection, name: str) -> bool:
     conn.execute("DELETE FROM scans WHERE domain_id = ?", (did,))
     conn.execute("DELETE FROM jobs WHERE domain = ?", (name,))
     conn.execute("DELETE FROM posture_scans WHERE domain = ?", (name,))
+    conn.execute("DELETE FROM host_tags WHERE host = ? OR host LIKE ?", (name, "%." + name))
     conn.execute("DELETE FROM domains WHERE id = ?", (did,))
     return True
 

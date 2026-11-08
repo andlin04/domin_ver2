@@ -105,17 +105,38 @@
     <h2>Records <small>{{ rows|length }}</small></h2>
     <input class="filter" placeholder="Filter host, address, provider…" data-filter="#records" aria-label="Filter records">
   </div>
+  {% if tag_counts %}<p class="tag-groups">Group by tag:
+    {% for t, n in tag_counts.items() %}<a class="pill {{ 'active' if t == tag }}" href="?tag={{ t }}#records">{{ t }} {{ n }}</a>{% endfor %}
+    {% if tag %}<a href="?#records">show all</a>{% endif %}</p>{% endif %}
   <div class="table-wrap">
     <table id="records" class="sortable" data-colfilters>
       <thead><tr><th data-sort="text">Host</th><th data-sort="ip">Address</th><th data-sort="num" class="num">ASN</th>
         <th data-sort="text">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
-        <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th></tr></thead>
+        <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th>
+        {% if user %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
       <tbody>
+      {% set tagger = user and user.role in ('admin', 'analyst') %}
       {% for r in rows %}{% set eu = eu_status(r.country) %}
         <tr><td class="host">{{ r.host }}</td><td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td>
           <td class="mono">{{ r.prefix }}</td><td class="text net">{{ r.netname }}</td>
           <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td>
-          <td class="{{ 'eu' if eu == 'EU' else 'non-eu' if eu }}">{{ eu }}</td><td>{{ r.country }}</td></tr>
+          <td class="{{ 'eu' if eu == 'EU' else 'non-eu' if eu }}">{{ eu }}</td><td>{{ r.country }}</td>
+          {% if user %}<td class="tags">
+            {% for t in host_tags.get(r.host, []) %}<form method="post" action="{{ admin_base }}/tags" class="inline tag">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
+              <input type="hidden" name="host" value="{{ r.host }}"><input type="hidden" name="tag" value="{{ t }}">
+              <a class="pill" href="?tag={{ t }}#records">{{ t }}</a>{% if tagger %}<button class="tag-x" name="action" value="remove"
+                title="Remove tag {{ t }}" aria-label="Remove tag {{ t }}">×</button>{% endif %}</form>{% endfor %}
+            {% if tagger %}
+            {% for t in suggested.get(r.host, []) %}<form method="post" action="{{ admin_base }}/tags" class="inline tag">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
+              <input type="hidden" name="host" value="{{ r.host }}"><input type="hidden" name="tag" value="{{ t }}">
+              <button class="pill suggest" title="Suggested: add tag {{ t }}">+ {{ t }}</button></form>{% endfor %}
+            <form method="post" action="{{ admin_base }}/tags" class="inline tag">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
+              <input type="hidden" name="host" value="{{ r.host }}">
+              <input name="tag" class="tag-in" placeholder="tag" maxlength="30" aria-label="New tag for {{ r.host }}"></form>
+            {% endif %}</td>{% endif %}</tr>
       {% endfor %}
       </tbody>
     </table>

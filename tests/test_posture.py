@@ -246,3 +246,59 @@ def test_viewer_cannot_change_profiles_and_anonymous_sees_no_posture(settings):
         assert r.status_code == 403
     with app_client(settings) as h:
         assert "Security posture" not in h.get(f"/d/{DOM}").text
+
+
+# ---- host tags ----
+
+def test_suggest_from_name_and_services():
+    from domin import tags
+    assert tags.suggest("cam-01.corp.example") == ["iot-device"]
+    assert tags.suggest("www.example.org") == ["webserver"]
+    assert tags.suggest("box.example.org", [{"port": 22, "service": "ssh"}, {"port": 443, "service": "https"},
+                                            {"port": 1883, "service": "mqtt"}]) == ["iot-device", "webserver"]
+    assert tags.suggest("box.example.org") == []
+    assert tags.valid("iot-device") and not tags.valid("Bad Tag") and not tags.valid("x;y")
+
+
+def test_analyst_tags_hosts_and_groups_by_tag(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        page = h.get(f"/d/{DOM}").text
+        assert "+ storage" in page   # nas.corp.example: name rule suggestion
+        r = h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage"},
+                   follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith(f"/d/{DOM}")
+        page = h.get(f"/d/{DOM}?tag=storage").text
+        assert "Group by tag" in page and "nas.corp.example" in page and "cdn.corp.example" not in page
+        h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
+                                    "action": "remove"})
+        assert "Group by tag" not in h.get(f"/d/{DOM}").text
+        assert h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "other.example", "tag": "x"}
+                      ).status_code == 404
+        assert h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example",
+                                           "tag": "Bad Tag"}).status_code == 422
+        assert h.post("/admin/tags", data={"csrf": "x", "domain": DOM, "host": "nas.corp.example",
+                                           "tag": "y"}).status_code == 403
+
+
+def test_viewer_sees_tags_but_cannot_change_them(settings):
+    with db.connect(settings.db_path) as c:
+        from domin import tags
+        tags.add(c, "nas.corp.example", "storage", "ana")
+    with app_client(settings) as h:
+        csrf = sign_in(h, "vee")
+        page = h.get(f"/d/{DOM}").text
+        assert "storage" in page and "Remove tag" not in page and "+ storage" not in page
+        assert h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example",
+                                           "tag": "y"}).status_code == 403
+    with app_client(settings) as h:
+        assert "Group by tag" not in h.get(f"/d/{DOM}").text and ">storage<" not in h.get(f"/d/{DOM}").text
+
+
+def test_dropping_a_domain_drops_its_host_tags(settings):
+    from domin import tags
+    with db.connect(settings.db_path) as c:
+        tags.add(c, "nas.corp.example", "storage", "ana")
+        tags.add(c, "www.other.example", "webserver", "ana")
+        assert db.delete_domain(c, DOM)
+        assert tags.for_hosts(c, ["nas.corp.example", "www.other.example"]) == {"www.other.example": ["webserver"]}
