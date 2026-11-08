@@ -55,6 +55,10 @@ SSL mode to Full (strict); once traffic arrives on 443, close port 80 in the fir
 **Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (keeps the
 database and certificate). Options: see the top of [deploy/install.sh](deploy/install.sh).
 
+**Uninstall:** `bash deploy/uninstall.sh` removes the services, code and nginx config but keeps the database and
+`/etc/domin.env`; `bash deploy/uninstall.sh --purge` also deletes the data and the `domin` user. Reinstall any time
+with `install.sh`.
+
 ## Admin page
 
 At `/admin`, HTTPS only, for the client addresses in `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or

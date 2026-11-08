@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: uninstall script
+
+- `deploy/uninstall.sh` removes the services, code and nginx config (keeps the database and `/etc/domin.env`);
+  `--purge` also deletes the data and the `domin` user. domin is now a clean install/uninstall package.
+
 ## 2026-11-08: security hardening
 
 - No built-in admin address: `DOMIN_ADMIN_IPS` is empty by default (no admin page); `install.sh --admin-ip` sets it.

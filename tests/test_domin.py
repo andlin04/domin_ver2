@@ -380,6 +380,15 @@ def test_install_pins_dependencies_and_denies_own_addresses():
     assert "SystemCallFilter=~@privileged @resources" in install.splitlines()
 
 
+def test_uninstall_removes_services_and_keeps_data():
+    u = (Path(__file__).parent.parent / "deploy" / "uninstall.sh").read_text()
+    assert "systemctl disable -q --now domin domin-worker" in u
+    assert "rm -rf /opt/domin" in u                       # code and venv go
+    assert "--purge" in u                                 # data only with --purge
+    purge_block = u.split('if [ "$purge" = 1 ]', 1)[1]    # removing the data is inside the --purge branch only
+    assert "rm -rf /var/lib/domin" in purge_block and "rm -rf /var/lib/domin" not in u.split('if [ "$purge"', 1)[0]
+
+
 def test_internal_ips_skip_scan_limits(settings):
     s = replace(settings, scans_per_hour=1, scans_per_day=1, queue_max=1, internal_ips=("192.0.2.0/24",))
     with TestClient(create_app(s), client=("192.0.2.9", 50000)) as h:
