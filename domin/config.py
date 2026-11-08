@@ -29,6 +29,7 @@ class Settings:
     internal_ips: tuple[str, ...] = ()   # private API clients (over a VPN): POST /api/scan without visitor limits
     internal_zones: tuple[str, ...] = ()   # domain suffixes scanned internally: resolve via internal_dns, no egress
     internal_dns: tuple[str, ...] = ()   # resolver addresses for internal scans (the LAN DNS server)
+    internal_nets: tuple[str, ...] = ()   # internal scans: networks whose addresses are reverse-looked-up for names
     cve_db_mode: str = "own"      # own = this instance maintains its CVE database; shared = read one from elsewhere
     cve_db_path: str = ""         # shared mode: the database file to read; own mode: defaults next to db_path
     cve_ttl_days: int = 7         # own mode: re-query a target whose cached result is older than this
@@ -62,6 +63,7 @@ class Settings:
             internal_zones=tuple(x.strip().lower().strip(".") for x in env("DOMIN_INTERNAL_ZONES", "").split(",")
                                  if x.strip()),
             internal_dns=tuple(x.strip() for x in env("DOMIN_INTERNAL_DNS", "").split(",") if x.strip()),
+            internal_nets=tuple(x.strip() for x in env("DOMIN_INTERNAL_NETS", "").split(",") if x.strip()),
             cve_db_mode="shared" if env("DOMIN_CVE_DB_MODE", "own").strip().lower() == "shared" else "own",
             cve_db_path=env("DOMIN_CVE_DB_PATH", "").strip(),
             cve_ttl_days=int(env("DOMIN_CVE_TTL_DAYS", "7")),

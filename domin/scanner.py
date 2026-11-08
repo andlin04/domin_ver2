@@ -20,7 +20,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import dns.exception
+import dns.query
 import dns.resolver
+import dns.reversename
+import dns.zone
 import httpx
 import pycountry
 
@@ -87,6 +90,53 @@ def from_dns(domain: str, resolver: dns.resolver.Resolver) -> set[str]:
                     found.add(target)
         except (dns.exception.DNSException, OSError):
             pass
+    return found
+
+
+def from_axfr(domain: str, servers: tuple[str, ...]) -> set[str]:
+    """Internal scan: the whole zone from the first internal DNS server that allows a transfer (AXFR)."""
+    for server in servers:
+        try:
+            zone = dns.zone.from_xfr(dns.query.xfr(server, domain, timeout=10, lifetime=60))
+        except Exception as exc:  # refused, not authoritative, timeout: the other methods still run
+            log.info("axfr %s @%s: %s", domain, server, str(exc)[:80] or type(exc).__name__)
+            continue
+        names = {n.derelativize(zone.origin).to_text().rstrip(".").lower() for n in zone.nodes}
+        return {h for h in names if "*" not in h and normalize_domain(h, (domain,)) and is_under(h, domain)}
+    return set()
+
+
+def sweep_addresses(nets: tuple[str, ...], seeds: list[str], limit: int) -> list[str]:
+    """Addresses to reverse-look-up: the configured networks, else the /24 of each private IPv4 seed address."""
+    if nets:
+        networks = [ipaddress.ip_network(n, strict=False) for n in nets]
+    else:
+        networks = list(dict.fromkeys(ipaddress.ip_network(f"{ip}/24", strict=False) for ip in seeds
+                                      if _lan_address(ip) and ipaddress.ip_address(ip).version == 4))
+    out: list[str] = []
+    for net in networks:
+        out += [str(a) for a in (net.hosts() if net.num_addresses > 2 else net)]
+    return list(dict.fromkeys(out))[:limit]
+
+
+def from_ptr(addresses: list[str], zone: str, domain: str, resolver: dns.resolver.Resolver,
+             workers: int) -> set[str]:
+    """Internal scan: reverse look-ups (PTR) of the addresses; names under the domain. A bare name (a hosts-file
+    entry such as 'pve') belongs to the zone."""
+    def one(ip: str) -> list[str]:
+        try:
+            return [a.to_text() for a in resolver.resolve(dns.reversename.from_address(ip).to_text(), "PTR")]
+        except (dns.exception.DNSException, OSError):
+            return []
+
+    found = set()
+    with ThreadPoolExecutor(workers) as pool:
+        for names in pool.map(one, addresses):
+            for n in names:
+                n = n.rstrip(".").lower()
+                n = n if "." in n else f"{n}.{zone}"
+                if normalize_domain(n, (zone,)) and is_under(n, domain):
+                    found.add(n)
     return found
 
 
@@ -209,8 +259,13 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
     client = client or tools.http_client()
     try:
         progress("discovering host names")
-        if internal:   # internal scan: discover over the LAN DNS only, no crt.sh/amass egress
-            found = {domain} | from_dns(domain, resolver)
+        if internal:   # internal scan: discover by DNS queries to the LAN DNS only, no crt.sh/amass egress
+            zone = max((z for z in settings.internal_zones if is_under(domain, z)), key=len)
+            found = {domain} | from_dns(domain, resolver) | from_axfr(domain, settings.internal_dns)
+            sweep = sweep_addresses(settings.internal_nets, [*settings.internal_dns, *resolve(domain, resolver)],
+                                    admin.SWEEP_MAX)
+            progress(f"reverse look-ups of {len(sweep)} addresses")
+            found |= from_ptr(sweep, zone, domain, resolver, settings.scan_workers)
         else:
             found = ({domain} | from_crtsh(domain, client) | from_dns(domain, resolver)
                      | from_amass(domain, settings.amass))

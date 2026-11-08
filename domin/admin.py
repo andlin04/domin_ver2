@@ -62,16 +62,19 @@ def effective(settings: Settings, conn: sqlite3.Connection) -> Settings:
         settings = replace(settings, **{k: v for k, v in json.loads(raw).items() if k in TUNABLE and k in names})
     if internal := kv_get(conn, "internal_dns"):   # Settings page: internal zones + their DNS servers
         cfg = json.loads(internal)
-        settings = replace(settings, internal_zones=tuple(cfg["zones"]), internal_dns=tuple(cfg["dns"]))
+        settings = replace(settings, internal_zones=tuple(cfg["zones"]), internal_dns=tuple(cfg["dns"]),
+                           internal_nets=tuple(cfg.get("nets", ())))
     return settings
 
 
 _ZONE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+SWEEP_MAX = 8192   # addresses an internal scan reverse-looks-up at most (32 x /24)
 
 
-def save_internal_dns(conn: sqlite3.Connection, zones_text: str, dns_text: str) -> dict:
-    """Validate and store the internal zones (domain suffixes) and the DNS servers that answer for them. Zones without
-    a DNS server are refused: they would fall back to public resolvers."""
+def save_internal_dns(conn: sqlite3.Connection, zones_text: str, dns_text: str, nets_text: str = "") -> dict:
+    """Validate and store the internal zones (domain suffixes), the DNS servers that answer for them and the private
+    networks to reverse-look-up for names. Zones without a DNS server are refused: they would fall back to public
+    resolvers."""
     zones = sorted({z.strip().lower().strip(".") for z in re.split(r"[\s,]+", zones_text or "") if z.strip()})
     dns = list(dict.fromkeys(d.strip() for d in re.split(r"[\s,]+", dns_text or "") if d.strip()))
     bad = [z for z in zones if not _ZONE.match(z)]
@@ -84,7 +87,18 @@ def save_internal_dns(conn: sqlite3.Connection, zones_text: str, dns_text: str) 
             raise ValueError(f"DNS server must be an IP address: {d}") from None
     if zones and not dns:
         raise ValueError("Internal zones need at least one internal DNS server.")
-    cfg = {"zones": zones, "dns": dns}
+    nets: list[str] = []
+    for n in dict.fromkeys(x.strip() for x in re.split(r"[\s,]+", nets_text or "") if x.strip()):
+        try:
+            net = ipaddress.ip_network(n, strict=False)
+        except ValueError:
+            raise ValueError(f"Not a network (CIDR): {n}") from None
+        if not net.is_private or net.version != 4:
+            raise ValueError(f"Only private IPv4 networks can be swept: {n}")
+        nets.append(str(net))
+    if sum(ipaddress.ip_network(n).num_addresses for n in nets) > SWEEP_MAX:
+        raise ValueError(f"The networks hold more than {SWEEP_MAX} addresses; list smaller ones (e.g. /24s).")
+    cfg = {"zones": zones, "dns": dns, "nets": nets}
     kv_set(conn, "internal_dns", json.dumps(cfg))
     return cfg
 

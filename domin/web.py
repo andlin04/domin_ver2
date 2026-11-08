@@ -857,7 +857,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return shell(request, "settings.html", u, s, status, scope=scope,
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
                      countries=countries, roles=users.ROLES, error=error,
-                     internal_zones=eff.internal_zones, internal_dns=eff.internal_dns)
+                     internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets)
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):
@@ -877,7 +877,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             try:
                 scope = users.parse_scope(c, data)
                 if "internal_zones" in data:
-                    admin.save_internal_dns(c, data.get("internal_zones", ""), data.get("internal_dns", ""))
+                    admin.save_internal_dns(c, data.get("internal_zones", ""), data.get("internal_dns", ""),
+                                            data.get("internal_nets", ""))
             except ValueError as exc:
                 return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
             users.save_scope(c, scope)

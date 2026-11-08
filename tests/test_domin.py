@@ -597,6 +597,50 @@ def test_internal_scan_keeps_lan_addresses_only(settings):
                    ("lan.example", "172.20.0.1")]   # gitlab (public only) is gone
 
 
+def test_internal_scan_finds_hosts_by_reverse_lookups_and_zone_transfer(settings, monkeypatch):
+    import dns.resolver
+
+    class R:
+        def __init__(self, ip):
+            self.ip = ip
+
+        def to_text(self):
+            return self.ip
+
+    zone = {("lan.example", "A"): ["172.20.0.1"], ("pve.lan.example", "A"): ["172.20.0.102"],
+            ("laptop.lan.example", "A"): ["172.20.1.14"], ("vault.lan.example", "A"): ["172.20.0.199"],
+            ("102.0.20.172.in-addr.arpa.", "PTR"): ["pve."],                      # hosts-file entry: bare name
+            ("14.1.20.172.in-addr.arpa.", "PTR"): ["laptop.lan.example."],       # DHCP name: qualified
+            ("15.1.20.172.in-addr.arpa.", "PTR"): ["other.example.org."]}        # outside the domain: ignored
+    asked = []
+
+    class FakeRes:
+        nameservers = ["172.20.0.252"]
+
+        def resolve(self, name, rtype):
+            asked.append(name)
+            recs = zone.get((name, rtype))
+            if recs:
+                return [R(x) for x in recs]
+            raise dns.resolver.NXDOMAIN
+
+    monkeypatch.setattr(scanner, "from_axfr", lambda domain, servers: {"vault.lan.example"})
+    s = replace(settings, internal_zones=("lan.example",), internal_dns=("172.20.0.252",),
+                internal_nets=("172.20.0.0/24", "172.20.1.0/28"))
+    with db.connect(s.db_path) as c, httpx.Client(transport=httpx.MockTransport(lambda r: 1 / 0)) as client:
+        records = scanner.run(c, "lan.example", s, client=client, resolver=FakeRes())
+    hosts = {r["host"]: r["ip"] for r in records}
+    assert hosts == {"lan.example": "172.20.0.1", "pve.lan.example": "172.20.0.102",
+                     "laptop.lan.example": "172.20.1.14", "vault.lan.example": "172.20.0.199"}
+    assert sum(n.endswith(".in-addr.arpa.") for n in asked) == 254 + 14   # every host address of both networks
+
+
+def test_sweep_defaults_to_the_slash24_of_dns_servers_and_the_domain():
+    got = scanner.sweep_addresses((), ["172.20.0.252", "172.20.4.7", "9.9.9.9", "fe80::1"], 8192)
+    assert len(got) == 2 * 254 and got[0] == "172.20.0.1" and "172.20.4.254" in got
+    assert scanner.sweep_addresses(("10.0.0.0/16",), [], 100)[-1] == "10.0.0.100"   # capped
+
+
 def test_api_scan_accepts_an_internal_zone_only_when_configured(settings):
     with TestClient(create_app(replace(settings, internal_zones=("home.arpa",)))) as h:
         assert h.post("/api/scan", json={"domain": "srv.home.arpa"}).status_code == 200

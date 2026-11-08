@@ -45,7 +45,12 @@
         <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>
       <label class="field">Internal DNS servers <small>IP addresses, one per line</small>
         <textarea name="internal_dns" rows="4" spellcheck="false" autocapitalize="off">{{ internal_dns|join('\n') }}</textarea></label>
+      <label class="field">Internal networks <small>CIDR, one per line, e.g. 172.20.0.0/24; at most 8192 addresses</small>
+        <textarea name="internal_nets" rows="4" spellcheck="false" autocapitalize="off">{{ internal_nets|join('\n') }}</textarea></label>
     </div>
+    <p class="muted small-print">Host names are found by DNS queries to the servers above: a zone transfer when the server
+      allows one, a reverse look-up of every address in these networks (empty = the /24 of each DNS server and of the
+      domain itself), the zone's MX/NS records and common names.</p>
   </section>
 
   <section class="card">

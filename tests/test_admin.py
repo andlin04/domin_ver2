@@ -239,13 +239,17 @@ def test_internal_domains_setting_overrides_env_and_validates(settings):
     with db.connect(settings.db_path) as c:
         assert adm.effective(settings, c).internal_zones == settings.internal_zones
         cfg = adm.save_internal_dns(c, "Corp.example., home.arpa", "172.20.0.252")
-        assert cfg == {"zones": ["corp.example", "home.arpa"], "dns": ["172.20.0.252"]}
+        assert cfg == {"zones": ["corp.example", "home.arpa"], "dns": ["172.20.0.252"], "nets": []}
         live = adm.effective(settings, c)
         assert live.internal_zones == ("corp.example", "home.arpa") and live.internal_dns == ("172.20.0.252",)
-        for zones, dns in (("bad_name!", "172.20.0.252"), ("corp.example", "ns1"), ("corp.example", "")):
+        adm.save_internal_dns(c, "corp.example", "172.20.0.252", "172.20.0.7/24 172.20.4.0/24")
+        assert adm.effective(settings, c).internal_nets == ("172.20.0.0/24", "172.20.4.0/24")
+        for zones, dns, nets in (("bad_name!", "172.20.0.252", ""), ("corp.example", "ns1", ""), ("corp.example", "", ""),
+                                 ("corp.example", "172.20.0.252", "lan"), ("corp.example", "172.20.0.252", "9.9.9.0/24"),
+                                 ("corp.example", "172.20.0.252", "10.0.0.0/8")):
             try:
-                adm.save_internal_dns(c, zones, dns)
-                raise AssertionError("accepted " + zones + " / " + dns)
+                adm.save_internal_dns(c, zones, dns, nets)
+                raise AssertionError("accepted " + zones + " / " + dns + " / " + nets)
             except ValueError:
                 pass
         adm.save_internal_dns(c, "", "")

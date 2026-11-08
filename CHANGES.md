@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: internal scans find host names by DNS queries
+
+- A scan of an internal domain now finds its host names with DNS queries to the internal DNS servers: a zone
+  transfer (AXFR) when the server allows one, and a reverse look-up (PTR) of every address in the internal networks.
+  Bare names from a hosts-style list (`pve`) are taken as names in the zone. Names outside the scanned domain are
+  ignored. MX/NS records and common names are still tried; no query leaves the internal DNS servers.
+- **Settings → Internal domains** gains **Internal networks** (private IPv4 CIDRs, at most 8192 addresses in all).
+  Empty = the /24 of each internal DNS server and of the domain's own address. `DOMIN_INTERNAL_NETS` prefills it.
+- No migration. Rollback: redeploy the previous build (the stored networks are then ignored).
+
 ## 2026-11-08: "Today" look
 
 - New colours and type: blue-violet accent, system font, 12 px cards and 8 px controls. Dark by default, light when
