@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, jobs, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -830,11 +830,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     # --- security portal: CVE scan tool (view: any signed-in user; run: analyst or admin) ------------------------
 
-    def security_ctx(status: int = 200, result: dict | None = None, form: dict | None = None, error: str = ""):
-        return {"status": status, "result": result, "form": form or {}, "error": error,
-                "cve_source": cve.SOURCE, "cve_mode": settings.cve_db_mode,
+    def security_ctx(status: int = 200, result: dict | None = None, form: dict | None = None,
+                     error: str = "", host_result: dict | None = None):
+        return {"status": status, "result": result, "host_result": host_result, "form": form or {},
+                "error": error, "cve_source": cve.SOURCE, "cve_mode": settings.cve_db_mode,
                 "cve_db": str(settings.cve_db_file), "cve_ttl": settings.cve_ttl_days,
-                "cve_count": cve_db.size()}
+                "cve_count": cve_db.size(), "default_ports": fingerprint.DEFAULT_PORTS}
 
     def security_view(request, u, s, ctx):
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
@@ -850,16 +851,42 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     @app.post(base + "/security/scan", include_in_schema=False)
     async def security_scan(request: Request):
         data = await form(request)
+        host_params = None
         with conn() as c:
             s, u = current(request, c, data)
             if not u:
                 return back()
             if not users.can(u["role"], "analyst"):
                 return security_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
-            try:
-                target = cve.parse_target(data)
-            except ValueError as exc:
-                return security_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
+            if data.get("kind") == "host":
+                tgt = (data.get("target") or "").strip()
+                ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
+                if not fingerprint.valid_target(tgt):
+                    return security_view(request, u, s, security_ctx(
+                        422, form=data, error="Enter one host name or IPv4 address to fingerprint."))
+                if not fingerprint.valid_ports(ports):
+                    return security_view(request, u, s, security_ctx(
+                        422, form=data, error="Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024)."))
+                name, ips = fingerprint.resolve(tgt)
+                if not ips:
+                    return security_view(request, u, s, security_ctx(
+                        422, form=data, error=f"Could not resolve {tgt}."))
+                if not all(users.posture_ip_in_scope(c, ip) for ip in ips):
+                    return security_view(request, u, s, security_ctx(
+                        403, form=data,
+                        error=f"{name} ({', '.join(ips)}) is outside the posture scope. Add it under Settings first."))
+                host_params = (ips[0], name, ports)
+            else:
+                try:
+                    target = cve.parse_target(data)
+                except ValueError as exc:
+                    return security_view(request, u, s, security_ctx(422, form=data, error=str(exc)))
+        if host_params is not None:
+            ip0, name, ports = host_params
+            scan = await run_in_threadpool(
+                fingerprint.scan, ip0, cve_db=cve_db, client=http, api_key=settings.nvd_api_key,
+                ports=ports, display=name)
+            return security_view(request, u, s, security_ctx(host_result=scan, form=data))
         result = await run_in_threadpool(cve.lookup, cve_db, target, http, settings.nvd_api_key)
         result["label"] = cve.target_label(target)
         return security_view(request, u, s, security_ctx(result=result, form=data))

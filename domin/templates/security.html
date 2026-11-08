@@ -23,9 +23,20 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="tabs" role="radiogroup" aria-label="Target type">
       <label class="tick"><input type="radio" name="kind" value="cpe"
-        {% if form.get('kind', 'cpe') != 'osv' %}checked{% endif %}> Product (CPE)</label>
+        {% if form.get('kind', 'cpe') == 'cpe' %}checked{% endif %}> Product (CPE)</label>
       <label class="tick"><input type="radio" name="kind" value="osv"
         {% if form.get('kind') == 'osv' %}checked{% endif %}> Package (OSV ecosystem)</label>
+      <label class="tick"><input type="radio" name="kind" value="host"
+        {% if form.get('kind') == 'host' %}checked{% endif %}> Host (fingerprint)</label>
+    </div>
+    <div class="grid g3">
+      <label class="field">Host <small>name or IPv4 to fingerprint (nmap -sT -sV)</small>
+        <input name="target" value="{{ form.get('target', '') }}" spellcheck="false" autocapitalize="off"></label>
+      <label class="field">Ports <small>default: common services</small>
+        <input name="ports" value="{{ form.get('ports', '') }}" placeholder="{{ default_ports }}"
+          spellcheck="false" autocapitalize="off"></label>
+      <span class="muted small-print">The target's resolved address must be inside the posture scope (Settings).
+        Connect scan only — no OS detection, no raw packets.</span>
     </div>
     <div class="grid g3">
       <label class="field">Vendor <small>CPE, e.g. proxmox</small>
@@ -79,6 +90,40 @@
 </section>
 {% endif %}
 
+{% if host_result is not none %}
+<section class="card">
+  <h2>{{ host_result.target }}
+    <small>{{ host_result.ip }} · {{ host_result.services|length }} open port(s)</small></h2>
+  {% if host_result.error %}<p class="note bad" role="alert">{{ host_result.error }}</p>{% endif %}
+  {% if host_result.note %}<p class="note" role="status">{{ host_result.note }}</p>{% endif %}
+  {% for svc in host_result.services %}
+  <div class="svc">
+    <h3>{{ svc.port }}/{{ svc.proto }} · {{ svc.service or 'unknown' }}
+      {% if svc.product %}<small>{{ svc.product }} {{ svc.version }}</small>{% endif %}
+      {% set crit = svc.findings|selectattr('severity', 'in', ['critical', 'high'])|list|length %}
+      {% if svc.findings %}<span class="pill {{ 'sev-critical' if crit else 'sev-medium' }}">{{ svc.findings|length }}
+        CVE(s){% if crit %}, {{ crit }} high+{% endif %}</span>
+      {% elif svc.matched %}<span class="pill sev-low">no known CVEs</span>
+      {% else %}<span class="pill sev-unknown">no CPE to match</span>{% endif %}</h3>
+    {% if svc.findings %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
+        <th>Source</th></tr></thead>
+      <tbody>{% for f in svc.findings %}<tr>
+        <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
+        <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
+        <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
+        <td>{{ f.fixed or '—' }}</td>
+        <td>{{ f.summary }}</td>
+        <td>{{ f.source }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
 <section class="card">
   <h2>About the CVE database</h2>
   <ul class="bullets">
@@ -87,8 +132,9 @@
     <li>Mode: <b>{{ cve_mode }}</b>. {% if cve_mode == 'own' %}This instance maintains its own database at
       <code>{{ cve_db }}</code>, re-querying a target older than {{ cve_ttl }} day(s).{% else %}This instance reads a
       shared database at <code>{{ cve_db }}</code>, read-only; it does not query the network.{% endif %}</li>
-    <li>Host fingerprinting (open ports, service and TLS versions) that feeds these look-ups automatically is built
-      next; today you enter a product or package version by hand.</li>
+    <li>Host fingerprinting (the <b>Host</b> tab) runs an nmap connect scan (<code>-sT -sV</code>, no OS detection,
+      no raw packets) of an in-scope address, then matches each service's CPEs against the sources above. You can
+      also enter a product or package version by hand.</li>
   </ul>
 </section>
 {% endblock %}

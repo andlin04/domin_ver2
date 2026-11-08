@@ -2,6 +2,21 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: security portal (CVE look-up and host fingerprinting)
+
+- A Security page (analyst or admin runs it; any signed-in user reads it). Look up the known vulnerabilities (CVEs)
+  of a product version (by CPE, against NVD) or a package version (by ecosystem, against OSV.dev) — the same sources
+  an infrastructure vulnerability watch uses, updated continuously upstream.
+- Host fingerprinting: the Host tab runs an nmap connect scan (`-sT -sV`, no OS detection and no raw packets, so no
+  extra privilege) of one in-scope address, then matches each open port's service CPEs against those sources and
+  lists the CVEs per service. The target's resolved address must fall inside the security posture scope (Settings).
+- Local CVE database: the instance keeps its own cache (`DOMIN_CVE_DB_MODE=own`, re-queried after
+  `DOMIN_CVE_TTL_DAYS`) or reads a shared one read-only (`shared` + `DOMIN_CVE_DB_PATH`). `DOMIN_NVD_API_KEY` raises
+  the NVD rate limit. nmap must be installed on the host; internet access (for `own` mode) may go through a proxy via
+  the usual `HTTPS_PROXY` environment variable.
+- Reversible: `deploy/install.sh` applies this in place and keeps the database, `/etc/domin.env` and certificates; to
+  undo, redeploy the previous build.
+
 ## 2026-11-08: signed-in area (users, roles, two-factor, scope)
 
 - The single admin password is replaced by user accounts with roles: viewer (reads the signed-in reports), analyst

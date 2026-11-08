@@ -320,6 +320,12 @@ def _country_ok(country: str, allow: list[str], deny: list[str]) -> bool:
     return (not allow or country in allow) and country not in deny
 
 
+def posture_ip_in_scope(conn: sqlite3.Connection, ip: str) -> bool:
+    """True when the posture / fingerprint engine may probe this address (IP allow/deny only)."""
+    scope = get_scope(conn)
+    return _ip_ok([ip], scope["ip_allow"], scope["ip_deny"])
+
+
 def posture_in_scope(conn: sqlite3.Connection, scope: dict) -> dict:
     """How many inventoried host names (and distinct countries) the posture IP and geolocation rules keep in scope."""
     rows = conn.execute(f"""SELECT r.host AS host, r.ip AS ip, r.country AS country FROM records r

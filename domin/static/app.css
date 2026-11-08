@@ -206,6 +206,10 @@ td.path { white-space: normal; min-width: 320px; }
 .tune label.tick { display: flex; align-items: center; gap: .5rem; color: var(--text); }
 .tune .btn { justify-self: start; }
 .small-print { font-size: .8rem; text-align: center; margin: 0; }
+.svc { padding: .7rem 0; border-top: 1px solid var(--border); }
+.svc:first-of-type { border-top: 0; }
+.svc h3 { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; margin: 0 0 .4rem; font-size: 1rem; }
+.svc h3 small { color: var(--muted); font-weight: 400; }
 
 @media (max-width: 860px) {
   .g2 { grid-template-columns: 1fr; }
