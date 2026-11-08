@@ -363,6 +363,70 @@ def trend(conn: sqlite3.Connection, domain: str = "", host: str = "") -> list[di
     return out if len(out) > 1 else []
 
 
+CHANGE_DAYS = 30
+CHANGE_ROWS = 100
+
+
+def port_set(ports: str) -> set[int]:
+    """The ports a scan covered ("22,80,1-1024" -> {22, 80, 1..1024})."""
+    out: set[int] = set()
+    for part in (ports or "").split(","):
+        lo, _, hi = part.partition("-")
+        if lo.isdigit() and (not hi or hi.isdigit()):
+            out.update(range(int(lo), int(hi or lo) + 1))
+    return out
+
+
+def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: datetime | None = None) -> dict:
+    """What changed between consecutive successful scans of each address: ports opened or closed (only ports both
+    scans covered, so a different profile is not a change), service versions, CVEs new or gone. Returns
+    {kpi: counts over the last CHANGE_DAYS days, rows: newest first (at most CHANGE_ROWS), compared: addresses
+    with two or more scans}."""
+    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    since = ((now or datetime.now()) - timedelta(days=CHANGE_DAYS)).isoformat(timespec="seconds")
+    last: dict[tuple[str, str], dict] = {}
+    rows: list[dict] = []
+    twice: set[tuple[str, str]] = set()
+    for r in conn.execute(f"""SELECT domain, ip, hosts, ports, finished, services FROM posture_scans
+                              WHERE status = 'done' AND finished IS NOT NULL {where} ORDER BY finished, id""", args):
+        if host and host not in (r["hosts"] or "").split(","):
+            continue
+        svc = {s["port"]: s for s in json.loads(r["services"] or "[]")}
+        cves = {f["cve"]: f["severity"] for s in svc.values() for f in s.get("findings") or []}
+        cur = {"ports": port_set(r["ports"]), "svc": svc, "cves": cves}
+        prev = last.get((r["domain"], r["ip"]))
+        last[(r["domain"], r["ip"])] = cur
+        if not prev:
+            continue
+        twice.add((r["domain"], r["ip"]))
+        both = cur["ports"] & prev["ports"]
+        base = {"at": r["finished"], "domain": r["domain"], "ip": r["ip"],
+                "host": (r["hosts"] or "").split(",")[0] or r["ip"]}
+
+        def ver(s: dict) -> str:
+            return " ".join(x for x in (s.get("product"), s.get("version")) if x) or s.get("service") or "?"
+        for p in sorted(both & (svc.keys() - prev["svc"].keys())):
+            rows.append({**base, "kind": "opened", "detail": f"{p}/tcp {ver(svc[p])}"})
+        for p in sorted(both & (prev["svc"].keys() - svc.keys())):
+            rows.append({**base, "kind": "closed", "detail": f"{p}/tcp {ver(prev['svc'][p])}"})
+        for p in sorted(svc.keys() & prev["svc"].keys()):
+            if ver(svc[p]) != ver(prev["svc"][p]):
+                rows.append({**base, "kind": "version", "detail": f"{p}/tcp {ver(prev['svc'][p])} → {ver(svc[p])}"})
+        for kind, got in (("new-cve", cves.keys() - prev["cves"].keys()),
+                          ("gone-cve", prev["cves"].keys() - cves.keys())):
+            if got:
+                sev = cves if kind == "new-cve" else prev["cves"]
+                worst = sorted(got, key=lambda c: (SEVERITIES.index(sev[c]) if sev[c] in SEVERITIES else 9, c))
+                rows.append({**base, "kind": kind, "detail": ", ".join(worst[:5]) + (f" +{len(got) - 5}" if
+                                                                                   len(got) > 5 else ""),
+                             "count": len(got), "severity": sev[worst[0]]})
+    recent = [x for x in rows if x["at"] >= since]
+    kpi = {k: sum(x.get("count", 1) for x in recent if x["kind"] == k)
+           for k in ("opened", "closed", "version", "new-cve", "gone-cve")}
+    return {"kpi": kpi, "rows": rows[::-1][:CHANGE_ROWS], "days": CHANGE_DAYS, "compared": len(twice),
+            "changed": len({(x["domain"], x["ip"]) for x in recent})}
+
+
 def domains(conn: sqlite3.Connection) -> list[str]:
     """Domains with a finished inventory scan, for the target pick-list."""
     return [r[0] for r in conn.execute(f"SELECT d.name FROM domains d JOIN ({db.LATEST}) s ON s.domain_id = d.id "

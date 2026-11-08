@@ -14,6 +14,36 @@
   {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
 </section>
 
+{% set ch = rep.changes %}
+{% if ch %}
+<section class="card posture-changes">
+  <h2>Changes <small>last {{ ch.days }} days, each scan against the address's previous scan · {{ ch.changed }} of
+    {{ ch.compared }} addresses with two or more scans changed</small></h2>
+  <div class="kpis">
+    <div class="kpi {{ 'alarm' if ch.kpi['new-cve'] }}"><span>New CVEs</span><b>+{{ ch.kpi['new-cve'] }}</b></div>
+    <div class="kpi"><span>CVEs gone</span><b class="up">−{{ ch.kpi['gone-cve'] }}</b></div>
+    <div class="kpi {{ 'warn' if ch.kpi.opened }}"><span>Ports opened</span><b>+{{ ch.kpi.opened }}</b></div>
+    <div class="kpi"><span>Ports closed</span><b>−{{ ch.kpi.closed }}</b></div>
+    <div class="kpi"><span>Version changes</span><b>{{ ch.kpi.version }}</b></div>
+  </div>
+  {% if ch.rows %}
+  <details class="posture-detail" {% if ch.rows|length <= 10 %}open{% endif %}><summary>{{ ch.rows|length }} changes, newest first</summary>
+  <div class="table-wrap"><table>
+    <thead><tr><th>When</th><th>Address</th><th>Change</th><th>Details</th></tr></thead>
+    <tbody>{% for x in ch.rows %}<tr>
+      <td>{{ x.at[:16]|replace('T', ' ') }}</td>
+      <td>{{ x.host }}{% if x.host != x.ip %} <small class="muted">{{ x.ip }}</small>{% endif %}</td>
+      <td>{{ {'opened': 'Port opened', 'closed': 'Port closed', 'version': 'Version changed',
+              'new-cve': 'New CVEs', 'gone-cve': 'CVEs gone'}[x.kind] }}{% if x.count %} ({{ x.count }}{% if x.kind == 'new-cve' %}, worst {{ x.severity }}{% endif %}){% endif %}</td>
+      <td>{{ x.detail }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  </details>
+  {% elif ch.compared %}<p class="muted">No changes: every address scanned again looks the same as before.</p>
+  {% else %}<p class="muted">Changes show once an address has been scanned twice.</p>{% endif %}
+</section>
+{% endif %}
+
 <section class="grid g3 posture-charts">
   <div class="card"><h2>Riskiest addresses <small>CVEs by severity · click to open</small></h2>
     <div class="chart h260"><canvas id="pc-hosts" role="img" aria-label="Distinct CVEs per severity for the riskiest addresses; the same figures are in Findings by address"></canvas></div></div>

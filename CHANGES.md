@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-08: posture Changes panel
+
+- The posture report (Security, per domain or host) has a Changes panel under the KPIs: each successful scan of an
+  address against its previous successful scan. Counts for the last 30 days (new CVEs, CVEs gone, ports opened,
+  ports closed, version changes) and a table of the latest 100 changes. Only ports both scans covered count, so a
+  scan with another profile is not a change; failed (timed-out) scans are not compared.
+- Rollback: revert this change (`posture.changes`, the panel in `_posture_report.html`).
+
 ## 2026-11-08: parallel posture scans, Mullvad "random country"
 
 - Tuning: "Posture scans at once" (1-4, default 1). The worker runs 4 posture threads; only as many as the setting

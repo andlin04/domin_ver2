@@ -66,6 +66,37 @@ def test_enqueue_skips_addresses_already_pending(settings):
         assert posture.enqueue(c, DOM, found, "22,80", "ana") == 0
 
 
+def test_changes_compare_each_scan_with_the_previous_one(settings):
+    def svc(port, product, version, cves=()):
+        return {"port": port, "service": "x", "product": product, "version": version,
+                "findings": [{"cve": c, "severity": "high", "score": 7.5, "summary": "", "fixed": [],
+                              "references": []} for c in cves]}
+
+    def done(at, ports, services, status="done"):
+        c.execute("""INSERT INTO posture_scans (domain, ip, hosts, ports, status, created, finished, services)
+                     VALUES (?, '172.20.4.50', 'web.home.arpa', ?, ?, ?, ?, ?)""",
+                  (DOM, ports, status, at, at, json.dumps(services)))
+    with db.connect(settings.db_path) as c:
+        assert posture.changes(c, DOM)["compared"] == 0
+        done("2026-11-01T10:00:00", "22,80,443", [svc(22, "OpenSSH", "9.2"), svc(80, "nginx", "1.24", ["CVE-1"])])
+        done("2026-11-03T10:00:00", "1-1024", [], status="failed")   # a failed (timed-out) scan is not compared
+        done("2026-11-05T10:00:00", "22,80,443,8080",
+             [svc(80, "nginx", "1.26", ["CVE-2"]), svc(443, "nginx", "1.26"), svc(8080, "jetty", "9")])
+        ch = posture.changes(c, DOM, now=posture.datetime(2026, 11, 8))
+    kinds = {(x["kind"], x["detail"]) for x in ch["rows"]}
+    assert ("opened", "443/tcp nginx 1.26") in kinds and ("closed", "22/tcp OpenSSH 9.2") in kinds
+    assert ("version", "80/tcp nginx 1.24 → nginx 1.26") in kinds
+    assert ("new-cve", "CVE-2") in kinds and ("gone-cve", "CVE-1") in kinds
+    assert not any("8080" in d for _, d in kinds)   # the earlier scan did not cover 8080: not "opened"
+    assert ch["kpi"] == {"opened": 1, "closed": 1, "version": 1, "new-cve": 1, "gone-cve": 1}
+    assert ch["compared"] == 1 and ch["changed"] == 1
+    assert posture.port_set("22,80,100-102") == {22, 80, 100, 101, 102}
+    with app_client(settings) as h:
+        sign_in(h, "ana")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert "Changes" in page and "Port opened" in page and "nginx 1.24 → nginx 1.26" in page
+
+
 def test_posture_slots_above_the_setting_take_no_scans(settings, nmap):
     with db.connect(settings.db_path) as c:
         found, _ = posture.targets(c, DOM)

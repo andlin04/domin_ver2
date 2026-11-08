@@ -924,6 +924,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
+            rep["changes"] = posture.changes(c, dom, host)
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
