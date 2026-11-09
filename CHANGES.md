@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Tags column in the posture Host names table
+
+- Posture view, Host names: a Tags column with the network tags (Settings) and the host name's own tags; analysts
+  and admins remove (×) and add tags there and land back on the table. The Filter matches own tags too.
+  Rollback: revert this commit.
+
 ## 2026-11-09: nmap errors shown instead of ParseError
 
 - nmap output cut short (no `</nmaprun>`) fails the scan with nmap's own last error line ("nmap stopped early:

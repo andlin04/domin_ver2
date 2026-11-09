@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -1121,6 +1121,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 tags.remove(c, host, tag)
             else:
                 tags.add(c, host, tag, u["name"])
+        if data.get("from") == "posture":   # the posture view's Host names table: back to that table
+            return back(f"{base}/security?{urlencode({'domain': dom})}#posture-hosts")
         return back(f"/d/{dom}#records")
 
     def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):

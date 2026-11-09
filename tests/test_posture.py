@@ -537,6 +537,26 @@ def test_analyst_tags_hosts_and_groups_by_tag(settings, nmap):
                                            "tag": "y"}).status_code == 403
 
 
+def test_posture_host_names_table_shows_and_edits_tags(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert ">Tags</th>" in page and 'aria-label="New tag for nas.corp.example"' in page
+        r = h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
+                                        "from": "posture"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith(f"/admin/security?domain={DOM}")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert 'aria-label="Remove tag storage"' in page
+    with db.connect(settings.db_path) as c:
+        nas = next(x for x in posture.host_list(c, DOM) if x["host"] == "nas.corp.example")
+        assert nas["tags"] == ["storage"]
+        assert "storage" in posture.with_results([nas], [])[0]["text"]
+    with app_client(settings) as h:
+        sign_in(h, "vee")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert ">storage<" in page and "Remove tag" not in page and "New tag for" not in page
+
+
 def test_viewer_sees_tags_but_cannot_change_them(settings):
     with db.connect(settings.db_path) as c:
         from domin import tags

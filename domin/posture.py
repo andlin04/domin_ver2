@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import admin, cve, db, fingerprint, proxy, users
+from . import admin, cve, db, fingerprint, proxy, tags, users
 
 log = logging.getLogger("domin.posture")
 
@@ -626,9 +626,11 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
                 e["pending"] = True
             elif r["status"] == "done" and r["finished"] and r["finished"] > e["last"]:
                 e["last"] = r["finished"]
+    own = tags.for_hosts(conn, list(names))
     for e in names.values():
         e["last"] = e["last"][:16].replace("T", " ")
         e["net_tags"] = users.net_tags(scope["net_tags"], e["ips"])   # Settings > Network tags, for the Filter
+        e["tags"] = own.get(e["host"], [])                            # set on the host name (Tags column)
     return list(names.values())
 
 
@@ -657,8 +659,8 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
         res = [by_ip[ip] for ip in h["ips"] if ip in by_ip]
         cves = {v["cve"]: v for r in res for v in r.get("vulns") or []}
         # what the page's Filter box matches on: names, addresses, services, products, versions, ports, CVEs
-        text = [h["host"], *h["ips"], *h.get("countries", []), *h.get("net_tags", []), h.get("skip") or "",
-                *(v["severity"] for v in cves.values()), *cves]
+        text = [h["host"], *h["ips"], *h.get("countries", []), *h.get("net_tags", []), *h.get("tags", []),
+                h.get("skip") or "", *(v["severity"] for v in cves.values()), *cves]
         for r in res:
             text += [r.get("note") or "", r.get("error") or ""]
             for s in r.get("services") or []:
