@@ -206,6 +206,9 @@ dl.facts dd { margin: 0; word-break: break-word; }
 .table-tools .filter { margin-left: auto; }
 th.tick, td.tick { width: 2.2rem; text-align: center; }
 dialog.confirm .field { display: block; margin: 0 0 1.1rem; }
+dialog.confirm.wide { max-width: min(64rem, 94vw); width: 94vw; max-height: 88vh; overflow: auto; }
+dialog.confirm.wide h2 { margin: 0 0 .8rem; font-size: 1.1rem; }
+dialog.confirm.wide menu { margin-top: 1rem; }
 td.path { white-space: normal; min-width: 320px; }
 .step { display: inline-block; margin: 0 .35rem .2rem 0; padding: .05rem .45rem; border-radius: 6px; background: var(--surface-2); font-size: .8rem; }
 .step i { font-style: normal; color: var(--muted); }

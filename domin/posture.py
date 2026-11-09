@@ -560,6 +560,28 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
     return list(names.values())
 
 
+def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
+    """host_list entries joined with their addresses' current results (report rows): worst severity (`rank`: 0 =
+    critical, for sorting), CVEs counted once per host name (`sev_n`, `cves`, `fixable`), open ports, how many of its
+    addresses look blocked or failed, and the anchors of the address details."""
+    by_ip = {r["ip"]: r for r in rows}
+    order = (*SEVERITIES, "none")
+    out = []
+    for h in names:
+        res = [by_ip[ip] for ip in h["ips"] if ip in by_ip]
+        cves = {v["cve"]: v for r in res for v in r.get("vulns") or []}
+        worsts = [r["worst"] for r in res if r.get("worst") in order]
+        worst = min(worsts, key=order.index) if worsts else ""
+        out.append({**h, "anchors": [anchor(r["ip"]) for r in res], "worst": worst,
+                    "rank": order.index(worst) if worst else len(order),
+                    "sev_n": {s: n for s in SEVERITIES if (n := sum(1 for v in cves.values() if v["severity"] == s))},
+                    "cves": len(cves), "fixable": sum(1 for v in cves.values() if v["fixes"]),
+                    "open_ports": sum(r.get("open_ports") or 0 for r in res),
+                    "blocked": sum(1 for r in res if r.get("blocked")), "errors": sum(1 for r in res if r.get("error")),
+                    "results": len(res)})
+    return out
+
+
 def hosts(conn: sqlite3.Connection, domain: str) -> list[str]:
     """Host names with an address in the domain's latest inventory scan, for the host pick-list."""
     return [r[0] for r in conn.execute(f"""SELECT DISTINCT r.host FROM records r JOIN ({db.LATEST}) s

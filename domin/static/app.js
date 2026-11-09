@@ -57,7 +57,8 @@ $$("table.sortable").forEach((table) => {
     th.dataset.dir = dir;
     const body = table.tBodies[0];
     const key = (tr) => {
-      const t = tr.cells[col].textContent.trim();
+      const c = tr.cells[col];
+      const t = (c.dataset.key ?? c.textContent).trim();   // data-key: a sort value other than the text
       if (type === "num") return parseFloat(t) || 0;
       return type === "ip" ? ipKey(t) : t.toLowerCase();
     };
@@ -93,6 +94,32 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// posture host list: a host name shows its addresses' details (moved from the hidden #pa-pool, put back on close)
+function hostDetails(ids, title) {
+  const dlg = document.getElementById("host-details");
+  const pool = document.getElementById("pa-pool");
+  if (!dlg || !pool) return;
+  const body = $("[data-details-body]", dlg);
+  $("#host-details-title", dlg).textContent = title;
+  ids.map((id) => document.getElementById(id)).filter(Boolean).forEach((box) => {
+    box.open = ids.length === 1;
+    body.append(box);
+  });
+  dlg.showModal();
+}
+(function hostDetailsDialog() {
+  const dlg = document.getElementById("host-details");
+  const pool = document.getElementById("pa-pool");
+  if (!dlg || !pool) return;
+  dlg.addEventListener("close", () => pool.append(...$("[data-details-body]", dlg).children));
+  $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
+  document.addEventListener("click", (ev) => {
+    const a = ev.target.closest("a[data-host-details]");
+    if (!a) return;
+    ev.preventDefault();
+    hostDetails(a.dataset.hostDetails.split(" "), a.dataset.title);
+  });
+})();
 // posture host list: tick rows (the header box ticks every visible one), "Scan now" asks for a profile and queues the
 // ticked rows that are still visible
 (function hostPicker() {
@@ -134,6 +161,7 @@ document.addEventListener("click", (ev) => {
   const box = a && document.getElementById(a.getAttribute("href").slice(1));
   if (!box) return;
   ev.preventDefault();
+  if (box.closest("#pa-pool")) { hostDetails([box.id], a.textContent.trim()); return; }   // shown in the dialog
   box.open = true;
   box.scrollIntoView({ behavior: "smooth", block: "start" });
   history.replaceState(null, "", a.getAttribute("href"));
@@ -576,6 +604,7 @@ function postureCharts() {
                  onClick: (_, els) => {
                    const box = els.length && document.getElementById(hosts[els[0].index].anchor);
                    if (!box) return;
+                   if (box.closest("#pa-pool")) { hostDetails([box.id], hosts[els[0].index].label || box.id); return; }
                    box.open = true;
                    box.scrollIntoView({ behavior: "smooth", block: "start" });
                  } },

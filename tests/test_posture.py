@@ -100,6 +100,18 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     with db.connect(settings.db_path) as c:
         after = {h["host"]: h for h in posture.host_list(c, DOM)}
     assert after["nas.corp.example"]["last"] and after["www.corp.example"]["last"] == ""
+    with app_client(settings) as h:
+        sign_in(h, "ana")
+        page = h.get(f"/admin/security?domain={DOM}").text
+    # one table: results sit on the host rows; the address details wait in the hidden pool for the dialog
+    assert 'data-host-details="pa-172-20-4-60"' in page and 'id="pa-pool" hidden' in page
+    assert "Findings by address <small>" not in page and 'id="host-details"' in page
+    with db.connect(settings.db_path) as c:
+        rows = posture.report(posture.current(c, DOM))["rows"]
+        merged = {m["host"]: m for m in posture.with_results(posture.host_list(c, DOM), rows)}
+    nas = merged["nas.corp.example"]
+    assert nas["results"] == 1 and nas["cves"] >= 1 and nas["worst"] and nas["rank"] < 5 and nas["open_ports"] == 3
+    assert merged["www.corp.example"]["results"] == 0 and merged["www.corp.example"]["worst"] == ""
 
 
 def test_enqueue_skips_addresses_already_pending(settings):
@@ -603,7 +615,7 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
         order = [page.index(x) for x in ("Scan / renew", "Authorized use only", "Critical CVEs", "Riskiest addresses",
-                                         "Findings by address <small>", "Scan age")]
+                                         'id="posture-hosts"', "Scan age")]   # host table = findings list
         assert order == sorted(order)
         assert 'id="posture-data"' in page and "CVE-2024-9999" in page
         assert "Vulnerabilities <small>" not in page and "Services &amp; scan details" in page

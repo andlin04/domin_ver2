@@ -1,0 +1,52 @@
+{# Host names of the picked domain with their current results (posture.with_results), ticks and "Scan now".
+   A host name opens its addresses' details (#pa-pool) in a dialog. #}
+<section class="card host-list">
+  <h2>Host names <small>{{ host_list|length }} with an address in the latest inventory scan of {{ posture_domain }}
+    · {{ host_list|selectattr('last', 'equalto', '')|list|length }} never scanned · open a name for its findings</small></h2>
+  <div class="table-tools">
+    {% if user.role in ('admin', 'analyst') %}
+    <button class="btn primary" type="button" data-scan-picked disabled>Scan now</button>
+    <span class="muted small-print" data-picked-count>0 ticked</span>{% endif %}
+    <input class="filter" placeholder="Filter all columns…" data-filter="#posture-hosts" aria-label="Filter host names">
+  </div>
+  <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters>
+    <thead><tr>
+      <th class="tick" data-nofilter><input type="checkbox" data-pick-all aria-label="Tick every visible host name"></th>
+      <th data-sort="text">Host name</th><th data-sort="ip">Addresses</th><th data-sort="num">Worst</th>
+      <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
+      <th data-sort="text">Last scan</th></tr></thead>
+    <tbody>{% for h in host_list %}<tr>
+      <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
+      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" data-host-details="{{ h.anchors|join(' ') }}"
+        data-title="{{ h.host }}">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
+      <td class="mono">{{ h.ips|join(', ') }}</td>
+      <td data-key="{{ h.rank }}">{% if h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
+        {% if h.blocked %}<span class="pill blocked" title="{{ h.blocked }} of {{ h.results }} address(es): no scanned port answered">potentially blocked</span>{% endif %}
+        {% if h.errors %}<span class="pill fix-no">{{ h.errors }} failed</span>{% endif %}</td>
+      <td data-key="{{ h.cves if h.results else -1 }}">{% if h.results %}{{ h.cves }}{% for s, n in h.sev_n.items() %} <span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}{% endif %}</td>
+      <td data-key="{{ h.fixable if h.results else -1 }}">{% if h.cves %}{{ h.fixable }} of {{ h.cves }}{% endif %}</td>
+      <td data-key="{{ h.open_ports if h.results else -1 }}">{% if h.results %}{{ h.open_ports }}{% endif %}</td>
+      <td>{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %} <small class="muted">· {{ h.skip }}</small>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <dialog class="confirm wide" id="host-details" aria-labelledby="host-details-title">
+    <h2 id="host-details-title"></h2>
+    <div data-details-body></div>
+    <menu><button type="button" class="btn" data-cancel>Close</button></menu>
+  </dialog>
+  {% if user.role in ('admin', 'analyst') %}
+  <dialog class="confirm" id="scan-picked">
+    <form method="post" action="{{ base }}/security/posture" data-posture-run>
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="domain" value="{{ posture_domain }}">
+      <input type="hidden" name="hosts" value=""><input type="hidden" name="picked" value="1">
+      <p>Scan <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }} now?</p>
+      <label class="field">Profile
+        <select name="profile">
+          {% for pr in profiles %}<option value="{{ pr.name }}">{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %} · route {{ route_names.get(pr.route, 'a deleted route') }}</option>{% endfor %}
+        </select></label>
+      <menu><button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary">Confirm</button></menu>
+    </form>
+  </dialog>{% endif %}
+</section>

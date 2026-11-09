@@ -2,6 +2,15 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: host list and findings in one table
+
+- With a domain picked, the host name table replaces "Findings by address": each row also shows the worst
+  severity, CVEs (once per host name, with severity pills), fixable, open ports, "potentially blocked" and failed
+  scans; Worst sorts critical first. A host name opens its addresses' findings (CVE groups, services, Renew) in a
+  dialog; the riskiest-addresses chart and the CVE table's address links open the same dialog.
+- "All domains" and the domain page keep the per-address list.
+- Rollback: revert this change.
+
 ## 2026-11-09: posture host list with "Scan now"
 
 - With a domain picked, the posture page lists its host names with an address (latest inventory scan): addresses,

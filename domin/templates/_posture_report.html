@@ -3,6 +3,7 @@
 {% set k = rep.kpi %}
 {% if not rep.rows %}
 <p class="muted card">No posture scans yet.</p>
+{% if host_list %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
 <section class="kpis posture-kpis">
   <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
@@ -88,8 +89,13 @@
 </section>
 {% endif %}
 
+{# a picked domain: the host name table is the findings list; the address details wait in a hidden pool for its dialog #}
+{% if host_list %}{% include "_posture_hosts.html" %}
+<div id="pa-pool" hidden>
+{% else %}
 <section class="card">
   <h2>Findings by address <small>{{ rep.rows|length }}, worst first — open one for its CVEs, open a CVE for its description</small></h2>
+{% endif %}
   {% for p in rep.rows %}
   <details class="svc posture-detail" id="pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}">
     <summary class="posture-head">
@@ -162,7 +168,7 @@
     </details>
   </details>
   {% endfor %}
-</section>
+{% if host_list %}</div>{% else %}</section>{% endif %}
 
 <section class="grid g2 posture-charts">
   <div class="card"><h2>Scan age <small>addresses by age of their current result</small></h2>
