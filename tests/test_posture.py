@@ -60,6 +60,24 @@ def test_targets_keep_in_scope_addresses_of_the_latest_scan(settings):
         assert [t["ip"] for t in posture.targets(c, DOM)[0]] == ["172.20.4.50"]
 
 
+def test_never_scan_rules_skip_matching_hosts(settings):
+    recs = [{"host": "autodiscover.corp.example", "ip": "172.20.4.70", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"},
+            {"host": "autodiscover.old.corp.example", "ip": "172.20.4.71", "descr": "Own hosting"},
+            {"host": "www.corp.example", "ip": "172.20.4.72", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"},
+            {"host": "sip.corp.example", "ip": "172.20.4.72", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"}]
+    ms = "ms.corp.example"
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, ms, db.now(), "scan", recs)
+        found, skipped = posture.targets(c, ms)   # defaults: Microsoft 365 names at Microsoft
+        assert {t["ip"]: t["hosts"] for t in found} == {"172.20.4.71": ["autodiscover.old.corp.example"],
+                                                         "172.20.4.72": ["www.corp.example"]} and skipped == 1
+        scope = users.parse_scope(c, {"ex_host_0": "WWW.", "ex_owner_0": "", "ex_note_0": "test",
+                                      "ex_host_1": "", "ex_owner_1": "", "ex_note_1": "blank row dropped"})
+        assert scope["posture_exclude"] == [{"host": "www.", "owner": "", "note": "test"}]
+        users.save_scope(c, {**users.get_scope(c), "posture_exclude": scope["posture_exclude"]})
+        assert sorted(t["ip"] for t in posture.targets(c, ms)[0]) == ["172.20.4.70", "172.20.4.71", "172.20.4.72"]
+
+
 def test_enqueue_skips_addresses_already_pending(settings):
     with db.connect(settings.db_path) as c:
         found, _ = posture.targets(c, DOM)

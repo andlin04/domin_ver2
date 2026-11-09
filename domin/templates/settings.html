@@ -79,6 +79,20 @@
     </table></div>
     <p class="muted small-print">Empty allow = every country; deny removes a country even when allowed.</p>
     {% else %}<p class="muted">No country data in the inventory yet (load DB-IP country data and run scans).</p>{% endif %}
+    <h3 id="exclusions">Never scan <small>hosts skipped by every posture scan</small></h3>
+    <div class="table-wrap short"><table id="posture-exclude">
+      <thead><tr><th>Host name contains</th><th>Network owner contains</th><th>Note</th></tr></thead>
+      <tbody>{% for r in scope.posture_exclude + [{'host': '', 'owner': '', 'note': ''}] * 3 %}<tr>
+        <td><input name="ex_host_{{ loop.index0 }}" value="{{ r.host }}" spellcheck="false" autocapitalize="off"
+          aria-label="Host name contains, rule {{ loop.index }}"></td>
+        <td><input name="ex_owner_{{ loop.index0 }}" value="{{ r.owner }}" spellcheck="false" autocapitalize="off"
+          aria-label="Network owner contains, rule {{ loop.index }}"></td>
+        <td><input name="ex_note_{{ loop.index0 }}" value="{{ r.note }}" aria-label="Note, rule {{ loop.index }}"></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted small-print">A host is skipped when its name contains the first text and its address's network owner
+      (ASN, netname or description from the inventory) contains the second; an empty box matches anything, case does not
+      matter. Clear both boxes to remove a rule; save to add more empty rows.</p>
   </section>
 
   <section class="card">

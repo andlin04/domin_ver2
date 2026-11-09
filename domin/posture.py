@@ -27,18 +27,22 @@ log = logging.getLogger("domin.posture")
 
 def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "") -> tuple[list[dict], int]:
     """Addresses of the domain's latest inventory scan inside the posture scope, as [{ip, hosts, country}], and how
-    many addresses the scope left out. host or ip narrows the set to that host name or address."""
+    many addresses the scope or the "Never scan" exclusions left out. host or ip narrows the set to that host name or
+    address. An address is skipped when every host name on it is excluded."""
     scope = users.get_scope(conn)
-    rows = conn.execute(f"""SELECT r.host, r.ip, r.country FROM records r JOIN ({db.LATEST}) s ON s.id = r.scan_id
+    rows = conn.execute(f"""SELECT r.host, r.ip, r.country, r.asn, r.netname, r.descr FROM records r
+                            JOIN ({db.LATEST}) s ON s.id = r.scan_id
                             JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.ip != ''""", (domain,))
     by_ip: dict[str, dict] = {}
     for r in rows:
         if (host and r["host"] != host) or (ip and r["ip"] != ip):
             continue
         e = by_ip.setdefault(r["ip"], {"ip": r["ip"], "hosts": set(), "country": r["country"] or ""})
-        e["hosts"].add(r["host"])
+        owner = f"{r['asn']} {r['netname']} {r['descr']}"
+        if not users.excluded(scope["posture_exclude"], r["host"], owner):
+            e["hosts"].add(r["host"])
     keep = [{**e, "hosts": sorted(e["hosts"])} for e in by_ip.values()
-            if users.posture_ok(scope, e["ip"], e["country"])]
+            if e["hosts"] and users.posture_ok(scope, e["ip"], e["country"])]
     keep.sort(key=lambda e: e["ip"])
     return keep, len(by_ip) - len(keep)
 

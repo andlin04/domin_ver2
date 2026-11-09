@@ -222,6 +222,14 @@ SCOPE_DEFAULT = {"domains_allow": [], "domains_deny": [],                 # doma
                  "scan_limits_off": False,                                # domain scanner: skip the visitor limits
                  "require_2fa": {r: False for r in ROLES}}
 LIST_KEYS = ("domains_allow", "domains_deny", "ip_allow", "ip_deny", "countries_allow", "countries_deny")
+# Posture exclusions: hosts never scanned. A rule is {"host": text, "owner": text, "note": text}: it matches when the
+# host name contains `host` and the address's network owner (ASN, netname, description) contains `owner`; an empty
+# field matches anything, case-insensitive. Defaults: Microsoft 365 service names that point at Microsoft (its hosts,
+# not the domain owner's).
+EXCLUDE_DEFAULT = [{"host": h, "owner": "microsoft", "note": "Microsoft 365"}
+                   for h in ("autodiscover.", "enterpriseenrollment.", "enterpriseregistration.", "lyncdiscover.",
+                             "msoid.", "sip.")]
+EXCLUDE_MAX = 200
 
 
 def get_scope(conn: sqlite3.Connection) -> dict:
@@ -237,7 +245,15 @@ def get_scope(conn: sqlite3.Connection) -> dict:
                     out[k] = bool(saved[k])
                 else:
                     out[k] = list(saved[k])
+    out["posture_exclude"] = [dict(r) for r in (saved["posture_exclude"] if raw and "posture_exclude" in saved
+                                                else EXCLUDE_DEFAULT)]
     return out
+
+
+def excluded(rules: list[dict], host: str, owner: str) -> dict | None:
+    """The first exclusion rule whose host and owner texts are contained in this host name and network owner."""
+    host, owner = (host or "").lower(), (owner or "").lower()
+    return next((r for r in rules if r["host"] in host and r["owner"] in owner), None)
 
 
 def required_for(conn: sqlite3.Connection, role: str) -> bool:
@@ -269,6 +285,14 @@ def parse_scope(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
             except ValueError:
                 raise ValueError(f"{label}: {item} is not a valid CIDR or address") from None
         out[key] = nets
+    rules = []
+    for i in range(EXCLUDE_MAX):   # rows ex_host_N / ex_owner_N / ex_note_N; a row with both texts empty is dropped
+        if f"ex_host_{i}" not in form:
+            continue
+        host, owner, note = ((form.get(f"ex_{k}_{i}") or "").strip()[:100] for k in ("host", "owner", "note"))
+        if host or owner:
+            rules.append({"host": host.lower(), "owner": owner.lower(), "note": note})
+    out["posture_exclude"] = rules
     inv = set(inventory_countries(conn))
     out["countries_allow"] = [c for c in inv if form.get(f"ca:{c}") == "on"]
     out["countries_deny"] = [c for c in inv if form.get(f"cd:{c}") == "on"]

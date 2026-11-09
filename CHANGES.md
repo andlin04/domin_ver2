@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: posture "Never scan" list
+
+- Settings · Security posture scope has an editable "Never scan" list: a host is skipped by every posture scan
+  when its name contains one text and its network owner (ASN, netname, description) contains the other; an empty
+  box matches anything. An address is skipped when every name on it is. Defaults until the settings are saved:
+  autodiscover., enterpriseenrollment., enterpriseregistration., lyncdiscover., msoid., sip. at "microsoft".
+- Rollback: revert this change (the stored list is ignored by older versions).
+
 ## 2026-11-09: CVEs grouped per service
 
 - An address's CVE list is grouped per service (product, version, port), worst group first, each collapsed with

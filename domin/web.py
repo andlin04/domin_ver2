@@ -1001,7 +1001,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             found, skipped = posture.targets(c, dom, host=host, ip=ip)
             if not found:
                 what = host or ip or dom
-                why = f" ({skipped} address(es) outside the posture scope; see Settings)" if skipped else ""
+                why = (f" ({skipped} address(es) outside the posture scope or on its Never scan list; see Settings)"
+                       if skipped else "")
                 return refuse(422, f"No address of {what} to scan{why}.")
             batch: list[int] = []
             n = posture.enqueue(c, dom, found, prof, u["name"], batch)

@@ -210,6 +210,7 @@ def test_geolocation_options_come_from_the_inventory(settings):
         login(h, "boss")
         page = h.get(BASE + "/settings").text
         assert 'name="ca:Sweden"' in page and 'name="cd:Finland"' in page   # pick-list, not free text
+        assert 'id="posture-exclude"' in page and 'name="ex_host_0"' in page   # Never scan rules, editable rows
 
 
 def test_domain_scope_refuses_out_of_scope_domain_in_the_scanner(settings):
