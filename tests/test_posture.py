@@ -61,10 +61,10 @@ def test_targets_keep_in_scope_addresses_of_the_latest_scan(settings):
 
 
 def test_never_scan_rules_skip_matching_hosts(settings):
-    recs = [{"host": "autodiscover.corp.example", "ip": "172.20.4.70", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"},
-            {"host": "autodiscover.old.corp.example", "ip": "172.20.4.71", "descr": "Own hosting"},
-            {"host": "www.corp.example", "ip": "172.20.4.72", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"},
-            {"host": "sip.corp.example", "ip": "172.20.4.72", "netname": "MICROSOFT-CORP-MSN-AS-BLOCK"}]
+    recs = [{"host": "autodiscover.corp.example", "ip": "172.20.4.70", "asn": "8075", "netname": "MSFT"},
+            {"host": "autodiscover.old.corp.example", "ip": "172.20.4.71", "asn": "18075", "descr": "Own hosting"},
+            {"host": "www.corp.example", "ip": "172.20.4.72", "asn": "8075", "netname": "MSFT"},
+            {"host": "sip.corp.example", "ip": "172.20.4.72", "asn": "8075", "netname": "MSFT"}]
     ms = "ms.corp.example"
     with db.connect(settings.db_path) as c:
         db.save_scan(c, ms, db.now(), "scan", recs)

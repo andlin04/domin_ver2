@@ -226,7 +226,7 @@ LIST_KEYS = ("domains_allow", "domains_deny", "ip_allow", "ip_deny", "countries_
 # host name contains `host` and the address's network owner (ASN, netname, description) contains `owner`; an empty
 # field matches anything, case-insensitive. Defaults: Microsoft 365 service names that point at Microsoft (its hosts,
 # not the domain owner's).
-EXCLUDE_DEFAULT = [{"host": h, "owner": "microsoft", "note": "Microsoft 365"}
+EXCLUDE_DEFAULT = [{"host": h, "owner": "as8075", "note": "Microsoft 365 (Microsoft's AS8075)"}
                    for h in ("autodiscover.", "enterpriseenrollment.", "enterpriseregistration.", "lyncdiscover.",
                              "msoid.", "sip.")]
 EXCLUDE_MAX = 200
@@ -248,6 +248,12 @@ def get_scope(conn: sqlite3.Connection) -> dict:
     out["posture_exclude"] = [dict(r) for r in (saved["posture_exclude"] if raw and "posture_exclude" in saved
                                                 else EXCLUDE_DEFAULT)]
     return out
+
+
+def owner_text(record) -> str:
+    """What a "network owner contains" rule is matched against: "AS<number> <netname> <description>"."""
+    asn = str(record["asn"] or "")
+    return f"{'AS' + asn if asn.isdigit() else asn} {record['netname'] or ''} {record['descr'] or ''}"
 
 
 def excluded(rules: list[dict], host: str, owner: str) -> dict | None:

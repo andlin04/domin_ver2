@@ -39,8 +39,7 @@ def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "",
         if (host and r["host"] != host) or (ip and r["ip"] != ip) or (names is not None and r["host"] not in names):
             continue
         e = by_ip.setdefault(r["ip"], {"ip": r["ip"], "hosts": set(), "country": r["country"] or ""})
-        owner = f"{r['asn']} {r['netname']} {r['descr']}"
-        if not users.excluded(scope["posture_exclude"], r["host"], owner):
+        if not users.excluded(scope["posture_exclude"], r["host"], users.owner_text(r)):
             e["hosts"].add(r["host"])
     keep = [{**e, "hosts": sorted(e["hosts"])} for e in by_ip.values()
             if e["hosts"] and users.posture_ok(scope, e["ip"], e["country"])]
@@ -543,7 +542,7 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
                                          "skip": "out of scope"})
         if r["ip"] not in e["ips"]:
             e["ips"].append(r["ip"])
-        if users.excluded(scope["posture_exclude"], r["host"], f"{r['asn']} {r['netname']} {r['descr']}"):
+        if users.excluded(scope["posture_exclude"], r["host"], users.owner_text(r)):
             e["skip"] = e["skip"] if e["skip"] == "" else "on the Never scan list"
         elif users.posture_ok(scope, r["ip"], r["country"] or ""):
             e["skip"] = ""

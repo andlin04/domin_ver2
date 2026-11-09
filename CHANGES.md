@@ -10,6 +10,8 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 - Tick rows (the header box ticks every visible row); "Scan now" opens a dialog with the profile to use and queues
   the ticked rows that are still visible, with the usual progress dialog.
 - Tables: sorting uses the clicked header's own column, so a table may start with a column that does not sort.
+- Never scan: the owner text is now "AS<number> <netname> <description>", and the defaults match "as8075"
+  (Microsoft's ASN) instead of "microsoft": one Microsoft address had no description and was still scanned.
 - Rollback: revert this change.
 
 ## 2026-11-09: posture "Never scan" list
