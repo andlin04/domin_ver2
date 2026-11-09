@@ -26,9 +26,10 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="domain" value="{{ posture_domain }}">
     <label class="field">Scan target
-      <select name="host">
+      {# never the view's host filter: a scan covers the whole domain unless a host is picked here #}
+      <select name="host" data-scan-target>
         <option value="">Whole domain ({{ posture_hosts|length }} host names)</option>
-        {% for h in posture_hosts %}<option value="{{ h }}" {% if (form.get('host') or posture_host) == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
+        {% for h in posture_hosts %}<option value="{{ h }}" {% if form.get('host') == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
       </select></label>
     <label class="field">Profile
       <select name="profile">
@@ -37,7 +38,7 @@
     <label class="field">Ports <small>optional override</small>
       <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile" size="12"
         spellcheck="false" autocapitalize="off"></label>
-    <button class="btn primary" type="submit">Scan / renew</button>
+    <button class="btn primary" type="submit" data-scan-button>{{ 'Scan / renew 1 host' if form.get('host') else 'Scan / renew whole domain' }}</button>
   </form>
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}

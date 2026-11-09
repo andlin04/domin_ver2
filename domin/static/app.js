@@ -91,6 +91,11 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// posture: the scan button says what it will scan
+$$("[data-scan-target]").forEach((sel) => sel.addEventListener("change", () => {
+  const btn = $("[data-scan-button]", sel.form);
+  if (btn) btn.textContent = sel.value ? "Scan / renew 1 host" : "Scan / renew whole domain";
+}));
 // a link to a collapsed section (posture: CVE findings -> the address) opens it before scrolling there
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("a[data-open-details]");

@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: posture scan form starts at the whole domain
+
+- The scan form no longer takes the host picked in the view: it starts at "Whole domain", and the button says
+  "Scan / renew whole domain" or "Scan / renew 1 host". A view narrowed to one host had silently narrowed scans.
+- Rollback: revert this change.
+
 ## 2026-11-09: CVE findings table in the posture report
 
 - One row per address and CVE (CVE, severity, score, fixed in, address, host names, product · port, domain,

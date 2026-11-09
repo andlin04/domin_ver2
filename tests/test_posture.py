@@ -565,6 +565,10 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert 'id="posture-data"' in page and "CVE-2024-9999" in page
         assert "Vulnerabilities <small>" not in page and "Services &amp; scan details" in page
         assert not [d for d in re.findall(r'<details class="svc posture-detail"[^>]*>', page) if " open" in d]
+        # viewing one host doesn't narrow the next scan: the form starts at the whole domain
+        one = h.get(f"/admin/security?domain={DOM}&host=nas.corp.example").text
+        form = one.split("data-scan-target>")[1].split("</select>")[0]
+        assert "selected" not in form and "Scan / renew whole domain" in one
         dom_page = h.get(f"/d/{DOM}").text
         assert dom_page.index("Security posture") < dom_page.index("Records <small>")
         assert "CVE look-up" not in page and 'aria-label="Settings sections"' not in page   # moved under Settings
