@@ -229,8 +229,8 @@ table[data-resizable] td.clip { white-space: nowrap; text-overflow: ellipsis; }
   border-right: 2px solid transparent; }
 .col-resize:hover, .col-resize.dragging { border-right-color: var(--accent); }
 /* posture host table: a host name expands its findings in a row below (chevron as on the other expandables) */
-a.host-toggle::before { content: ""; display: inline-block; width: .4rem; height: .4rem; margin: 0 .45rem .1rem 0;
-  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg);
+a.host-toggle::before { content: ""; display: inline-block; width: .55rem; height: .55rem; margin: 0 .5rem .1rem 0;
+  border-right: 2.5px solid var(--accent); border-bottom: 2.5px solid var(--accent); transform: rotate(-45deg);
   transition: transform .15s; }
 tr.expanded a.host-toggle::before { transform: rotate(45deg); border-color: var(--text); }
 tr.expanded > td { background: var(--surface-2); }
@@ -367,13 +367,23 @@ details.svc-group:first-child { border-top: 0; }
 .cve-body { padding: .2rem .8rem .6rem 1.6rem; background: var(--surface-2); }
 .cve-body p { margin: .35rem 0; }
 /* Posture expandables: a chevron that points right when closed and turns down when open (as in wg-admin) */
+/* Posture Filter box: last in the panel, pushed right; rows it filters out */
+.card.controls .pick-filter { margin-left: auto; }
+tr.pf-out { display: none; }
+/* expandables stand out: accent chevrons, a hover tint on every summary, an accent edge on what is open */
+.posture-detail > summary, .cve-item > summary, .svc-group > summary, .scan-details > summary { border-radius: 6px; }
+.posture-detail > summary:hover, .cve-item > summary:hover, .svc-group > summary:hover, .scan-details > summary:hover,
+tr:has(> td > a.host-toggle):hover > td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+details.posture-detail[open], details.svc-group[open], details.cve-item[open], details.scan-details[open] {
+  box-shadow: inset 3px 0 0 var(--accent); padding-left: .35rem; }
+a.host-toggle { font-weight: 600; }
 .posture-detail > summary, .cve-item > summary, .svc-group > summary, .scan-details > summary { list-style: none; }
 .posture-detail > summary::-webkit-details-marker, .cve-item > summary::-webkit-details-marker,
 .svc-group > summary::-webkit-details-marker, .scan-details > summary::-webkit-details-marker { display: none; }
 .posture-detail > summary::before, .cve-item > summary::before, .svc-group > summary::before,
 .scan-details > summary::before {
-  content: ""; display: inline-block; flex: none; width: .45rem; height: .45rem; margin: 0 .45rem 0 .1rem;
-  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg);
+  content: ""; display: inline-block; flex: none; width: .55rem; height: .55rem; margin: 0 .5rem 0 .15rem;
+  border-right: 2.5px solid var(--accent); border-bottom: 2.5px solid var(--accent); transform: rotate(-45deg);
   transition: transform .15s; vertical-align: .1rem; }
 .posture-detail[open] > summary::before, .cve-item[open] > summary::before, .svc-group[open] > summary::before,
 .scan-details[open] > summary::before {

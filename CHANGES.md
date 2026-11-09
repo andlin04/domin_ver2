@@ -2,6 +2,15 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture Filter narrows the page; expandables stand out
+
+- The search box is now "Filter", last in the panel on the right. Besides the Domain list it narrows the page: all
+  domains = the domain table rows; one domain = the host rows (name, addresses, service, product, version, port,
+  CVE ids, severities, notes) and the CVE rows (CVE, severity, products, fixed versions, addresses). Every word must
+  match, any case. KPIs and charts stay for the whole domain.
+- Expandables: accent chevrons, larger; a hover tint on every expandable row; an accent edge on open sections.
+- Rollback: revert this change.
+
 ## 2026-11-09: search the Posture domain picker
 
 - A search box next to the Domain list narrows it to the domains whose data holds every typed word, any case: domain

@@ -188,17 +188,19 @@ document.addEventListener("click", (ev) => {
   if (!table || !btn || !dlg) return;
   const all = $("[data-pick-all]", table);
   const count = $("[data-picked-count]");
-  const picked = () => $$("tbody input[data-pick]", table).filter((b) => b.checked && !b.closest("tr").hidden);
+  const shown = (b) => { const tr = b.closest("tr"); return !tr.hidden && !tr.classList.contains("pf-out"); };
+  const picked = () => $$("tbody input[data-pick]", table).filter((b) => b.checked && shown(b));
   const sync = () => {
     const n = picked().length;
     btn.disabled = !n;
     count.textContent = `${n} ticked`;
   };
   all.addEventListener("change", () => {
-    $$("tbody input[data-pick]", table).forEach((b) => { if (!b.closest("tr").hidden) b.checked = all.checked; });
+    $$("tbody input[data-pick]", table).forEach((b) => { if (shown(b)) b.checked = all.checked; });
     sync();
   });
   table.addEventListener("change", sync);
+  document.addEventListener("pagefilter", sync);
   document.addEventListener("input", (ev) => { if (ev.target.matches(".colf, [data-filter='#posture-hosts']")) sync(); });
   btn.addEventListener("click", () => {
     const names = picked().map((b) => b.value);
@@ -246,18 +248,32 @@ $$("[data-tabs]").forEach((card) => {
 });
 // Posture domain search: the server says which domains hold every typed word (any case, any attribute); the Domain
 // list keeps only those. Options are taken out, not hidden (iOS ignores hidden options). Enter opens the first match.
+// The same box filters the page's lists: domain rows by the server's answer, host and CVE rows by their data-text
+// (class pf-out, so the column filters' own hiding stays separate); an expanded host's detail row follows its row.
 $$("[data-domain-search]").forEach((box) => {
-  const sel = $("select[name=domain]", box.form);
-  const count = $("[data-domain-count]", box.form);
+  const sel = $(".posture-pick select[name=domain]");
+  const count = $("[data-domain-count]", box.closest(".field"));
   const all = [...sel.options].filter((o) => o.value);
   let hits = all;
   let timer;
   let seq = 0;
+  const rows = (id) => $$(`#${id} > tbody > tr:not(.detail-row)`);
+  const out = (tr, gone) => { tr.classList.toggle("pf-out", gone); tr._detail?.classList.toggle("pf-out", gone); };
   const show = (names) => {
     hits = names ? all.filter((o) => names.has(o.value)) : all;
     // the shown domain stays listed so the picker keeps showing it; the rest in name order
     all.forEach((o) => { if (hits.includes(o) || o.selected) sel.append(o); else o.remove(); });
-    count.textContent = names ? `${hits.length} of ${all.length} match` : `${all.length} domains`;
+    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const parts = [names ? `${hits.length} of ${all.length} domains` : `${all.length} domains`];
+    rows("posture-domains").forEach((tr) => out(tr, !!names && !names.has(tr.dataset.domain)));
+    for (const [id, what] of [["posture-hosts", "hosts"], ["posture-cves", "CVEs"]]) {
+      const list = rows(id);
+      if (!list.length) continue;
+      list.forEach((tr) => out(tr, !words.every((w) => tr.dataset.text.includes(w))));
+      if (words.length) parts.push(`${list.filter((tr) => !tr.classList.contains("pf-out")).length} of ${list.length} ${what}`);
+    }
+    count.textContent = parts.join(" · ");
+    box.dispatchEvent(new Event("pagefilter", { bubbles: true }));   // the host picker recounts its ticks
   };
   const search = async () => {
     const q = box.value.trim();

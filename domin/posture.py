@@ -385,6 +385,8 @@ def report(rows: list[dict], host: str = "") -> dict:
     for v in table:
         v["products"] = sorted(v["products"])
         v["addresses"] = list(dict.fromkeys((ip, name) for ip, name, _ in v["targets"]))   # each address once
+        v["text"] = " ".join([v["cve"], v["severity"], *v["products"], *v["fixes"],
+                              *(x for a in v["addresses"] for x in a if x)]).lower()   # for the Filter box
     rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
     rows = sorted(rows, key=lambda r: (rank[r["worst"]], -r["high"], -r["cves"], r["ip"]))
     by_sev = {s: sum(1 for v in table if v["severity"] == s) for s in SEVERITIES}
@@ -606,6 +608,13 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
     for h in names:
         res = [by_ip[ip] for ip in h["ips"] if ip in by_ip]
         cves = {v["cve"]: v for r in res for v in r.get("vulns") or []}
+        # what the page's Filter box matches on: names, addresses, services, products, versions, ports, CVEs
+        text = [h["host"], *h["ips"], h.get("skip") or "", *(v["severity"] for v in cves.values()), *cves]
+        for r in res:
+            text += [r.get("note") or "", r.get("error") or ""]
+            for s in r.get("services") or []:
+                text += [str(s.get(k) or "") for k in ("service", "product", "version")]
+                text.append(f"{s.get('port')}/{s.get('proto') or 'tcp'}")
         worsts = [r["worst"] for r in res if r.get("worst") in order]
         worst = min(worsts, key=order.index) if worsts else ""
         out.append({**h, "anchors": [anchor(r["ip"]) for r in res], "worst": worst,
@@ -614,7 +623,7 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
                     "cves": len(cves), "fixable": sum(1 for v in cves.values() if v["fixes"]),
                     "open_ports": sum(r.get("open_ports") or 0 for r in res),
                     "blocked": sum(1 for r in res if r.get("blocked")), "errors": sum(1 for r in res if r.get("error")),
-                    "results": len(res)})
+                    "results": len(res), "text": " ".join(t for t in text if t).lower()})
     return out
 
 

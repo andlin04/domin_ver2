@@ -350,7 +350,12 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     assert '<a href="#pa-172-20-4-50" data-open-details title="172.20.4.50">' in table
     assert 'id="pa-172-20-4-50"' in page and 'id="cve-findings"' not in page
     # domain search: any attribute, any case, every word must match; signed-in only
-    assert 'data-domain-search="/admin/security/domain-search"' in page
+    assert 'data-domain-search="/admin/security/domain-search"' in page and 'class="field pick-filter">Filter' in page
+    # the Filter box also narrows the host and CVE rows: each carries its lower-case text
+    host_row = re.search(r'<tr data-text="([^"]*)">\s*<td class="tick"><input type="checkbox" data-pick value="www.lab', page)
+    assert host_row and "openssh" in host_row.group(1) and "cve-2024-9999" in host_row.group(1)
+    assert "22/tcp" in host_row.group(1) and "172.20.4.50" in host_row.group(1)
+    assert re.search(r'<tr data-text="cve-2024-9999 [^"]*172\.20\.4\.50', page)
     with app_client(settings) as h:
         assert h.get("/admin/security/domain-search?q=lab").status_code == 401
         sign_in(h, "ana")
@@ -646,7 +651,8 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         # all domains: one row per domain, no per-address lists
         every = h.get("/admin/security").text
         doms = every.split('id="posture-domains"')[1].split("</table>")[0]
-        assert f'href="/admin/security?domain={DOM}">{DOM}</a>' in doms and doms.count("<tr>") == 2   # head + 1
+        assert f'href="/admin/security?domain={DOM}">{DOM}</a>' in doms and doms.count("<tr") == 2   # head + 1
+        assert f'<tr data-domain="{DOM}">' in doms
         assert 'id="posture-hosts"' not in every and 'class="svc posture-detail"' not in every
         # the domain page: a summary card, the details stay in Posture
         dom_page = h.get(f"/d/{DOM}").text

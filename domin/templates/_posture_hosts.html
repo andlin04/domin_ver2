@@ -25,7 +25,7 @@
       <th data-sort="text">Host name</th><th data-sort="ip">Addresses</th><th data-sort="num">Worst</th>
       <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
       <th data-sort="text">Last scan</th></tr></thead>
-    <tbody>{% for h in host_list %}<tr>
+    <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}">
       <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
       <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
         aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
@@ -50,7 +50,7 @@
       <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
         <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
         <th data-sort="num">Addresses</th></tr></thead>
-      <tbody>{% for v in cves %}<tr>
+      <tbody>{% for v in cves %}<tr data-text="{{ v.text }}">
         <td class="mono" title="{{ v.summary or '' }}">{{ v.cve }}</td>
         <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
         <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>

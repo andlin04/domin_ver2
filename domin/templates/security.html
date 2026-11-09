@@ -8,11 +8,6 @@
     {% else %}Showing all domains.{% endif %}</p></div></section>
 <section class="card controls">
   <form method="get" action="{{ base }}/security" class="inline posture-pick">
-    {# narrows the Domain list: any text of a domain (host names, addresses, ASN, provider, country, tags, products,
-       CVE ids), case-insensitive; Enter opens the first match #}
-    <label class="field">Search domains <small data-domain-count>{{ posture_domains|length }} domains</small>
-      <input type="search" data-domain-search="{{ base }}/security/domain-search" placeholder="host, address, AS, provider, CVE…" size="24"
-        spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Search the domains on any attribute"></label>
     <label class="field">Domain
       <select name="domain" data-autosubmit data-reset="host">
         <option value="">All domains</option>
@@ -47,6 +42,12 @@
   </form>
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}
+  {# Filter: any attribute, any case, every word. Narrows the Domain list (server-side: host names, addresses, ASN,
+     provider, country, tags, products, CVE ids) and the page's lists: the domain table, or the host and CVE rows.
+     Enter opens the first matching domain. #}
+  <label class="field pick-filter">Filter <small data-domain-count>{{ posture_domains|length }} domains</small>
+    <input type="search" data-domain-search="{{ base }}/security/domain-search" placeholder="product, host, address, AS, CVE…"
+      size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>
   {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 </section>
 
