@@ -24,8 +24,13 @@
       {% if user %}
       <span class="nav-sep" aria-hidden="true"></span>
       <a href="/admin/security" {{ here('security') }}>Posture</a>
-      {% if user.role in ('admin', 'analyst') %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
-      <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" {{ here('settings') }}>Settings</a>
+      <details class="nav-menu" data-nav-menu>
+        <summary {% if sec in ('admin', 'settings') %}class="active"{% endif %}>Admin</summary>
+        <div class="nav-drop">
+          {% if user.role in ('admin', 'analyst') %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
+          <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" {{ here('settings') }}>Settings</a>
+        </div>
+      </details>
       {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
       <a href="/admin/account" {{ here('account') }}>{{ user.name }}</a>
       {% elif signed_in_hint %}

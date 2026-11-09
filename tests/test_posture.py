@@ -646,6 +646,10 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert "Product (CPE)" in look and 'aria-label="Settings sections"' in look
         # an analyst's Settings opens Scan profiles; General and Routes stay admin-only
         assert '<a href="/admin/security/profiles" class="active" aria-current="page">Settings</a>' in look
+        # Operations and Settings sit in the nav's Admin menu, which is marked active on their pages
+        menu = look.split("data-nav-menu>")[1].split("</details>")[0]
+        assert '<summary class="active">Admin</summary>' in menu and ">Operations</a>" in menu and ">Settings</a>" in menu
+        assert '<summary >Admin</summary>' in page and page.index('href="/admin/security"') < page.index("data-nav-menu")
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
 

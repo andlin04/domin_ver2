@@ -51,6 +51,20 @@ h2 small, h3 small { color: var(--muted); font-weight: 400; margin-left: .35rem;
 .topbar nav a:hover { color: var(--text); text-decoration: none; }
 .topbar nav a.active { color: var(--accent); font-weight: 650; border-bottom: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* Admin menu: a nav entry that drops down its sub-pages (Operations, Settings) */
+.nav-menu { position: relative; display: flex; }
+.nav-menu > summary { display: flex; align-items: center; gap: .3rem; list-style: none; cursor: pointer; color: var(--muted);
+  padding: 0 .75rem; font-weight: 500; border-bottom: 2px solid transparent; }
+.nav-menu > summary::-webkit-details-marker { display: none; }
+.nav-menu > summary::after { content: "▾"; font-size: .75em; }
+.nav-menu > summary:hover { color: var(--text); }
+.nav-menu > summary.active { color: var(--accent); font-weight: 650; border-bottom: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.nav-drop { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 11rem; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 0 0 8px 8px; box-shadow: 0 6px 18px rgb(0 0 0 / .18);
+  padding: .3rem 0; }
+.topbar nav .nav-drop a { padding: .55rem .9rem; border-bottom: 0; border-left: 3px solid transparent; }
+.topbar nav .nav-drop a.active { border-bottom: 0; border-left-color: var(--accent); }
 .jump { margin-left: auto; position: relative; display: flex; align-items: center; }
 .jump svg { position: absolute; left: .7rem; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; pointer-events: none; }
 .jump input { width: 300px; padding-left: 2.1rem; padding-right: 2rem; }
@@ -246,7 +260,8 @@ td form { margin: 0; }
   .jump { display: none; }
   .topbar-in { gap: .5rem; padding: 0 .75rem; }
   .topbar nav { gap: 0; padding-left: .25rem; font-size: .9rem; }
-  .topbar nav a { padding: 0 .45rem; white-space: nowrap; }
+  .topbar nav a, .nav-menu > summary { padding: 0 .45rem; white-space: nowrap; }
+  .nav-drop { right: 0; left: auto; }
   .icon-btn { margin-left: auto; }
   .scan-form input, .filter { width: 100%; }
   .scan-form { width: 100%; }

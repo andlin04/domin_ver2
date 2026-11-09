@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Admin menu in the top bar
+
+- Operations and Settings moved under one "Admin" entry that drops down (marked active on their pages; a click
+  elsewhere or Escape closes it). Users and the account link stay where they were.
+- Rollback: revert this change.
+
 ## 2026-11-09: posture views by depth, trend charts
 
 - Posture, all domains: one row per domain (worst, CVEs per severity, fixable, addresses with high+, open ports,

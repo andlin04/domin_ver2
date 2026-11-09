@@ -244,6 +244,13 @@ $$("[data-tabs]").forEach((card) => {
   const named = tabs.find((b) => `#${b.dataset.tab}` === location.hash);
   if (named) show(named.dataset.tab);
 });
+// nav Admin menu: a click elsewhere or Escape closes it
+document.addEventListener("click", (ev) => {
+  $$("[data-nav-menu][open]").forEach((m) => { if (!m.contains(ev.target)) m.open = false; });
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") $$("[data-nav-menu][open]").forEach((m) => { m.open = false; });
+});
 // posture ?host=: that host's row opens on load
 $$("a[data-auto-open]").forEach((a) => expandHost(a));
 // sideways overflow: a fade and a "More columns" button while columns are hidden to the right
