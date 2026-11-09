@@ -2,6 +2,18 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Network tags; raw scans; richer identification; account in the Admin menu
+
+- Settings > Network tags: address or CIDR -> tag; every host name with an address inside carries it (domain page,
+  tag filter, posture Filter).
+- Settings > Raw network access: SYN scans (nmap -sS --privileged) on direct routes when the worker holds
+  CAP_NET_RAW + CAP_NET_ADMIN (deploy/worker-raw.conf drop-in, not installed by default). Routes stay connect scans.
+- Every scan runs safe NSE scripts (banner, http-server-header, http-generator, http-title, ssl-cert): when -sV
+  finds no version, a server header or banner (Apache, nginx, IIS, OpenSSH, ...) supplies product, version and CPE,
+  so the CVE look-up has something to match; the script lines are kept per service ("info").
+- Nav: My account moved into the Admin menu.
+- Rollback: revert this change; remove /etc/systemd/system/domin-worker.service.d/30-raw.conf if installed.
+
 ## 2026-11-09: Posture map; backdrop
 
 - Posture: "Where the addresses are" map, country level and offline (static/world.json from Natural Earth 1:110m,

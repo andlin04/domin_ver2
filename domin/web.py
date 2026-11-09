@@ -255,18 +255,24 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
                   "asns": db.breakdown(rows, "asn", 10)}
         user, csrf = viewer(request)
-        posture_rows, posture_trend, host_tags, suggested, tag_counts = [], [], {}, {}, {}
+        posture_rows, posture_trend, host_tags, suggested, tag_counts, net_tags = [], [], {}, {}, {}, {}
         tag = request.query_params.get("tag", "")
         if user:   # posture results and host tags are signed-in reports
             with conn() as c:
                 posture_rows = posture.current(c, d["name"])
                 posture_trend = posture.trend(c, d["name"])
                 host_tags = tags.for_hosts(c, sorted({r["host"] for r in rows}))
+                rules = users.get_scope(c)["net_tags"]
             suggested = tags.suggestions(rows, posture_rows, host_tags)
-            for t in (t for ts in host_tags.values() for t in ts):
+            if rules:   # Settings > Network tags: shown beside the hand-set tags, not removable here
+                ips: dict[str, list[str]] = {}
+                for r in rows:
+                    ips.setdefault(r["host"], []).append(r["ip"])
+                net_tags = {h: t for h, a in ips.items() if (t := users.net_tags(rules, a))}
+            for t in (t for ts in [*host_tags.values(), *net_tags.values()] for t in ts):
                 tag_counts[t] = tag_counts.get(t, 0) + 1
             if tag in tag_counts:
-                rows = [r for r in rows if tag in host_tags.get(r["host"], [])]
+                rows = [r for r in rows if tag in host_tags.get(r["host"], []) + net_tags.get(r["host"], [])]
             else:
                 tag = ""
         posture_report = posture.report(posture_rows)
@@ -274,7 +280,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
-                    posture_report=posture_report, host_tags=host_tags, suggested=suggested,
+                    posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
                     tag_counts=dict(sorted(tag_counts.items())), tag=tag)
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -862,6 +868,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                            | set(scope["countries_deny"]))
         eff = admin.effective(settings, c)
         return shell(request, "settings.html", u, s, status, scope=scope,
+                     raw_ok=admin.kv_get(c, posture.RAW_KEY) == "1",
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
                      countries=countries, roles=users.ROLES, error=error,
                      internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,

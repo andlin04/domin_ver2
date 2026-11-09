@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import cve, db, fingerprint, proxy, users
+from . import admin, cve, db, fingerprint, proxy, users
 
 log = logging.getLogger("domin.posture")
 
@@ -179,12 +179,19 @@ def _finish(conn: sqlite3.Connection, sid: int, status: str, res: dict) -> None:
                   res.get("note") or "", res.get("error") or "", res.get("raw") or "", res.get("params") or "", sid))
 
 
+RAW_KEY = "worker:raw"   # kv: "1" when the worker last found it may send raw packets (fingerprint.raw_capable)
+
+
 def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx.Client | None,
         api_key: str = "") -> None:
     """Run one claimed row. The scope is checked again: it may have changed while the row waited."""
-    if not users.posture_ok(users.get_scope(conn), row["ip"], row["country"]):
+    scope = users.get_scope(conn)
+    if not users.posture_ok(scope, row["ip"], row["country"]):
         _finish(conn, row["id"], "failed", {"error": "outside the posture scope (Settings changed after queueing)"})
         return
+    able = fingerprint.raw_capable()
+    admin.kv_set(conn, RAW_KEY, "1" if able else "0")   # Settings shows whether the worker can send raw packets
+    raw = scope["raw_scans"] and able
     cfg = proxy.get(conn)   # read per scan: a change on the Routes page applies to the next one
     r = None
     try:   # the profile's route, copied at queueing ('' = the default route as it is now)
@@ -209,7 +216,8 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],
                                    display=row["hosts"].split(",")[0] or row["ip"],
                                    intensity=row.get("intensity", 2), timing=row.get("timing", 3),
-                                   timeout=row.get("timeout", 120), via=via, resume=resume, on_chunk=saved)
+                                   timeout=row.get("timeout", 120), via=via, resume=resume, on_chunk=saved,
+                                   raw=raw)
     except Exception as exc:   # one bad host must not stop the queue
         log.exception("posture scan %s failed", row["ip"])
         res = {"error": f"internal error ({type(exc).__name__})"}
@@ -620,6 +628,7 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
                 e["last"] = r["finished"]
     for e in names.values():
         e["last"] = e["last"][:16].replace("T", " ")
+        e["net_tags"] = users.net_tags(scope["net_tags"], e["ips"])   # Settings > Network tags, for the Filter
     return list(names.values())
 
 
@@ -648,7 +657,7 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
         res = [by_ip[ip] for ip in h["ips"] if ip in by_ip]
         cves = {v["cve"]: v for r in res for v in r.get("vulns") or []}
         # what the page's Filter box matches on: names, addresses, services, products, versions, ports, CVEs
-        text = [h["host"], *h["ips"], *h.get("countries", []), h.get("skip") or "",
+        text = [h["host"], *h["ips"], *h.get("countries", []), *h.get("net_tags", []), h.get("skip") or "",
                 *(v["severity"] for v in cves.values()), *cves]
         for r in res:
             text += [r.get("note") or "", r.get("error") or ""]

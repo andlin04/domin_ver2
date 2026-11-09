@@ -7,12 +7,13 @@ recovery codes (domin.totp); only hashes of the recovery codes are stored, and t
 so a code works only once."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import secrets
 import sqlite3
 from datetime import datetime, timedelta
 
-from . import admin, db, totp
+from . import admin, db, tags, totp
 
 ROLES = ("viewer", "analyst", "admin")
 SETPW_HOURS = 24          # a set-password link is valid this long
@@ -247,7 +248,22 @@ def get_scope(conn: sqlite3.Connection) -> dict:
                     out[k] = list(saved[k])
     out["posture_exclude"] = [dict(r) for r in (saved["posture_exclude"] if raw and "posture_exclude" in saved
                                                 else EXCLUDE_DEFAULT)]
+    out["net_tags"] = [dict(r) for r in (saved.get("net_tags") or [])] if raw else []
+    out["raw_scans"] = bool(saved.get("raw_scans")) if raw else False
     return out
+
+
+def net_tags(rules: list[dict], ips: list[str]) -> list[str]:
+    """The tags of the network tag rules ({net: CIDR, tag, note}) whose network holds any of these addresses, sorted."""
+    out = set()
+    for ip in ips:
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        out |= {r["tag"] for r in rules if a.version == ipaddress.ip_network(r["net"]).version
+                and a in ipaddress.ip_network(r["net"])}
+    return sorted(out)
 
 
 def owner_text(record) -> str:
@@ -278,7 +294,6 @@ def parse_scope(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
     """Build and validate a scope from the settings form. Domains and IP ranges come from a textarea each; the
     posture countries come from tick boxes (ca:<country> / cd:<country>) over the countries present in the
     inventory, so the choice uses the same country values as the records."""
-    import ipaddress
     out: dict = {"require_2fa": {r: form.get(f"require_2fa_{r}") == "on" for r in ROLES},
                  "scan_limits_off": form.get("scan_limits_off") == "on"}
     out["domains_allow"] = [d.lower().lstrip(".") for d in _lines(form.get("domains_allow", ""))]
@@ -299,6 +314,22 @@ def parse_scope(conn: sqlite3.Connection, form: dict[str, str]) -> dict:
         if host or owner:
             rules.append({"host": host.lower(), "owner": owner.lower(), "note": note})
     out["posture_exclude"] = rules
+    tagged = []
+    for i in range(EXCLUDE_MAX):   # rows nt_net_N / nt_tag_N / nt_note_N; a row with an empty address is dropped
+        if f"nt_net_{i}" not in form:
+            continue
+        net, tag, note = ((form.get(f"nt_{k}_{i}") or "").strip()[:100] for k in ("net", "tag", "note"))
+        if not net:
+            continue
+        try:
+            net = str(ipaddress.ip_network(net, strict=False))
+        except ValueError:
+            raise ValueError(f"network tag: {net} is not a valid CIDR or address") from None
+        if not tags.valid(tag.lower()):
+            raise ValueError(f"network tag for {net}: '{tag}' must be 1-30 of a-z, 0-9 and -")
+        tagged.append({"net": net, "tag": tag.lower(), "note": note})
+    out["net_tags"] = tagged
+    out["raw_scans"] = form.get("raw_scans") == "on"
     inv = set(inventory_countries(conn))
     out["countries_allow"] = [c for c in inv if form.get(f"ca:{c}") == "on"]
     out["countries_deny"] = [c for c in inv if form.get(f"cd:{c}") == "on"]

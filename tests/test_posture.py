@@ -848,3 +848,35 @@ def test_posture_map_and_backdrop(settings, nmap):
         world = h.get(css + "world.json").json()
         assert any("sweden" in w["k"] and "se" in w["k"] for w in world) and len(world) > 150
         assert h.get("/static/backdrop.svg").status_code == 200
+
+
+def test_net_tags_match_addresses_in_the_network():
+    rules = [{"net": "172.20.4.0/24", "tag": "lab", "note": ""}, {"net": "2001:db8::/32", "tag": "v6", "note": ""}]
+    assert users.net_tags(rules, ["172.20.4.20", "2001:db8::1", "nope"]) == ["lab", "v6"]
+    assert users.net_tags(rules, ["172.20.5.1"]) == []
+
+
+def test_settings_save_network_tags_and_raw_switch(settings):
+    with db.connect(settings.db_path) as c:
+        form = {"nt_net_0": "172.20.4.7", "nt_tag_0": "Lab", "nt_note_0": "practice", "nt_net_1": "",
+                "nt_tag_1": "", "raw_scans": "on"}
+        scope = users.parse_scope(c, form)
+        assert scope["net_tags"] == [{"net": "172.20.4.7/32", "tag": "lab", "note": "practice"}]
+        assert scope["raw_scans"] is True
+        with pytest.raises(ValueError):
+            users.parse_scope(c, {"nt_net_0": "172.20.4.0/24", "nt_tag_0": "bad tag!"})
+
+
+def test_header_names_the_server_when_version_detection_does_not():
+    xml = """<nmaprun><host><ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/>
+      <service name="http"/><script id="http-server-header" output="Apache/2.4.52 (Ubuntu)"/>
+      <script id="http-title" output="Welcome"/></port></ports></host></nmaprun>"""
+    s = fingerprint.parse_xml(xml)[0]
+    assert (s["product"], s["version"], s["source"]) == ("Apache httpd", "2.4.52", "http-server-header")
+    assert s["cpes"] == ["cpe:/a:apache:http_server:2.4.52"] and "http-title: Welcome" in s["info"]
+
+
+def test_raw_scans_use_syn_only_without_a_route():
+    assert "-sS" in fingerprint.nmap_args("172.20.4.50", "22", 60, raw=True)
+    assert "-sT" in fingerprint.nmap_args("172.20.4.50", "22", 60)
+    assert "--script" in fingerprint.nmap_args("172.20.4.50", "22", 60)

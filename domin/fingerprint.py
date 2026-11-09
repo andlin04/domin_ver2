@@ -94,24 +94,41 @@ def with_aliases(target: dict) -> list[dict]:
     return [target, {**target, "vendor": alias[0], "product": alias[1]}] if alias else [target]
 
 
+# safe NSE scripts that name the software when -sV can't: server headers, banners, page generator, certificate
+ID_SCRIPTS = "banner,http-server-header,http-generator,http-title,ssl-cert"
+
+
+def raw_capable() -> bool:
+    """Whether this process may send raw packets (CAP_NET_RAW and CAP_NET_ADMIN effective, as nmap -sS needs)."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            eff = next(int(x.split()[1], 16) for x in f if x.startswith("CapEff:"))
+    except (OSError, StopIteration, ValueError):
+        return False
+    return bool(eff & (1 << 13)) and bool(eff & (1 << 12))
+
+
 def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int = 3,
-              nmap_bin: str = "nmap") -> list[str]:
-    """The nmap command line: connect scan only (``-sT``), no OS detection and no raw packets, so no root or
-    cap_net_raw is needed. intensity is nmap's --version-intensity (0-9; 2 = --version-light), timing its -T
-    template (1-4)."""
-    args = [nmap_bin, "-sT", "-sV", "-Pn", "-n", "--version-intensity", str(int(intensity)), f"-T{int(timing)}",
-            "-oX", "-", "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
+              nmap_bin: str = "nmap", raw: bool = False) -> list[str]:
+    """The nmap command line: a connect scan (``-sT``, no raw packets, no root or capabilities), or with raw a SYN
+    scan (``-sS --privileged``: the worker holds CAP_NET_RAW + CAP_NET_ADMIN, not root). intensity is nmap's
+    --version-intensity (0-9; 2 = --version-light), timing its -T template (1-4). ID_SCRIPTS add product names
+    and versions from headers and banners."""
+    scan = ["-sS", "--privileged"] if raw else ["-sT"]
+    args = [nmap_bin, *scan, "-sV", "-Pn", "-n", "--version-intensity", str(int(intensity)), f"-T{int(timing)}",
+            "--script", ID_SCRIPTS, "-oX", "-", "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
     if ":" in ip:
         args.insert(1, "-6")
     return args
 
 
 def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3,
-             via: dict | None = None) -> str:
-    """Run a connect + service-version scan and return the XML. via: the route's hop (proxy.hop) when there is one; nmap
-    then runs under proxychains4 with a per-run config (mode 0600, deleted afterwards). Fails closed: a missing
-    proxychains4 or an unresolvable or unreachable proxy is an NmapError, never a direct scan."""
-    args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin)
+             via: dict | None = None, raw: bool = False) -> str:
+    """Run a connect (or with raw and no route, SYN) + service-version scan and return the XML. via: the route's hop
+    (proxy.hop) when there is one; nmap then runs under proxychains4 with a per-run config (mode 0600, deleted
+    afterwards), always as a connect scan. Fails closed: a missing proxychains4 or an unresolvable or unreachable
+    proxy is an NmapError, never a direct scan."""
+    args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin, raw=raw and not via)
     if not via:
         return _run(args, timeout)
     pc = shutil.which("proxychains4")
@@ -154,16 +171,49 @@ def parse_xml(text: str) -> list[dict]:
                 continue
             svc = port.find("service")
             cpes = [c.text for c in port.findall("./service/cpe") if c.text]
-            services.append({
+            s = {
                 "port": int(port.get("portid")),
                 "proto": port.get("protocol") or "tcp",
                 "service": (svc.get("name") if svc is not None else "") or "",
                 "product": (svc.get("product") if svc is not None else "") or "",
                 "version": (svc.get("version") if svc is not None else "") or "",
                 "cpes": cpes,
-            })
+            }
+            scripts = {x.get("id"): (x.get("output") or "").strip() for x in port.findall("script")}
+            info = [f"{k}: {v.splitlines()[0][:160]}" for k, v in scripts.items() if v and k != "banner"]
+            if info:
+                s["info"] = info
+            if not s["version"]:   # -sV gave no version: take one from a header or banner
+                fill(s, scripts)
+            services.append(s)
     services.sort(key=lambda s: s["port"])
     return services
+
+
+# "Server: Apache/2.4.52 (Ubuntu)", "SSH-2.0-OpenSSH_8.9p1 Ubuntu" -> product, version and a CPE for the CVE look-up
+_SOFT = re.compile(r"(Apache|nginx|Microsoft-IIS|lighttpd|OpenSSH|LiteSpeed|openresty|Caddy|Jetty|Apache-Coyote)"
+                   r"[/_](\d+(?:\.\d+)+[a-z0-9]*)", re.I)
+SOFT_CPE = {"apache": ("apache", "http_server", "Apache httpd"), "nginx": ("f5", "nginx", "nginx"),
+            "microsoft-iis": ("microsoft", "internet_information_services", "Microsoft IIS httpd"),
+            "lighttpd": ("lighttpd", "lighttpd", "lighttpd"), "openssh": ("openbsd", "openssh", "OpenSSH"),
+            "litespeed": ("litespeedtech", "litespeed_web_server", "LiteSpeed httpd"),
+            "openresty": ("openresty", "openresty", "OpenResty"), "caddy": ("caddyserver", "caddy", "Caddy"),
+            "jetty": ("eclipse", "jetty", "Jetty"), "apache-coyote": ("apache", "tomcat", "Apache Tomcat")}
+
+
+def fill(s: dict, scripts: dict[str, str]) -> None:
+    """Set a service's product, version and CPE from its http-server-header or banner script output, when that
+    names a known server with a version."""
+    for key in ("http-server-header", "banner"):
+        m = _SOFT.search(scripts.get(key) or "")
+        if not m:
+            continue
+        vendor, product, label = SOFT_CPE[m.group(1).lower()]
+        s["product"] = s["product"] or label
+        s["version"] = m.group(2)
+        s["cpes"] = [c for c in s["cpes"] if f":{product}" not in c] + [f"cpe:/a:{vendor}:{product}:{m.group(2)}"]
+        s["source"] = key
+        return
 
 
 def _dedupe(findings: list[dict]) -> list[dict]:
@@ -222,8 +272,8 @@ def no_answer(xml: str, routed: bool) -> bool:
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
          timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
          timing: int = 3, via: dict | None = None, resume: dict | None = None,
-         on_chunk: Callable[[dict], None] | None = None) -> dict:
-    """Fingerprint one host and match each service's CPEs against the CVE layer.
+         on_chunk: Callable[[dict], None] | None = None, raw: bool = False) -> dict:
+    """Fingerprint one host and match each service's CPEs against the CVE layer. raw: SYN scan (no route only).
 
     The ports are scanned in chunks of CHUNK_PORTS, one nmap run each (timeout is the limit per run). After each
     chunk on_chunk gets the progress {chunks, chunks_done, services, raw}; passing that back as `resume` skips the
@@ -235,7 +285,8 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
     "via Mullvad: mullvad se-got-wg-socks5-001 (se, follow host)") when via (the hop, proxy.hop) is on."""
     via = via if via and via.get("enabled") else None
     chunks = port_chunks(ports) or [ports]
-    params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap"))
+    raw = raw and not via
+    params = " ".join(nmap_args(ip, ports, timeout, intensity, timing, "nmap", raw=raw))
     if len(chunks) > 1:
         params += f" (in {len(chunks)} runs of up to {CHUNK_PORTS} ports)"
     if via:
@@ -247,7 +298,7 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
     late: list[str] = []
     for i in range(done, len(chunks)):
         try:
-            xml = run_nmap(ip, chunks[i], timeout, nmap_bin, intensity, timing, via=via)
+            xml = run_nmap(ip, chunks[i], timeout, nmap_bin, intensity, timing, via=via, raw=raw)
         except FileNotFoundError:
             return {"target": display or ip, "ip": ip, "services": [], "note": "", "params": params,
                     "error": "nmap is not installed on this host."}

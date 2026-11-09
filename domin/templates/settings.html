@@ -93,6 +93,25 @@
     <p class="muted small-print">A host is skipped when its name contains the first text and its address's network owner
       ("AS8075 MSFT Microsoft Corporation": ASN, netname and description from the inventory) contains the second; an empty box matches anything, case does not
       matter. Clear both boxes to remove a rule; save to add more empty rows.</p>
+    <h3 id="net-tags">Network tags <small>a tag on every host name with an address in the network</small></h3>
+    <div class="table-wrap short"><table id="net-tags-table">
+      <thead><tr><th>Address or network (CIDR)</th><th>Tag</th><th>Note</th></tr></thead>
+      <tbody>{% for r in scope.net_tags + [{'net': '', 'tag': '', 'note': ''}] * 3 %}<tr>
+        <td><input name="nt_net_{{ loop.index0 }}" value="{{ r.net }}" spellcheck="false" autocapitalize="off"
+          placeholder="172.20.0.0/24" aria-label="Network, tag rule {{ loop.index }}"></td>
+        <td><input name="nt_tag_{{ loop.index0 }}" value="{{ r.tag }}" spellcheck="false" autocapitalize="off"
+          placeholder="office-lan" aria-label="Tag, tag rule {{ loop.index }}"></td>
+        <td><input name="nt_note_{{ loop.index0 }}" value="{{ r.note }}" aria-label="Note, tag rule {{ loop.index }}"></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted small-print">Tags: 1-30 of a-z, 0-9 and -. They show beside the hand-set tags (no × to remove: edit
+      the rule here) and the posture Filter finds them. Clear the address box to remove a rule.</p>
+    <h3 id="raw-scans">Raw network access <small>SYN scans and OS detection</small></h3>
+    <label class="tick"><input type="checkbox" name="raw_scans" {% if scope.raw_scans %}checked{% endif %}>
+      Use SYN scans (nmap -sS) and OS detection on direct routes</label>
+    <p class="muted small-print">Needs the worker's raw-socket capability (CAP_NET_RAW and CAP_NET_ADMIN, not root),
+      which the install grants. {{ 'The worker had it at its last scan.' if raw_ok else 'The worker did not have it at its last scan (or has not scanned yet): scans stay TCP connect scans.' }}
+      Scans through a proxy route (Tor, Mullvad, Squid) always stay connect scans.</p>
   </section>
 
   <section class="card">

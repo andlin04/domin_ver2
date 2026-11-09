@@ -139,6 +139,7 @@
           <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td>
           <td class="{{ 'eu' if eu == 'EU' else 'non-eu' if eu }}">{{ eu }}</td><td>{{ r.country }}</td>
           {% if user %}<td class="tags">
+            {% for t in net_tags.get(r.host, []) %}<a class="pill" href="?tag={{ t }}#records" title="Network tag (Settings)">{{ t }}</a>{% endfor %}
             {% for t in host_tags.get(r.host, []) %}<form method="post" action="{{ admin_base }}/tags" class="inline tag">
               <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
               <input type="hidden" name="host" value="{{ r.host }}"><input type="hidden" name="tag" value="{{ t }}">
