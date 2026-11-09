@@ -5,6 +5,7 @@ only lay them out, so both files say the same thing. Recommendations are rules o
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime
 
@@ -54,7 +55,13 @@ def _names(v: dict) -> list[str]:
 
 
 def _more(items: list, n: int) -> str:
-    return ", ".join(items[:n]) + (", ..." if len(items) > n else "")
+    return ", ".join(items[:n]) + (f" and {len(items) - n} more" if len(items) > n else "")
+
+
+def _cut(s: str, n: int) -> str:
+    """At most n characters, cut at a word."""
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + " ..."
 
 
 def actions(vulns: list[dict], rows: list[dict], hosts: list[dict]) -> list[dict]:
@@ -72,9 +79,12 @@ def actions(vulns: list[dict], rows: list[dict], hosts: list[dict]) -> list[dict
                 g["fixes"].update(v["fixes"])
                 g["hosts"].update(_names(v))
     for p, g in sorted(patch.items(), key=lambda x: -len(x[1]["cves"])):
-        out.append({"priority": 1, "title": f"Update {p}",
+        plain = [f for f in g["fixes"] if not f.startswith("after")] or sorted(g["fixes"])
+        target = max(plain, key=lambda f: tuple(int(x) for x in re.findall(r"\d+", f)))
+        out.append({"priority": 1, "title": f"Update {p} to {target} or later",
                     "detail": f"Fixes {len(g['cves'])} critical/high CVE(s): {_more(g['cves'], 5)}."
-                              f" Fixed in: {_more(sorted(g['fixes']), 4)}. Hosts: {_more(sorted(g['hosts']), 8)}."})
+                              f" {target} is the newest fixed version they name."
+                              f" Hosts: {_more(sorted(g['hosts']), 8)}."})
     nofix = [v for v in serious if not v["fixable"]]
     if nofix:
         prods = sorted({p for v in nofix for p in v["products"]})
@@ -210,14 +220,19 @@ def markdown(m: dict) -> str:
                    f" {len(s.get('findings') or [])} |" for s in r["services"]]
             md.append("")
         md += [f"- **{v['cve']}** ({_sev(v)}; fixed in {', '.join(v['fixes']) or 'no fix yet'}):"
-               f" {_cell((v.get('summary') or '')[:300])}" for v in r["vulns"]]
+               f" {_cell(_cut(v.get('summary'), 300))}" for v in r["vulns"]]
         md.append("")
     md += ["## 6. Scope and method", "", *(f"- {x}" for x in _method(m)), ""]
     return "\n".join(md)
 
 
 # ------------------------------------------------------------------------------------------------------------- PDF
-INK, MUTED, LINE, ACCENT = (33, 37, 41), (108, 117, 125), (222, 226, 230), (31, 78, 121)
+INK, MUTED, LINE, ACCENT, ZEBRA = (33, 37, 41), (108, 117, 125), (222, 226, 230), (31, 78, 121), (244, 246, 248)
+SHORT = {**RATING, "none": "None found"}
+
+
+def _ips(ips: list[str], n: int = 3) -> str:
+    return ", ".join(ips[:n]) + (f" +{len(ips) - n} more" if len(ips) > n else "")
 SEV_RGB = {"critical": (176, 0, 32), "high": (214, 92, 0), "medium": (191, 144, 0), "low": (46, 125, 50),
            "unknown": (108, 117, 125), "none": (46, 125, 50), "": (108, 117, 125)}
 DASHES = str.maketrans({"–": "-", "—": "-", "‘": "'", "’": "'", "“": '"', "”": '"',
@@ -274,7 +289,8 @@ class _Doc(FPDF):
         self.set_draw_color(*LINE)
         head_style = FontFace(emphasis="BOLD", color=(255, 255, 255), fill_color=ACCENT)
         with self.table(col_widths=widths, headings_style=head_style, line_height=size * 0.55, text_align="LEFT",
-                        borders_layout="HORIZONTAL_LINES", padding=1.2) as t:
+                        borders_layout="HORIZONTAL_LINES", padding=1.2, cell_fill_color=ZEBRA,
+                        cell_fill_mode="ROWS") as t:
             t.row([_t(x) for x in head])
             for r in rows:
                 row = t.row()
@@ -305,6 +321,7 @@ def pdf(m: dict) -> bytes:
     d.set_text_color(255, 255, 255)
     d.set_font("helvetica", "B", 12)
     d.cell(0, 10, _t(f"  Overall risk: {m['rating']}"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    d.set_fill_color(255, 255, 255)   # tables would inherit the banner's fill
     d.ln(4)
     tiles = [("Critical", k["critical"], "critical"), ("High", k["high"], "high"),
              ("Medium", m["by_sev"]["medium"], "medium"), ("Low", m["by_sev"]["low"], "low"),
@@ -343,10 +360,10 @@ def pdf(m: dict) -> bytes:
         d.para("No critical or high vulnerabilities.")
     d.h1("4. Hosts")
     d.grid(["Host name", "Addresses", "Rating", "CVEs (c/h)", "Fixable", "Ports", "Last scan"],
-           [[h["host"], ", ".join(h["ips"]), (RATING[h["worst"]], h["worst"]),
+           [[h["host"], _ips(h["ips"]), (SHORT[h["worst"]], h["worst"]),
              f"{h['cves']} ({h['sev_n'].get('critical', 0)}/{h['sev_n'].get('high', 0)})", h["fixable"],
-             h["open_ports"], h["last"] or "never"] for h in m["hosts"]],
-           (46, 30, 26, 20, 14, 12, 30), sev_col=2)
+             h["open_ports"], h["last"][:10] or "never"] for h in m["hosts"]],
+           (44, 44, 22, 18, 13, 11, 26), sev_col=2)
     if m["rows"]:
         d.add_page()
         d.h1("5. Technical findings")
@@ -369,7 +386,7 @@ def pdf(m: dict) -> bytes:
         if r["vulns"]:
             d.grid(["CVE", "Severity", "Fixed in", "Summary"],
                    [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["fixes"]) or "no fix yet",
-                     (v.get("summary") or "")[:220]] for v in r["vulns"]], (28, 22, 30, 98), sev_col=1, size=7.5)
+                     _cut(v.get("summary"), 220)] for v in r["vulns"]], (28, 22, 30, 98), sev_col=1, size=7.5)
         d.ln(2)
     d.h1("6. Scope and method")
     for line in _method(m):
