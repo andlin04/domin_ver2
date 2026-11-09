@@ -78,6 +78,30 @@ def test_never_scan_rules_skip_matching_hosts(settings):
         assert sorted(t["ip"] for t in posture.targets(c, ms)[0]) == ["172.20.4.70", "172.20.4.71", "172.20.4.72"]
 
 
+def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nmap):
+    with db.connect(settings.db_path) as c:
+        before = {h["host"]: h for h in posture.host_list(c, DOM)}
+    assert set(before) == {"www.corp.example", "mail.corp.example", "nas.corp.example", "cdn.corp.example"}
+    assert all(h["last"] == "" for h in before.values()) and before["www.corp.example"]["ips"] == ["172.20.4.50"]
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert 'id="posture-hosts"' in page and "data-scan-picked" in page and 'name="hosts"' in page
+        assert page.count(">Never<") == 4
+        assert page.count("· out of scope") == 1   # cdn: 203.0.113.9 is outside the IP allow range
+        empty = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM, "hosts": "", "picked": "1"},
+                       headers={"Accept": "application/json"})
+        assert empty.status_code == 422 and "Tick at least one" in empty.json()["error"]
+        r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example",
+                                                     "picked": "1", "profile": "default"},
+                   headers={"Accept": "application/json"})
+        assert r.status_code == 200 and r.json()["queued"] == 1   # only the ticked name's address
+    assert run_queue(settings) == 1
+    with db.connect(settings.db_path) as c:
+        after = {h["host"]: h for h in posture.host_list(c, DOM)}
+    assert after["nas.corp.example"]["last"] and after["www.corp.example"]["last"] == ""
+
+
 def test_enqueue_skips_addresses_already_pending(settings):
     with db.connect(settings.db_path) as c:
         found, _ = posture.targets(c, DOM)
@@ -297,7 +321,8 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM}, follow_redirects=False)
         assert r.status_code == 303 and "posture-queued" in r.headers["location"]
         page = h.get(f"/admin/security?domain={DOM}").text
-        assert "172.20.4.50" in page and "queued" in page and "203.0.113.9" not in page
+        assert "172.20.4.50" in page and "queued" in page and 'id="pa-203-0-113-9"' not in page
+        assert "out of scope" in page   # the host list still names it, marked
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
     assert "CVE-2024-9999" in page and "Renew" in page and "22/tcp" in page

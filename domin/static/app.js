@@ -49,8 +49,9 @@ document.addEventListener("keydown", (ev) => {
 // --- tables: sort, filter, row links -------------------------------------------------------------------------------
 const ipKey = (s) => s.includes(".") ? s.split(".").map((n) => n.padStart(3, "0")).join(".") : s;
 $$("table.sortable").forEach((table) => {
-  $$("th[data-sort]", table).forEach((th, col) => th.addEventListener("click", () => {
+  $$("th[data-sort]", table).forEach((th) => th.addEventListener("click", () => {
     const type = th.dataset.sort;
+    const col = th.cellIndex;   // not the index among sortable headers: a tick column has none
     const dir = th.dataset.dir === "asc" ? "desc" : "asc";
     $$("th", table).forEach((h) => delete h.dataset.dir);
     th.dataset.dir = dir;
@@ -81,6 +82,7 @@ function applyFilters(table) {
 }
 $$("table[data-colfilters]").forEach((table) => {
   $$("thead th", table).forEach((th) => {
+    if (th.hasAttribute("data-nofilter")) return;
     const input = document.createElement("input");
     input.className = "colf";
     input.placeholder = "Filter";
@@ -91,6 +93,36 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// posture host list: tick rows (the header box ticks every visible one), "Scan now" asks for a profile and queues the
+// ticked rows that are still visible
+(function hostPicker() {
+  const table = document.getElementById("posture-hosts");
+  const btn = $("[data-scan-picked]");
+  const dlg = document.getElementById("scan-picked");
+  if (!table || !btn || !dlg) return;
+  const all = $("[data-pick-all]", table);
+  const count = $("[data-picked-count]");
+  const picked = () => $$("tbody input[data-pick]", table).filter((b) => b.checked && !b.closest("tr").hidden);
+  const sync = () => {
+    const n = picked().length;
+    btn.disabled = !n;
+    count.textContent = `${n} ticked`;
+  };
+  all.addEventListener("change", () => {
+    $$("tbody input[data-pick]", table).forEach((b) => { if (!b.closest("tr").hidden) b.checked = all.checked; });
+    sync();
+  });
+  table.addEventListener("change", sync);
+  document.addEventListener("input", (ev) => { if (ev.target.matches(".colf, [data-filter='#posture-hosts']")) sync(); });
+  btn.addEventListener("click", () => {
+    const names = picked().map((b) => b.value);
+    $("input[name=hosts]", dlg).value = names.join(",");
+    $("[data-picked-n]", dlg).textContent = names.length;
+    dlg.showModal();
+  });
+  $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
+  $("form", dlg).addEventListener("submit", () => dlg.close());   // the posture-run handler sends it and shows progress
+})();
 // posture: the scan button says what it will scan
 $$("[data-scan-target]").forEach((sel) => sel.addEventListener("change", () => {
   const btn = $("[data-scan-button]", sel.form);

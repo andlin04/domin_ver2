@@ -25,17 +25,18 @@ from . import cve, db, fingerprint, proxy, users
 log = logging.getLogger("domin.posture")
 
 
-def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "") -> tuple[list[dict], int]:
+def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "",
+            names: set[str] | None = None) -> tuple[list[dict], int]:
     """Addresses of the domain's latest inventory scan inside the posture scope, as [{ip, hosts, country}], and how
-    many addresses the scope or the "Never scan" exclusions left out. host or ip narrows the set to that host name or
-    address. An address is skipped when every host name on it is excluded."""
+    many addresses the scope or the "Never scan" exclusions left out. host, ip or names (a set of host names) narrow
+    the set. An address is skipped when every host name on it is excluded."""
     scope = users.get_scope(conn)
     rows = conn.execute(f"""SELECT r.host, r.ip, r.country, r.asn, r.netname, r.descr FROM records r
                             JOIN ({db.LATEST}) s ON s.id = r.scan_id
                             JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.ip != ''""", (domain,))
     by_ip: dict[str, dict] = {}
     for r in rows:
-        if (host and r["host"] != host) or (ip and r["ip"] != ip):
+        if (host and r["host"] != host) or (ip and r["ip"] != ip) or (names is not None and r["host"] not in names):
             continue
         e = by_ip.setdefault(r["ip"], {"ip": r["ip"], "hosts": set(), "country": r["country"] or ""})
         owner = f"{r['asn']} {r['netname']} {r['descr']}"
@@ -527,6 +528,37 @@ def domains(conn: sqlite3.Connection) -> list[str]:
     """Domains with a finished inventory scan, for the target pick-list."""
     return [r[0] for r in conn.execute(f"SELECT d.name FROM domains d JOIN ({db.LATEST}) s ON s.domain_id = d.id "
                                        "ORDER BY d.name")]
+
+
+def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
+    """The domain's host names with an address (latest inventory scan), each with its addresses, when a posture scan
+    covering it last finished ("" = never), whether one is queued or running now, and `skip`: why a scan would leave
+    it out ("out of scope", "on the Never scan list"; "" = it would be scanned)."""
+    scope = users.get_scope(conn)
+    names: dict[str, dict] = {}
+    for r in conn.execute(f"""SELECT r.host, r.ip, r.country, r.asn, r.netname, r.descr FROM records r
+                             JOIN ({db.LATEST}) s ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id
+                             WHERE d.name = ? AND r.ip != '' ORDER BY r.host""", (domain,)):
+        e = names.setdefault(r["host"], {"host": r["host"], "ips": [], "last": "", "pending": False,
+                                         "skip": "out of scope"})
+        if r["ip"] not in e["ips"]:
+            e["ips"].append(r["ip"])
+        if users.excluded(scope["posture_exclude"], r["host"], f"{r['asn']} {r['netname']} {r['descr']}"):
+            e["skip"] = e["skip"] if e["skip"] == "" else "on the Never scan list"
+        elif users.posture_ok(scope, r["ip"], r["country"] or ""):
+            e["skip"] = ""
+    for r in conn.execute("SELECT hosts, status, finished FROM posture_scans WHERE domain = ?", (domain,)):
+        for h in (r["hosts"] or "").split(","):
+            e = names.get(h)
+            if not e:
+                continue
+            if r["status"] in ("queued", "running"):
+                e["pending"] = True
+            elif r["status"] == "done" and r["finished"] and r["finished"] > e["last"]:
+                e["last"] = r["finished"]
+    for e in names.values():
+        e["last"] = e["last"][:16].replace("T", " ")
+    return list(names.values())
 
 
 def hosts(conn: sqlite3.Connection, domain: str) -> list[str]:

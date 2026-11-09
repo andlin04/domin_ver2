@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: posture host list with "Scan now"
+
+- With a domain picked, the posture page lists its host names with an address (latest inventory scan): addresses,
+  last finished scan ("Never" when none), queued, and "out of scope" / "on the Never scan list" when a scan would
+  skip it. Sortable, with the filter box and per-column filters of the domain tables.
+- Tick rows (the header box ticks every visible row); "Scan now" opens a dialog with the profile to use and queues
+  the ticked rows that are still visible, with the usual progress dialog.
+- Tables: sorting uses the clicked header's own column, so a table may start with a column that does not sort.
+- Rollback: revert this change.
+
 ## 2026-11-09: posture "Never scan" list
 
 - Settings · Security posture scope has an editable "Never scan" list: a host is skipped by every posture scan

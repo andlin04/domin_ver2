@@ -930,6 +930,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
+                       host_list=posture.host_list(c, dom) if dom else [],
                        report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes, proxy.tests(c)),
                        scan_route=proxy.label(routes, default.get("route", "")),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
@@ -998,9 +999,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if ports and not fingerprint.valid_ports(ports):
                 return refuse(422, "Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024).")
             prof = {**prof, "ports": ports or prof["ports"]}
-            found, skipped = posture.targets(c, dom, host=host, ip=ip)
+            picked = None   # "Scan now" on the host list: the ticked host names, comma separated
+            if data.get("picked"):   # set by the dialog, so an empty tick list never widens to the whole domain
+                picked = {h.strip().lower() for h in (data.get("hosts") or "").split(",") if h.strip()}
+                if not picked:
+                    return refuse(422, "Tick at least one host name to scan.")
+            found, skipped = posture.targets(c, dom, host=host, ip=ip, names=picked)
             if not found:
-                what = host or ip or dom
+                what = host or ip or (f"the {len(picked)} ticked host name(s)" if picked else dom)
                 why = (f" ({skipped} address(es) outside the posture scope or on its Never scan list; see Settings)"
                        if skipped else "")
                 return refuse(422, f"No address of {what} to scan{why}.")
