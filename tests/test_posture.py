@@ -283,6 +283,11 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
     assert "CVE-2024-9999" in page and "Renew" in page and "22/tcp" in page
+    # CVE findings table: one row per address and CVE, column filters, the address opens its section
+    table = page.split('id="cve-findings"')[1].split("</table>")[0]
+    assert "data-colfilters" in page and 'data-filter="#cve-findings"' in page
+    assert '<td class="mono" title=' in table and "CVE-2024-9999" in table
+    assert '<a href="#pa-172-20-4-50" data-open-details>172.20.4.50</a>' in table and 'id="pa-172-20-4-50"' in page
 
 
 def test_analyst_scans_one_host(settings):

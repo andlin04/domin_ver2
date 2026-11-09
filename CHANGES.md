@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: CVE findings table in the posture report
+
+- One row per address and CVE (CVE, severity, score, fixed in, address, host names, product · port, domain,
+  scanned), with a filter box per column ("!text" = without), an all-columns filter and sorting, as in the domain
+  tables. Collapsed by default; typing in the filter opens it. An address link opens its section below.
+- Rollback: revert this change.
+
 ## 2026-11-09: certificate-log retries, scan notes, host cap warning
 
 - crt.sh gets 3 attempts (waits 10 s and 30 s, 120 s each); when all fail, certspotter's keyless API (up to 8 pages

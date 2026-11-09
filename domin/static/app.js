@@ -69,6 +69,7 @@ document.addEventListener("click", (ev) => { if (ev.target.closest("th .colf")) 
 function applyFilters(table) {
   const words = ($(`[data-filter="#${table.id}"]`)?.value || "").toLowerCase().split(/\s+/).filter(Boolean);
   const cols = $$("thead th", table).map((th) => ($(".colf", th)?.value || "").trim().toLowerCase());
+  if (words.length) { const box = table.closest("details"); if (box) box.open = true; }   // a collapsed table shows its matches
   const start = $$("thead th", table).map((th) => th.dataset.match === "start");   // EU: "eu" isn't "Non-EU"
   const cell = (tr, i) => (tr.cells[i]?.textContent || "").trim().toLowerCase();
   const has = (v, t, i) => (start[i] ? v.startsWith(t) : v.includes(t));
@@ -90,6 +91,16 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// a link to a collapsed section (posture: CVE findings -> the address) opens it before scrolling there
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("a[data-open-details]");
+  const box = a && document.getElementById(a.getAttribute("href").slice(1));
+  if (!box) return;
+  ev.preventDefault();
+  box.open = true;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  history.replaceState(null, "", a.getAttribute("href"));
+});
 // search page: empty boxes stay out of the address
 $("#search-form")?.addEventListener("formdata", (ev) => {
   for (const [k, v] of [...ev.formData]) if (!v && k !== "q") ev.formData.delete(k);

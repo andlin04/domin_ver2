@@ -55,6 +55,38 @@
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
+{% set nfind = rep.rows|sum(attribute='vulns', start=[])|length %}
+{% if nfind %}
+<section class="card">
+  <div class="card-head">
+    <h2>CVE findings <small>{{ nfind }}: one row per address and CVE · a box per column filters it ("!text" = without),
+      click a header to sort, an address to open it below</small></h2>
+    <input class="filter" placeholder="Filter all columns…" data-filter="#cve-findings" aria-label="Filter CVE findings">
+  </div>
+  <details class="posture-detail"><summary>Show the table (typing a filter opens it)</summary>
+  <div class="table-wrap">
+    <table id="cve-findings" class="sortable" data-colfilters>
+      <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
+        <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="ip">Address</th>
+        <th data-sort="text">Host names</th><th data-sort="text">Product · port</th>
+        {% if show_domain %}<th data-sort="text">Domain</th>{% endif %}<th data-sort="text">Scanned</th></tr></thead>
+      <tbody>{% for p in rep.rows %}{% for v in p.vulns %}<tr>
+        <td class="mono" title="{{ v.summary or '' }}">{{ v.cve }}</td>
+        <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
+        <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+        <td>{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
+        <td class="mono"><a href="#pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}" data-open-details>{{ p.ip }}</a></td>
+        <td>{{ p.hosts.replace(',', ', ') }}</td>
+        <td>{% for prod, port, proto in v.where %}{{ prod }} · {{ port }}/{{ proto }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        {% if show_domain %}<td>{{ p.domain }}</td>{% endif %}
+        <td>{{ (p.finished or p.created)[:10] }}</td>
+      </tr>{% endfor %}{% endfor %}</tbody>
+    </table>
+  </div>
+  </details>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Findings by address <small>{{ rep.rows|length }}, worst first — open one for its CVEs, open a CVE for its description</small></h2>
   {% for p in rep.rows %}
