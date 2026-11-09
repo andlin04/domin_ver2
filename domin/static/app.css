@@ -25,6 +25,15 @@ body {
   margin: 0; background: var(--bg); color: var(--text); line-height: 1.5;
   font: 14px/1.5 var(--font);
 }
+/* signed-in pages: a decorative backdrop (backdrop.svg as a mask, so it takes the theme's text colour) far below
+   the panels; app.js moves it at a fraction of the scroll speed for depth (none with reduced motion) */
+body.backdrop { position: relative; }
+body.backdrop::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--text); opacity: .035;
+  -webkit-mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
+  mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
+}
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1 { font-size: 1.75rem; margin: 0 0 .25rem; letter-spacing: -.02em; }
@@ -341,6 +350,13 @@ dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inheri
 /* chart severity scale, checked for colour-vision separation on both surfaces; legends and axis labels name each one */
 :root { --sev-critical: #a83a9e; --sev-high: #e04a2f; --sev-medium: #c99a00; --sev-low: #3987e5; --sev-unknown: #7d8590; }
 .chart-empty { margin: 0; padding: 2rem .5rem; text-align: center; }
+.posture-map { margin-bottom: 1rem; }
+.map-wrap { position: relative; overflow: hidden; border-radius: 6px; }
+.map-wrap canvas { display: block; cursor: grab; touch-action: none; }
+.map-tip {
+  position: absolute; max-width: 240px; padding: .4rem .55rem; pointer-events: none; font-size: .8rem; line-height: 1.35;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 14px rgb(0 0 0 / .25);
+}
 .posture-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; cursor: pointer; padding: .35rem 0; }
 .posture-head .hosts { color: var(--muted); }
 .posture-head form.renew { margin-left: auto; }

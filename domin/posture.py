@@ -444,6 +444,29 @@ def domain_summary(rows: list[dict]) -> list[dict]:
                                                -d["sev_n"].get("high", 0), -d["cves"], d["domain"]))
 
 
+def country_summary(rows: list[dict]) -> list[dict]:
+    """The posture map: report()'s rows per country ("" = no location, e.g. private addresses), each with addresses,
+    exposed (high+), worst severity, distinct CVEs per severity, open ports and up to 5 host names; most addresses
+    first."""
+    rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
+    out: dict[str, dict] = {}
+    for r in rows:
+        c = out.setdefault(r.get("country") or "", {"country": r.get("country") or "", "addresses": 0, "exposed": 0,
+                                                    "open_ports": 0, "worst": "", "cve": {}, "hosts": []})
+        c["addresses"] += 1
+        c["exposed"] += r["worst"] in ("critical", "high")
+        c["open_ports"] += r["open_ports"] if r["status"] == "done" else 0
+        c["cve"].update({v["cve"]: v["severity"] for v in r["vulns"]})
+        if rank[r["worst"]] < rank[c["worst"]]:
+            c["worst"] = r["worst"]
+        if len(c["hosts"]) < 5:
+            c["hosts"] += [h for h in (r.get("hosts") or "").split(",")[:1] if h]
+    for c in out.values():
+        sevs = list(c.pop("cve").values())
+        c["sev_n"] = {s: n for s in SEVERITIES if (n := sevs.count(s))}
+    return sorted(out.values(), key=lambda c: (-c["addresses"], c["country"]))
+
+
 TREND_DAYS = 90
 
 
@@ -577,9 +600,11 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
                              JOIN ({db.LATEST}) s ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id
                              WHERE d.name = ? AND r.ip != '' ORDER BY r.host""", (domain,)):
         e = names.setdefault(r["host"], {"host": r["host"], "ips": [], "last": "", "pending": False,
-                                         "skip": "out of scope"})
+                                         "skip": "out of scope", "countries": []})
         if r["ip"] not in e["ips"]:
             e["ips"].append(r["ip"])
+        if r["country"] and r["country"] not in e["countries"]:
+            e["countries"].append(r["country"])   # for the Filter box (the map puts a country there)
         if users.excluded(scope["posture_exclude"], r["host"], users.owner_text(r)):
             e["skip"] = e["skip"] if e["skip"] == "" else "on the Never scan list"
         elif users.posture_ok(scope, r["ip"], r["country"] or ""):
@@ -623,7 +648,8 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
         res = [by_ip[ip] for ip in h["ips"] if ip in by_ip]
         cves = {v["cve"]: v for r in res for v in r.get("vulns") or []}
         # what the page's Filter box matches on: names, addresses, services, products, versions, ports, CVEs
-        text = [h["host"], *h["ips"], h.get("skip") or "", *(v["severity"] for v in cves.values()), *cves]
+        text = [h["host"], *h["ips"], *h.get("countries", []), h.get("skip") or "",
+                *(v["severity"] for v in cves.values()), *cves]
         for r in res:
             text += [r.get("note") or "", r.get("error") or ""]
             for s in r.get("services") or []:

@@ -823,3 +823,28 @@ def test_footprint_per_day_carries_each_domains_latest_scan(settings):
             ("2026-01-01", 1, 2, 1, 1), ("2026-01-02", 2, 3, 2, 2), ("2026-01-03", 2, 2, 2, 2)]
         assert [d["day"] for d in db.footprint_per_day(c, "2026-01-02")][:2] == ["2026-01-02", "2026-01-03"]
         assert db.footprint_per_day(c, "2026-01-02")[0]["domains"] == 2   # earlier scans still count
+
+
+def test_country_summary_for_the_map():
+    rows = [{"country": "Sweden", "worst": "high", "status": "done", "open_ports": 2, "hosts": "a.example,b.example",
+             "vulns": [{"cve": "CVE-1", "severity": "high"}]},
+            {"country": "Sweden", "worst": "none", "status": "done", "open_ports": 1, "hosts": "c.example", "vulns": []},
+            {"country": "", "worst": "", "status": "failed", "open_ports": 3, "hosts": "", "vulns": []}]
+    sweden, nowhere = posture.country_summary(rows)
+    assert (sweden["country"], sweden["addresses"], sweden["exposed"], sweden["worst"]) == ("Sweden", 2, 1, "high")
+    assert sweden["sev_n"] == {"high": 1} and sweden["open_ports"] == 3 and sweden["hosts"] == ["a.example", "c.example"]
+    assert (nowhere["country"], nowhere["addresses"], nowhere["open_ports"]) == ("", 1, 0)
+
+
+def test_posture_map_and_backdrop(settings, nmap):
+    with app_client(settings) as h:
+        assert 'class="backdrop"' not in h.get("/").text          # public pages: no backdrop
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        run_queue(settings)
+        page = h.get("/admin/security").text
+        assert 'class="backdrop"' in page and 'id="pc-map"' in page and '"countries": [' in page
+        css = re.search(r'href="([^"]*)app.css"', page).group(1)
+        world = h.get(css + "world.json").json()
+        assert any("sweden" in w["k"] and "se" in w["k"] for w in world) and len(world) > 150
+        assert h.get("/static/backdrop.svg").status_code == 200

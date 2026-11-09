@@ -924,6 +924,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
+            rep["charts"]["countries"] = posture.country_summary(rep["rows"])
             if not dom:   # all domains: the public footprint over time (inventory scans)
                 since = (datetime.now() - timedelta(days=posture.TREND_DAYS)).strftime("%Y-%m-%d")
                 rep["charts"]["footprint"] = db.footprint_per_day(c, since)

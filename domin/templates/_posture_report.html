@@ -41,6 +41,15 @@
 </section>
 {% endif %}
 
+<section class="card posture-map">
+  <h2>Where the addresses are <small>country of each scanned address · bubble size = addresses, colour = worst
+    severity · wheel or pinch to zoom, drag to move · click a country to filter</small></h2>
+  <div class="map-wrap"><canvas id="pc-map" role="img"
+    aria-label="World map with the scanned addresses per country"></canvas><div class="map-tip" hidden></div></div>
+  {% set nowhere = rep.charts.countries|selectattr('country', 'equalto', '')|first %}
+  {% if nowhere %}<p class="muted">No location: {{ nowhere.addresses }} address(es) (private or unknown).</p>{% endif %}
+</section>
+
 <section class="grid g2 posture-charts">
   <div class="card"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
     <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity per day with a finished scan"></canvas></div></div>

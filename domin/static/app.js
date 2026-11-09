@@ -7,6 +7,13 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const pageData = () => { const el = $("#page-data"); return el ? JSON.parse(el.textContent) : {}; };
 
+// --- backdrop: the signed-in pages' decorative layer moves at 15 % of the scroll speed (depth); still for reduced motion
+if (document.body.classList.contains("backdrop") && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  let queued = false;
+  const move = () => { queued = false; document.body.style.setProperty("--backdrop-y", `${Math.round(-scrollY * 0.15)}px`); };
+  addEventListener("scroll", () => { if (!queued) { queued = true; requestAnimationFrame(move); } }, { passive: true });
+}
+
 // --- theme ---------------------------------------------------------------------------------------------------------
 $("#theme")?.addEventListener("click", () => {
   const dark = document.documentElement.dataset.theme
@@ -812,8 +819,132 @@ function postureCharts() {
   }
 }
 
+// posture map, country level and offline (static/world.json: Natural Earth 110m, public domain): one bubble per
+// country with scanned addresses (size = addresses, colour = worst severity, C/H counts beside it). It opens fitted to
+// those countries; the wheel zooms at the pointer, drag moves, hover shows a summary, a click puts the country in the
+// page's Filter box. Colours are read at draw time, so a theme change applies on the next draw.
+async function postureMap() {
+  const cv = document.getElementById("pc-map");
+  const data = document.getElementById("posture-data");
+  if (!cv || !data) return;
+  const wrap = cv.parentElement;
+  const tip = $(".map-tip", wrap);
+  const hits = (JSON.parse(data.textContent).countries || []).filter((c) => c.country);
+  let world;
+  try {
+    world = await (await fetch(new URL("world.json", $('link[rel="stylesheet"][href*="app.css"]').href))).json();
+  } catch {
+    wrap.innerHTML = '<p class="muted chart-empty">The map data did not load.</p>';
+    return;
+  }
+  const byKey = new Map();
+  world.forEach((w) => w.k.forEach((k) => byKey.set(k, w)));
+  const merc = (lat) => -Math.log(Math.tan(Math.PI / 4 + Math.max(-80, Math.min(80, lat)) * Math.PI / 360)) * 180 / Math.PI;
+  // rings in map units (lon, mercator y); each country's box from its largest ring (overseas parts left out)
+  world.forEach((w) => {
+    w.m = w.r.map((ring) => { const out = []; for (let i = 0; i < ring.length; i += 2) out.push(ring[i] / 10, merc(ring[i + 1] / 10)); return out; });
+    const area = (r) => { let s = 0; for (let i = 0; i < r.length - 2; i += 2) s += r[i] * r[i + 3] - r[i + 2] * r[i + 1]; return Math.abs(s); };
+    const big = w.m.reduce((a, b) => (area(b) > area(a) ? b : a));
+    const xs = big.filter((_, i) => i % 2 === 0), ys = big.filter((_, i) => i % 2 === 1);
+    w.box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    w.c = [(w.box[0] + w.box[2]) / 2, (w.box[1] + w.box[3]) / 2];
+  });
+  const pins = hits.map((h) => ({ ...h, w: byKey.get(h.country.toLowerCase()) })).filter((p) => p.w);
+  const lost = hits.length - pins.length;
+  let k = 1, tx = 0, ty = 0, W = 0, H = 0;
+  const dpr = devicePixelRatio || 1;
+  const ctx = cv.getContext("2d");
+  const fit = () => {
+    const boxes = pins.length ? pins.map((p) => p.w.box) : [[-170, merc(75), 180, merc(-55)]];
+    let [x0, y0, x1, y1] = boxes.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
+    const span = Math.max(x1 - x0, y1 - y0, 25);   // one small country still shows its neighbours
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    [x0, x1, y0, y1] = [cx - span * .65, cx + span * .65, cy - span * .65, cy + span * .65];
+    k = Math.min(W / (x1 - x0), H / (y1 - y0));
+    tx = W / 2 - cx * k; ty = H / 2 - cy * k;
+  };
+  const radius = (p) => Math.min(42, 6 + 4 * Math.sqrt(p.addresses));
+  const colour = (p) => (["critical", "high", "medium", "low"].includes(p.worst) ? css(`--sev-${p.worst}`) : css("--accent"));
+  const path = (w) => {
+    const p = new Path2D();
+    w.m.forEach((ring) => { p.moveTo(ring[0] * k + tx, ring[1] * k + ty); for (let i = 2; i < ring.length; i += 2) p.lineTo(ring[i] * k + tx, ring[i + 1] * k + ty); p.closePath(); });
+    return p;
+  };
+  const draw = () => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const lit = new Set(pins.map((p) => p.w));
+    ctx.lineWidth = .7;
+    world.forEach((w) => {
+      w.path = path(w);
+      ctx.fillStyle = css(lit.has(w) ? "--border" : "--surface-2");
+      ctx.strokeStyle = css("--border");
+      ctx.fill(w.path); ctx.stroke(w.path);
+    });
+    ctx.font = `600 11px ${css("--font") || "sans-serif"}`;
+    ctx.textBaseline = "middle";
+    pins.forEach((p) => {
+      const x = p.w.c[0] * k + tx, y = p.w.c[1] * k + ty, r = radius(p);
+      ctx.globalAlpha = .55; ctx.fillStyle = colour(p);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = colour(p); ctx.stroke();
+      const counts = [["C", "critical"], ["H", "high"]].filter(([, s]) => p.sev_n[s]).map(([l, s]) => `${l}${p.sev_n[s]}`).join(" ");
+      ctx.fillStyle = css("--text");
+      ctx.fillText(`${p.addresses}${counts ? " · " + counts : ""}`, x + r + 4, y);
+    });
+    if (lost) { ctx.fillStyle = css("--muted"); ctx.fillText(`${lost} country name(s) not on the map`, 8, H - 10); }
+  };
+  const size = () => {
+    W = wrap.clientWidth; H = Math.max(260, Math.min(460, Math.round(W * .5)));
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = `${W}px`; cv.style.height = `${H}px`;
+  };
+  size(); fit(); draw();
+  new ResizeObserver(() => { if (wrap.clientWidth !== W) { size(); fit(); draw(); } }).observe(wrap);
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const at = (ev) => { const b = cv.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+  const pick = ([x, y]) => pins.find((p) => Math.hypot(p.w.c[0] * k + tx - x, p.w.c[1] * k + ty - y) <= radius(p))
+    || pins.find((p) => ctx.isPointInPath(p.w.path, x * dpr, y * dpr));
+  cv.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const [x, y] = at(ev), f = Math.pow(1.0015, -ev.deltaY);
+    const nk = Math.max(.5, Math.min(60, k * f));
+    tx = x - (x - tx) * nk / k; ty = y - (y - ty) * nk / k; k = nk;
+    draw();
+  }, { passive: false });
+  let drag = null;
+  cv.addEventListener("pointerdown", (ev) => { drag = { x: ev.clientX, y: ev.clientY, tx, ty, moved: false }; cv.setPointerCapture(ev.pointerId); });
+  cv.addEventListener("pointermove", (ev) => {
+    if (drag) {
+      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+      if (drag.moved) { tx = drag.tx + dx; ty = drag.ty + dy; tip.hidden = true; draw(); return; }
+    }
+    const [x, y] = at(ev), p = pick([x, y]);
+    cv.style.cursor = p ? "pointer" : "grab";
+    tip.hidden = !p;
+    if (!p) return;
+    const sev = ["critical", "high", "medium", "low"].filter((s) => p.sev_n[s]).map((s) => `${p.sev_n[s]} ${s}`).join(", ");
+    tip.innerHTML = `<b>${esc(p.country)}</b><br>${p.addresses} address(es), ${p.exposed} with high+<br>`
+      + `${esc(sev || "no CVEs")} · ${p.open_ports} open port(s)<br><span class="muted">${esc(p.hosts.join(", "))}</span>`;
+    tip.style.left = `${Math.min(x + 14, W - 240)}px`; tip.style.top = `${y + 14}px`;
+  });
+  cv.addEventListener("pointerup", (ev) => {
+    const was = drag; drag = null;
+    if (!was || was.moved) return;
+    const p = pick(at(ev));
+    const box = $("[data-domain-search]");
+    if (!p || !box) return;
+    box.value = p.country;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.scrollIntoView({ block: "nearest" });
+  });
+  cv.addEventListener("pointerleave", () => { tip.hidden = true; });
+  cv.addEventListener("dblclick", () => { fit(); draw(); });
+}
+
 const page = document.body.dataset.page;
 if (page === "tools") toolsPage();
+postureMap();
 if (chartDefaults()) {
   postureCharts();
   if (page === "overview") overviewCharts();

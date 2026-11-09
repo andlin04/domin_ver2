@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720" fill="none" stroke="#000" stroke-width="1.2" stroke-linecap="round">
+  <!-- decorative backdrop tile (mask only: the page colours it); network graph, attack paths, packet fragments -->
+  <g opacity=".9">
+    <path d="M60 80 L190 140 L320 90 L450 170 L600 110 M190 140 L230 290 L360 330 L450 170 M230 290 L110 380 L60 520
+             M360 330 L520 360 L650 300 L600 110 M520 360 L560 520 L680 600 M360 330 L330 480 L200 560 L110 380
+             M330 480 L470 600 L560 520 M200 560 L250 690 M470 600 L430 710 M650 300 L710 240"/>
+  </g>
+  <g fill="#000" stroke="none">
+    <circle cx="60" cy="80" r="4"/><circle cx="190" cy="140" r="6"/><circle cx="320" cy="90" r="3.5"/>
+    <circle cx="450" cy="170" r="7"/><circle cx="600" cy="110" r="4"/><circle cx="230" cy="290" r="4.5"/>
+    <circle cx="360" cy="330" r="8"/><circle cx="110" cy="380" r="4"/><circle cx="60" cy="520" r="3.5"/>
+    <circle cx="520" cy="360" r="5"/><circle cx="650" cy="300" r="4"/><circle cx="560" cy="520" r="6"/>
+    <circle cx="680" cy="600" r="3.5"/><circle cx="330" cy="480" r="4.5"/><circle cx="200" cy="560" r="5"/>
+    <circle cx="470" cy="600" r="4"/>
+  </g>
+  <!-- target rings on the compromised nodes -->
+  <g stroke-width="1">
+    <circle cx="360" cy="330" r="18"/><circle cx="360" cy="330" r="30" stroke-dasharray="3 6"/>
+    <circle cx="450" cy="170" r="16"/><circle cx="560" cy="520" r="15" stroke-dasharray="2 5"/>
+  </g>
+  <!-- lateral movement: dashed arcs with arrow heads -->
+  <g stroke-width="1.4" stroke-dasharray="6 7">
+    <path d="M60 520 Q200 420 360 330"/><path d="M360 330 Q480 250 600 110"/><path d="M200 560 Q380 640 560 520"/>
+  </g>
+  <g stroke-width="1.4">
+    <path d="M347 326 L360 330 L351 340"/><path d="M588 112 L600 110 L596 122"/><path d="M546 518 L560 520 L551 531"/>
+  </g>
+  <!-- packet and hex fragments -->
+  <g fill="#000" stroke="none" font-family="ui-monospace, Consolas, monospace" font-size="11">
+    <text x="24" y="30">SYN 0x02 &#8594; 443/tcp</text>
+    <text x="400" y="40">4d 5a 90 00 03 00 00 00 04 00</text>
+    <text x="470" y="260">CVE-20xx · RCE</text>
+    <text x="24" y="250">ff fe 00 1b 7a 3c</text>
+    <text x="250" y="420">GET /admin HTTP/1.1</text>
+    <text x="40" y="640">10.0.0.0/8 · 22 · 3389</text>
+    <text x="560" y="680">0x7f 45 4c 46</text>
+    <text x="380" y="700">T1190 &#8594; T1021</text>
+  </g>
+  <!-- port grid fragment -->
+  <g stroke-width="1" opacity=".8">
+    <rect x="600" y="400" width="80" height="60"/>
+    <path d="M620 400 V460 M640 400 V460 M660 400 V460 M600 420 H680 M600 440 H680"/>
+  </g>
+  <g fill="#000" stroke="none"><rect x="621" y="421" width="18" height="18"/><rect x="661" y="401" width="18" height="18"/></g>
+</svg>

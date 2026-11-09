@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture map; backdrop
+
+- Posture: "Where the addresses are" map, country level and offline (static/world.json from Natural Earth 1:110m,
+  public domain): a bubble per country (size = addresses, colour = worst severity, C/H counts), fitted to those
+  countries; wheel zoom, drag, double-click resets, hover summary, click puts the country in the Filter. Addresses
+  without a location are counted under it. The Filter also matches host names by country.
+- Signed-in pages: a decorative backdrop (static/backdrop.svg, theme text colour at 3.5 %) that moves at 15 % of the
+  scroll speed; no movement with reduced motion. Public pages unchanged.
+- Rollback: revert this change.
+
 ## 2026-11-09: KPIs follow the Filter; footprint trend; Users under Admin
 
 - Posture: while the Filter box holds text, the KPI tiles count only what it leaves (all domains: the domains it
