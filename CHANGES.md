@@ -2,6 +2,17 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture report (PDF or Markdown) on ticked hosts
+
+- Posture, domain view: tick host names, then Report: download an executive and technical report as PDF or
+  Markdown. Contents: overall risk rating, KPIs, executive summary, prioritised recommendations (update per product,
+  mitigate without a fix, services that rarely belong on the internet, routine patching, coverage gaps), top
+  critical/high risks, host table, per-address technical findings (ports, products, CVEs with fixes), scope and
+  method. Any signed-in user; the ticks work for viewers too (Scan now stays analyst/admin).
+- New dependency fpdf2 (with pillow, fonttools), pinned in deploy/requirements.txt. `deploy/update.sh` now installs
+  deploy/requirements.txt when it changed (proxy settings from /etc/domin.env).
+- Rollback: revert this change; the extra packages can stay installed.
+
 ## 2026-11-09: Scan dialog fits; progress shows only the started scan
 
 - Confirm dialogs with a picker are wider (up to 40rem) and the picker never runs past the frame.

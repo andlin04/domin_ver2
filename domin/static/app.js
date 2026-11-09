@@ -194,20 +194,19 @@ document.addEventListener("click", (ev) => {
   const tr = a.closest("tr");
   if (tr._detail) collapseHost(tr); else expandHost(a);
 });
-// posture host list: tick rows (the header box ticks every visible one), "Scan now" asks for a profile and queues the
-// ticked rows that are still visible
+// posture host list: tick rows (the header box ticks every visible one). "Scan now" (profile) and "Report" (format)
+// open their dialog for the ticked rows that are still visible
 (function hostPicker() {
   const table = document.getElementById("posture-hosts");
-  const btn = $("[data-scan-picked]");
-  const dlg = document.getElementById("scan-picked");
-  if (!table || !btn || !dlg) return;
+  const btns = $$("[data-picked-open]");
+  if (!table || !btns.length) return;
   const all = $("[data-pick-all]", table);
   const count = $("[data-picked-count]");
   const shown = (b) => { const tr = b.closest("tr"); return !tr.hidden && !tr.classList.contains("pf-out"); };
   const picked = () => $$("tbody input[data-pick]", table).filter((b) => b.checked && shown(b));
   const sync = () => {
     const n = picked().length;
-    btn.disabled = !n;
+    btns.forEach((b) => { b.disabled = !n; });
     count.textContent = `${n} ticked`;
   };
   all.addEventListener("change", () => {
@@ -217,14 +216,18 @@ document.addEventListener("click", (ev) => {
   table.addEventListener("change", sync);
   document.addEventListener("pagefilter", sync);
   document.addEventListener("input", (ev) => { if (ev.target.matches(".colf, [data-filter='#posture-hosts']")) sync(); });
-  btn.addEventListener("click", () => {
-    const names = picked().map((b) => b.value);
-    $("input[name=hosts]", dlg).value = names.join(",");
-    $("[data-picked-n]", dlg).textContent = names.length;
-    dlg.showModal();
+  btns.forEach((btn) => {
+    const dlg = $(btn.dataset.pickedOpen);
+    btn.addEventListener("click", () => {
+      const names = picked().map((b) => b.value);
+      $("input[name=hosts]", dlg).value = names.join(",");
+      $("[data-picked-n]", dlg).textContent = names.length;
+      dlg.showModal();
+    });
+    $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
+    // Scan: the posture-run handler sends it and shows progress; Report: the browser downloads the file
+    $("form", dlg).addEventListener("submit", () => dlg.close());
   });
-  $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
-  $("form", dlg).addEventListener("submit", () => dlg.close());   // the posture-run handler sends it and shows progress
 })();
 // posture: Scan opens the confirm dialog (target + profile); Confirm submits the form the dialog sits in
 $$("[data-scan-open]").forEach((btn) => {

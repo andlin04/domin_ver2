@@ -89,7 +89,7 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")
         page = h.get(f"/admin/security?domain={DOM}").text
-        assert 'id="posture-hosts"' in page and "data-scan-picked" in page and 'name="hosts"' in page
+        assert 'id="posture-hosts"' in page and 'data-picked-open="#scan-picked"' in page and 'name="hosts"' in page
         assert page.count(">Never<") == 4
         assert page.count("· out of scope") == 1   # cdn: 203.0.113.9 is outside the IP allow range
         empty = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM, "hosts": "", "picked": "1"},
@@ -748,3 +748,33 @@ def test_posture_page_carries_trend_data(settings):
             raw = re.search(r'id="posture-data">(.*?)</script>', h.get(url).text).group(1)
             data = json.loads(raw)
             assert [t["critical"] for t in data["trend"]] == [1, 0]
+
+
+def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        run_queue(settings)
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert 'data-picked-open="#report-picked"' in page and 'action="/admin/security/report"' in page
+        form = {"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example,www.corp.example,other.example"}
+        md = h.post("/admin/security/report", data={**form, "format": "md"})
+        assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
+        assert f'filename="posture-report-{DOM}-' in md.headers["content-disposition"]
+        text = md.text
+        for part in ("# Security posture report: corp.example", "## 1. Executive summary", "Overall risk:",
+                     "## 2. Recommendations", "## 3. Top risks", "## 4. Hosts", "## 5. Technical findings",
+                     "## 6. Scope and method", "CVE-2024-9999"):
+            assert part in text, part
+        assert "| nas.corp.example |" in text and "| www.corp.example |" in text
+        assert "mail.corp.example |" not in text.split("## 4. Hosts")[1].split("## 5.")[0]   # not ticked
+        pdf = h.post("/admin/security/report", data={**form, "format": "pdf"})
+        assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+        assert pdf.content.startswith(b"%PDF") and len(pdf.content) > 2000
+        assert h.post("/admin/security/report", data={**form, "hosts": ""}).status_code == 422
+        assert h.post("/admin/security/report", data={**form, "hosts": "other.example"}).status_code == 422
+    with app_client(settings) as h:   # viewers may export what they can see
+        csrf = sign_in(h, "vee")
+        page = h.get(f"/admin/security?domain={DOM}").text
+        assert 'data-picked-open="#report-picked"' in page and 'data-picked-open="#scan-picked"' not in page
+        assert h.post("/admin/security/report", data={**form, "csrf": csrf, "format": "md"}).status_code == 200

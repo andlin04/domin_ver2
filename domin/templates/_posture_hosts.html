@@ -12,8 +12,9 @@
     · {{ host_list|selectattr('last', 'equalto', '')|list|length }} never scanned · open a name for its findings</small></h2>
   <div class="table-tools">
     {% if user.role in ('admin', 'analyst') %}
-    <button class="btn primary" type="button" data-scan-picked disabled>Scan now</button>
-    <span class="muted small-print" data-picked-count>0 ticked</span>{% endif %}
+    <button class="btn primary" type="button" data-picked-open="#scan-picked" disabled>Scan now</button>{% endif %}
+    <button class="btn" type="button" data-picked-open="#report-picked" disabled>Report</button>
+    <span class="muted small-print" data-picked-count>0 ticked</span>
     <input class="filter" placeholder="Filter all columns…" data-filter="#posture-hosts" aria-label="Filter host names">
   </div>
   <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable>
@@ -75,4 +76,18 @@
         <button type="submit" class="btn primary">Confirm</button></menu>
     </form>
   </dialog>{% endif %}
+  {# a plain POST: the answer is the file, so the browser downloads it and the page stays #}
+  <dialog class="confirm" id="report-picked">
+    <form method="post" action="{{ base }}/security/report">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="domain" value="{{ posture_domain }}">
+      <input type="hidden" name="hosts" value="">
+      <p>Report on <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }}: executive summary, risk rating,
+        prioritised recommendations, top risks, per-host technical findings, scope and method.</p>
+      <label class="field">Format
+        <select name="format"><option value="pdf">PDF</option><option value="md">Markdown (.md)</option></select></label>
+      <menu><button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary">Download</button></menu>
+    </form>
+  </dialog>
 </section>

@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, mullvad, posture, proxy, publicsync, tags, tools, totp, users
+from . import admin, cve, db, fingerprint, jobs, mullvad, posture, proxy, publicsync, reports, tags, tools, totp, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -970,6 +970,30 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return JSONResponse({"error": "Sign in first."}, status_code=401)
             return JSONResponse({"domains": posture.search_domains(c, request.query_params.get("q", "")[:200])})
+
+    @app.post(base + "/security/report", include_in_schema=False)
+    async def security_report(request: Request):
+        """Download a posture report (reports.py) on the ticked host names of one domain: format=pdf or md. Any
+        signed-in user (it shows what the posture page shows)."""
+        data = await form(request)
+        with conn() as c:
+            _, u = current(request, c, data)
+            if not u:
+                return back()
+            dom = (data.get("domain") or "").strip().lower()
+            picked = [h.strip().lower() for h in (data.get("hosts") or "").split(",") if h.strip()]
+            if dom not in posture.domains(c) or not picked:
+                raise HTTPException(422, "Pick a domain and tick at least one host name.")
+            m = reports.build(c, dom, picked, u["name"])
+        if not m["hosts"]:
+            raise HTTPException(422, "None of the ticked host names belong to this domain.")
+        ext = "pdf" if data.get("format") == "pdf" else "md"
+        if ext == "pdf":
+            body, kind = await run_in_threadpool(reports.pdf, m), "application/pdf"
+        else:
+            body, kind = reports.markdown(m).encode(), "text/markdown; charset=utf-8"
+        return priv(Response(body, media_type=kind, headers={
+            "Content-Disposition": f'attachment; filename="{reports.filename(m, ext)}"'}))
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
     def security_page(request: Request):

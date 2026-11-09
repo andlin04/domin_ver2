@@ -21,6 +21,13 @@ if [ -z "$changed" ]; then
 fi
 printf 'changed: %s\n' $changed
 cp -a "$NEW"/* "$APP"/   # the entries, not "$NEW"/. : that would give $APP the temp dir's mode 700
+# new or raised dependencies first, so the restarted services find them (proxy settings from domin.env, if any)
+if printf '%s\n' "$changed" | grep -qx 'deploy/requirements.txt'; then
+  ( set -a; [ -r /etc/domin.env ] && eval "$(grep -E '^(https?_proxy|HTTPS?_PROXY|no_proxy|NO_PROXY)=' /etc/domin.env)"
+    set +a
+    "${APP%/app}/venv/bin/pip" install -q --no-input -r "$APP/deploy/requirements.txt" )
+  echo "dependencies: installed from deploy/requirements.txt"
+fi
 
 web=$(printf '%s\n' "$changed" | grep '^domin/' || true)
 worker=$(printf '%s\n' "$web" | grep -Ev '^domin/(templates|static)/|^domin/web\.py$' || true)
