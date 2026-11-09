@@ -95,7 +95,8 @@ def actions(vulns: list[dict], rows: list[dict], hosts: list[dict]) -> list[dict
     for p, g in sorted(patch.items(), key=lambda x: -len(x[1]["cves"])):
         plain = [f for f in g["fixes"] if not f.startswith("after")] or sorted(g["fixes"])
         target = max(plain, key=lambda f: tuple(int(x) for x in re.findall(r"\d+", f)))
-        out.append({"priority": 1, "title": f"Update {p} to {target} or later",
+        goal = f"a version {target}" if target.startswith("after") else f"{target} or later"
+        out.append({"priority": 1, "title": f"Update {p} to {goal}",
                     "detail": f"Fixes {len(g['cves'])} critical/high CVE(s): {_more(g['cves'], 5)}."
                               f" {target} is the newest fixed version they name."
                               f" Hosts: {_more(sorted(g['hosts']), 8)}."})
@@ -307,6 +308,8 @@ class _Doc(FPDF):
         self.cell(0, 6, f"Confidential · page {self.page_no()}/{{nb}}", align="R")
 
     def h1(self, text: str):
+        if self.get_y() > self.page_break_trigger - 35:   # never a heading alone at the foot of a page
+            self.add_page()
         self.ln(3)
         self.set_font("helvetica", "B", 13)
         self.set_text_color(*ACCENT)
