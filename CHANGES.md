@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Every table sorts on its column headers
+
+- Click a column header in any table (admin, settings, profiles, users, lookup, posture) to sort; click again to
+  reverse. Columns without a set type are typed from their cells (address, number or text).
+- Rollback: revert this change.
+
 ## 2026-11-09: Posture Filter on the Domain row
 
 - The Filter box sits in the same row as the Domain picker, pushed to the right; the scan form starts the next row.

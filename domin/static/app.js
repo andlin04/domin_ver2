@@ -48,6 +48,20 @@ document.addEventListener("keydown", (ev) => {
 
 // --- tables: sort, filter, row links -------------------------------------------------------------------------------
 const ipKey = (s) => s.includes(".") ? s.split(".").map((n) => n.padStart(3, "0")).join(".") : s;
+// every table sorts on its column headers: a header without data-sort gets a type from its column's cells
+// (#results: the drill sorts all its matches itself)
+$$(".table-wrap table, table.sortable").forEach((table) => {
+  if (table.id === "results" || !table.tHead || !table.tBodies[0]) return;
+  table.classList.add("sortable");
+  const rows = [...table.tBodies[0].rows].filter((r) => !r.classList.contains("detail-row"));
+  $$("thead th", table).forEach((th) => {
+    if (th.dataset.sort || th.classList.contains("tick") || th.colSpan > 1 || !th.textContent.trim()) return;
+    const vals = rows.map((r) => r.cells[th.cellIndex]).filter(Boolean)
+      .map((c) => (c.dataset.key ?? c.textContent).trim()).filter((v) => v && v !== "—" && v !== "-");
+    const all = (re) => vals.length > 0 && vals.every((v) => re.test(v));
+    th.dataset.sort = all(/^\d{1,3}(\.\d{1,3}){3}$/) ? "ip" : all(/^-?\d+(\.\d+)?\s*%?$/) ? "num" : "text";
+  });
+});
 $$("table.sortable").forEach((table) => {
   $$("th[data-sort]", table).forEach((th) => th.addEventListener("click", () => {
     const type = th.dataset.sort;
@@ -58,6 +72,7 @@ $$("table.sortable").forEach((table) => {
     const body = table.tBodies[0];
     const key = (tr) => {
       const c = tr.cells[col];
+      if (!c) return "";   // an empty-list row spans the table
       const t = (c.dataset.key ?? c.textContent).trim();   // data-key: a sort value other than the text
       if (type === "num") return parseFloat(t) || 0;
       return type === "ip" ? ipKey(t) : t.toLowerCase();
