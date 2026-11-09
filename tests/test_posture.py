@@ -105,7 +105,7 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
         page = h.get(f"/admin/security?domain={DOM}").text
     # one table: results sit on the host rows; the address details wait in the hidden pool for the dialog
     assert 'data-host-details="pa-172-20-4-60"' in page and 'id="pa-pool" hidden' in page
-    assert "Findings by address <small>" not in page and 'id="host-details"' in page
+    assert "Findings by address <small>" not in page and 'class="host-toggle"' in page
     with db.connect(settings.db_path) as c:
         rows = posture.report(posture.current(c, DOM))["rows"]
         merged = {m["host"]: m for m in posture.with_results(posture.host_list(c, DOM), rows)}

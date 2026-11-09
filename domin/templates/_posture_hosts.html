@@ -1,5 +1,5 @@
 {# Host names of the picked domain with their current results (posture.with_results), ticks and "Scan now".
-   A host name opens its addresses' details (#pa-pool) in a dialog. #}
+   A host name expands a row under it with its addresses' details (moved from #pa-pool by app.js). #}
 <section class="card host-list">
   <h2>Host names <small>{{ host_list|length }} with an address in the latest inventory scan of {{ posture_domain }}
     · {{ host_list|selectattr('last', 'equalto', '')|list|length }} never scanned · open a name for its findings</small></h2>
@@ -17,8 +17,8 @@
       <th data-sort="text">Last scan</th></tr></thead>
     <tbody>{% for h in host_list %}<tr>
       <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
-      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" data-host-details="{{ h.anchors|join(' ') }}"
-        data-title="{{ h.host }}">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
+      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"
+        aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
       <td class="mono">{{ h.ips|join(', ') }}</td>
       <td data-key="{{ h.rank }}">{% if h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
         {% if h.blocked %}<span class="pill blocked" title="{{ h.blocked }} of {{ h.results }} address(es): no scanned port answered">potentially blocked</span>{% endif %}
@@ -29,11 +29,6 @@
       <td>{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %} <small class="muted">· {{ h.skip }}</small>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
-  <dialog class="confirm wide" id="host-details" aria-labelledby="host-details-title">
-    <h2 id="host-details-title"></h2>
-    <div data-details-body></div>
-    <menu><button type="button" class="btn" data-cancel>Close</button></menu>
-  </dialog>
   {% if user.role in ('admin', 'analyst') %}
   <dialog class="confirm" id="scan-picked">
     <form method="post" action="{{ base }}/security/posture" data-posture-run>

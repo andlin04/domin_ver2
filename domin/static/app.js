@@ -62,8 +62,10 @@ $$("table.sortable").forEach((table) => {
       if (type === "num") return parseFloat(t) || 0;
       return type === "ip" ? ipKey(t) : t.toLowerCase();
     };
-    const rows = [...body.rows].sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * (dir === "asc" ? 1 : -1));
+    const rows = [...body.rows].filter((r) => !r.classList.contains("detail-row"))
+      .sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * (dir === "asc" ? 1 : -1));
     body.append(...rows);
+    rows.forEach((r) => { if (r._detail) r.after(r._detail); });   // an expanded row keeps its details under it
   }));
 });
 document.addEventListener("click", (ev) => { if (ev.target.closest("th .colf")) ev.stopPropagation(); }, true);
@@ -77,8 +79,10 @@ function applyFilters(table) {
   const has = (v, t, i) => (start[i] ? v.startsWith(t) : v.includes(t));
   const ok = (c, v, i) => c[0] === "!" ? !c.slice(1) || !has(v, c.slice(1), i) : has(v, c, i);   // "!text": without it
   for (const tr of table.tBodies[0].rows) {
+    if (tr.classList.contains("detail-row")) continue;   // follows its host row
     const text = tr.textContent.toLowerCase();
     tr.hidden = !words.every((w) => text.includes(w)) || !cols.every((c, i) => !c || ok(c, cell(tr, i), i));
+    if (tr._detail) tr._detail.hidden = tr.hidden;
   }
 }
 $$("table[data-colfilters]").forEach((table) => {
@@ -94,32 +98,51 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
-// posture host list: a host name shows its addresses' details (moved from the hidden #pa-pool, put back on close)
-function hostDetails(ids, title) {
-  const dlg = document.getElementById("host-details");
+// posture host table: a host name expands a row under it with its addresses' findings (the <details> trees, moved
+// from the hidden #pa-pool and put back on collapse). An address shared by two names shows under one at a time.
+function collapseHost(tr) {
   const pool = document.getElementById("pa-pool");
-  if (!dlg || !pool) return;
-  const body = $("[data-details-body]", dlg);
-  $("#host-details-title", dlg).textContent = title;
-  ids.map((id) => document.getElementById(id)).filter(Boolean).forEach((box) => {
-    box.open = ids.length === 1;
-    body.append(box);
-  });
-  dlg.showModal();
+  if (!tr?._detail) return;
+  pool.append(...$$("details.posture-detail", tr._detail));
+  tr._detail.remove();
+  tr._detail = null;
+  tr.classList.remove("expanded");
 }
-(function hostDetailsDialog() {
-  const dlg = document.getElementById("host-details");
-  const pool = document.getElementById("pa-pool");
-  if (!dlg || !pool) return;
-  dlg.addEventListener("close", () => pool.append(...$("[data-details-body]", dlg).children));
-  $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
-  document.addEventListener("click", (ev) => {
-    const a = ev.target.closest("a[data-host-details]");
-    if (!a) return;
-    ev.preventDefault();
-    hostDetails(a.dataset.hostDetails.split(" "), a.dataset.title);
-  });
-})();
+function expandHost(a, openId) {
+  const tr = a.closest("tr");
+  if (!tr._detail) {
+    const ids = a.dataset.hostDetails.split(" ");
+    const boxes = ids.map((id) => document.getElementById(id)).filter(Boolean);
+    boxes.forEach((b) => { const other = b.closest("tr.detail-row"); if (other) collapseHost(other._host); });
+    const row = document.createElement("tr");
+    row.className = "detail-row";
+    row._host = tr;
+    const td = document.createElement("td");
+    td.colSpan = tr.cells.length;
+    td.append(...boxes);
+    boxes.forEach((b) => { b.open = boxes.length === 1; });
+    row.append(td);
+    row.hidden = tr.hidden;
+    tr.after(row);
+    tr._detail = row;
+    tr.classList.add("expanded");
+  }
+  const box = openId && document.getElementById(openId);
+  if (box) box.open = true;
+  (box || tr).scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+// from a chart or a CVE-table link: expand the host row that holds this address
+function hostDetails(id) {
+  const a = $$("a[data-host-details]").find((x) => x.dataset.hostDetails.split(" ").includes(id));
+  if (a) expandHost(a, id);
+}
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("a[data-host-details]");
+  if (!a) return;
+  ev.preventDefault();
+  const tr = a.closest("tr");
+  if (tr._detail) collapseHost(tr); else expandHost(a);
+});
 // posture host list: tick rows (the header box ticks every visible one), "Scan now" asks for a profile and queues the
 // ticked rows that are still visible
 (function hostPicker() {
@@ -161,7 +184,7 @@ document.addEventListener("click", (ev) => {
   const box = a && document.getElementById(a.getAttribute("href").slice(1));
   if (!box) return;
   ev.preventDefault();
-  if (box.closest("#pa-pool")) { hostDetails([box.id], a.textContent.trim()); return; }   // shown in the dialog
+  if (box.closest("#pa-pool, #posture-hosts")) { hostDetails(box.id); return; }   // lives in the host table
   box.open = true;
   box.scrollIntoView({ behavior: "smooth", block: "start" });
   history.replaceState(null, "", a.getAttribute("href"));
@@ -604,7 +627,7 @@ function postureCharts() {
                  onClick: (_, els) => {
                    const box = els.length && document.getElementById(hosts[els[0].index].anchor);
                    if (!box) return;
-                   if (box.closest("#pa-pool")) { hostDetails([box.id], hosts[els[0].index].label || box.id); return; }
+                   if (box.closest("#pa-pool, #posture-hosts")) { hostDetails(box.id); return; }
                    box.open = true;
                    box.scrollIntoView({ behavior: "smooth", block: "start" });
                  } },

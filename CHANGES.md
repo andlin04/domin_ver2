@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: host rows expand in place
+
+- A host name in the posture host table expands a row under it with its addresses' findings (the same tree: address,
+  services, CVEs, description), instead of a dialog; click again to fold it. Sorting keeps an expanded row's
+  findings under it, filtering hides them with their row. Chart and CVE-table links expand the right row.
+- Rollback: revert this change.
+
 ## 2026-11-09: host list and findings in one table
 
 - With a domain picked, the host name table replaces "Findings by address": each row also shows the worst
