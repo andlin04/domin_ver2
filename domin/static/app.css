@@ -368,6 +368,7 @@ details.svc-group:first-child { border-top: 0; }
 .cve-body p { margin: .35rem 0; }
 /* Posture expandables: a chevron that points right when closed and turns down when open (as in wg-admin) */
 /* Posture Filter box: last in the panel, pushed right; rows it filters out */
+.card.controls form.posture-pick { flex: 1 1 100%; }   /* its own row: Domain, Host, Show … Filter on the right */
 .card.controls .pick-filter { margin-left: auto; }
 tr.pf-out { display: none; }
 /* expandables stand out: accent chevrons, a hover tint on every summary, an accent edge on what is open */

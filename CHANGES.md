@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture Filter on the Domain row
+
+- The Filter box sits in the same row as the Domain picker, pushed to the right; the scan form starts the next row.
+- Rollback: revert this change.
+
 ## 2026-11-09: Posture Filter narrows the page; expandables stand out
 
 - The search box is now "Filter", last in the panel on the right. Besides the Domain list it narrows the page: all

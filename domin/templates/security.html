@@ -20,6 +20,12 @@
         {% for h in posture_hosts %}<option value="{{ h }}" {% if h == posture_host %}selected{% endif %}>{{ h }}</option>{% endfor %}
       </select></label>{% endif %}
     <button class="btn" type="submit">Show</button>
+    {# Filter (same row as Domain, pushed right; no name, so never submitted): any attribute, any case, every word.
+       Narrows the Domain list (server-side: host names, addresses, ASN, provider, country, tags, products, CVE ids)
+       and the page's lists: the domain table, or the host and CVE rows. Enter opens the first matching domain. #}
+    <label class="field pick-filter">Filter <small data-domain-count>{{ posture_domains|length }} domains</small>
+      <input type="search" data-domain-search="{{ base }}/security/domain-search" placeholder="product, host, address, AS, CVE…"
+        size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>
   </form>
   {% if posture_domain and user.role in ('admin', 'analyst') %}
   <form method="post" action="{{ base }}/security/posture" class="inline posture-run" data-posture-run>
@@ -42,12 +48,6 @@
   </form>
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}
-  {# Filter: any attribute, any case, every word. Narrows the Domain list (server-side: host names, addresses, ASN,
-     provider, country, tags, products, CVE ids) and the page's lists: the domain table, or the host and CVE rows.
-     Enter opens the first matching domain. #}
-  <label class="field pick-filter">Filter <small data-domain-count>{{ posture_domains|length }} domains</small>
-    <input type="search" data-domain-search="{{ base }}/security/domain-search" placeholder="product, host, address, AS, CVE…"
-      size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>
   {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 </section>
 
