@@ -244,26 +244,42 @@ $$("[data-tabs]").forEach((card) => {
   const named = tabs.find((b) => `#${b.dataset.tab}` === location.hash);
   if (named) show(named.dataset.tab);
 });
-// Posture domain search: narrows the Domain list to domains whose search text holds every typed word (any case);
-// options are taken out, not hidden (iOS ignores hidden options). Enter opens the first match.
+// Posture domain search: the server says which domains hold every typed word (any case, any attribute); the Domain
+// list keeps only those. Options are taken out, not hidden (iOS ignores hidden options). Enter opens the first match.
 $$("[data-domain-search]").forEach((box) => {
   const sel = $("select[name=domain]", box.form);
   const count = $("[data-domain-count]", box.form);
   const all = [...sel.options].filter((o) => o.value);
-  box.addEventListener("input", () => {
-    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const hits = all.filter((o) => words.every((w) => o.dataset.search.includes(w)));
+  let hits = all;
+  let timer;
+  let seq = 0;
+  const show = (names) => {
+    hits = names ? all.filter((o) => names.has(o.value)) : all;
     // the shown domain stays listed so the picker keeps showing it; the rest in name order
     all.forEach((o) => { if (hits.includes(o) || o.selected) sel.append(o); else o.remove(); });
-    count.textContent = words.length ? `${hits.length} of ${all.length} match` : `${all.length} domains`;
-  });
-  box.addEventListener("keydown", (ev) => {
+    count.textContent = names ? `${hits.length} of ${all.length} match` : `${all.length} domains`;
+  };
+  const search = async () => {
+    const q = box.value.trim();
+    if (!q) { show(null); return; }
+    const mine = ++seq;
+    count.textContent = "searching…";
+    try {
+      const r = await fetch(`${box.dataset.domainSearch}?q=${encodeURIComponent(q)}`, { headers: { Accept: "application/json" } });
+      const d = await r.json();
+      if (mine === seq) show(new Set(d.domains || []));
+    } catch {
+      if (mine === seq) count.textContent = "search failed";
+    }
+  };
+  box.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  box.addEventListener("keydown", async (ev) => {
     if (ev.key !== "Enter") return;
     ev.preventDefault();
-    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const first = all.find((o) => words.every((w) => o.dataset.search.includes(w)));
-    if (!first || first.selected) return;
-    sel.value = first.value;
+    clearTimeout(timer);
+    await search();
+    if (!box.value.trim() || !hits.length || hits[0].selected) return;
+    sel.value = hits[0].value;
     sel.dispatchEvent(new Event("change", { bubbles: true }));
   });
 });

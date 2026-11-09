@@ -5,8 +5,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 ## 2026-11-09: search the Posture domain picker
 
 - A search box next to the Domain list narrows it to the domains whose data holds every typed word, any case: domain
-  and host names, addresses, ASN, prefix, network name, description, country, host tags, and the latest posture
-  results (service, product, version, port, CVE ids, severities). Enter opens the first match.
+  and host names, addresses, ASN (also "AS8075"), prefix, network name, description, country, host tags, and the
+  latest posture results (service, product, version, port, CVE ids, severities). Enter opens the first match. The
+  server answers (`GET /admin/security/domain-search?q=`, signed in), so the page stays small.
 - Rollback: revert this change.
 
 ## 2026-11-09: Admin menu in the top bar

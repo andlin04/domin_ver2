@@ -76,6 +76,9 @@ def test_never_scan_rules_skip_matching_hosts(settings):
         assert scope["posture_exclude"] == [{"host": "www.", "owner": "", "note": "test"}]
         users.save_scope(c, {**users.get_scope(c), "posture_exclude": scope["posture_exclude"]})
         assert sorted(t["ip"] for t in posture.targets(c, ms)[0]) == ["172.20.4.70", "172.20.4.71", "172.20.4.72"]
+        # the Posture domain search finds a domain by its records: ASN as "AS<n>", network name, description
+        assert posture.search_domains(c, "AS8075") == [ms] and posture.search_domains(c, "own HOSTING") == [ms]
+        assert posture.search_domains(c, "msft autodiscover.old") == [ms] and posture.search_domains(c, "") == []
 
 
 def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nmap):
@@ -346,11 +349,15 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     assert '<td class="mono" title=' in table and "CVE-2024-9999" in table
     assert '<a href="#pa-172-20-4-50" data-open-details title="172.20.4.50">' in table
     assert 'id="pa-172-20-4-50"' in page and 'id="cve-findings"' not in page
-    # domain search: each option carries its lower-case search text (host names, addresses, products, CVE ids)
-    assert "data-domain-search" in page
-    opt = re.search(rf'<option value="{re.escape(DOM)}" data-search="([^"]*)"', page).group(1)
-    assert opt == opt.lower() and "www.corp.example" in opt and "172.20.4.50" in opt and "cve-2024-9999" in opt
-    assert "22/tcp" in opt and DOM in opt
+    # domain search: any attribute, any case, every word must match; signed-in only
+    assert 'data-domain-search="/admin/security/domain-search"' in page
+    with app_client(settings) as h:
+        assert h.get("/admin/security/domain-search?q=lab").status_code == 401
+        sign_in(h, "ana")
+        for q in ("WWW.LAB", "172.20.4.50", "cve-2024-9999", "openssh", f"{DOM} cve-2024", "50%"):
+            hit = h.get("/admin/security/domain-search", params={"q": q}).json()["domains"]
+            assert hit == ([DOM] if q != "50%" else []), q
+        assert h.get("/admin/security/domain-search", params={"q": "www no-such-word"}).json()["domains"] == []
 
 
 def test_analyst_scans_one_host(settings):

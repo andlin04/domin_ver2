@@ -930,7 +930,6 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       domain_index=posture.domain_index(c),
                        host_list=[h for h in posture.with_results(posture.host_list(c, dom), rep["rows"])
                                   if not host or h["host"] == host] if dom else [],
                        domain_rows=[] if dom else posture.domain_summary(rep["rows"]),
@@ -962,6 +961,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
         return lookup_view(request, u, s, security_ctx())
+
+    @app.get(base + "/security/domain-search", include_in_schema=False)
+    def security_domain_search(request: Request):
+        """The Posture domain picker's search box: the domains whose data holds every typed word (JSON)."""
+        with conn() as c:
+            _, u = current(request, c)
+            if not u:
+                return JSONResponse({"error": "Sign in first."}, status_code=401)
+            return JSONResponse({"domains": posture.search_domains(c, request.query_params.get("q", "")[:200])})
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
     def security_page(request: Request):
