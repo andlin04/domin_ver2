@@ -196,6 +196,9 @@ dl.facts dd { margin: 0; word-break: break-word; }
 .note { margin: 0; padding: .6rem .9rem; border-radius: var(--r-ctl); border: 1px solid var(--border); }
 .note.ok { border-color: var(--up); color: var(--up); }
 .note.bad { border-color: var(--down); color: var(--down); }
+.note.warn { border-color: var(--flat); color: var(--flat); font-weight: 600; }
+.pill.blocked { background: color-mix(in srgb, var(--flat) 22%, transparent); color: var(--flat);
+  border: 1px solid var(--flat); font-weight: 650; }
 .btn.small { padding: .2rem .6rem; font-size: .8rem; }
 .jobs form { display: inline; }
 .table-wrap.short { max-height: 360px; }

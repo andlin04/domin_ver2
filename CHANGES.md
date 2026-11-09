@@ -6,7 +6,8 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - A finished scan where no port answered (all filtered; through a proxy or relay, all refused) is flagged
   "potentially blocked" (pill, KPI, note) instead of "no open TCP ports". Read from the stored nmap output, so older
-  scans are flagged too. A direct scan that got a reset reached a live host and is not flagged.
+  scans are flagged too. A direct scan that got a reset reached a live host and is not flagged. The pill and the
+  note are amber (`--flat`).
 - Rollback: revert this change.
 
 ## 2026-11-09: posture scan form starts at the whole domain

@@ -96,7 +96,7 @@
       <span class="pill sev-{{ p.worst if p.worst in ('critical','high','medium','low') else 'unknown' }}">{{ p.worst or p.status }}</span>
       <b>{{ p.ip }}</b> <span class="hosts">{{ p.hosts.replace(',', ', ') }}</span>
       {% if show_domain %}<small class="muted">{{ p.domain }}</small>{% endif %}
-      {% if p.blocked %}<span class="pill fix-no" title="No scanned port answered">potentially blocked</span>{% endif %}
+      {% if p.blocked %}<span class="pill blocked" title="No scanned port answered">potentially blocked</span>{% endif %}
       {% for s, n in p.sev_n.items() %}<span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}
       {% if p.vulns %}<span class="pill {{ 'fix-yes' if p.fixable else 'fix-no' }}">{% if p.fixable %}{{ p.fixable }} of {{ p.vulns|length }} fixable{% else %}no fix published yet{% endif %}</span>{% endif %}
       <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% endif %}
@@ -110,7 +110,7 @@
         <button class="btn small" type="submit">Renew</button></form>{% endif %}
     </summary>
     {% if p.error %}<p class="note bad" role="alert">{{ p.error }}</p>{% endif %}
-    {% if p.note %}<p class="note" role="status">{{ p.note }}</p>{% endif %}
+    {% if p.note %}<p class="note {{ 'warn' if p.blocked }}" role="status">{{ p.note }}</p>{% endif %}
     {% if p.vulns %}
     <div class="cve-list">
       {% for v in p.vulns %}
