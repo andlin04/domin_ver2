@@ -244,6 +244,29 @@ $$("[data-tabs]").forEach((card) => {
   const named = tabs.find((b) => `#${b.dataset.tab}` === location.hash);
   if (named) show(named.dataset.tab);
 });
+// Posture domain search: narrows the Domain list to domains whose search text holds every typed word (any case);
+// options are taken out, not hidden (iOS ignores hidden options). Enter opens the first match.
+$$("[data-domain-search]").forEach((box) => {
+  const sel = $("select[name=domain]", box.form);
+  const count = $("[data-domain-count]", box.form);
+  const all = [...sel.options].filter((o) => o.value);
+  box.addEventListener("input", () => {
+    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const hits = all.filter((o) => words.every((w) => o.dataset.search.includes(w)));
+    // the shown domain stays listed so the picker keeps showing it; the rest in name order
+    all.forEach((o) => { if (hits.includes(o) || o.selected) sel.append(o); else o.remove(); });
+    count.textContent = words.length ? `${hits.length} of ${all.length} match` : `${all.length} domains`;
+  });
+  box.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const first = all.find((o) => words.every((w) => o.dataset.search.includes(w)));
+    if (!first || first.selected) return;
+    sel.value = first.value;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+});
 // nav Admin menu: a click elsewhere or Escape closes it
 document.addEventListener("click", (ev) => {
   $$("[data-nav-menu][open]").forEach((m) => { if (!m.contains(ev.target)) m.open = false; });

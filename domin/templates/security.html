@@ -8,10 +8,15 @@
     {% else %}Showing all domains.{% endif %}</p></div></section>
 <section class="card controls">
   <form method="get" action="{{ base }}/security" class="inline posture-pick">
+    {# narrows the Domain list: any text of a domain (host names, addresses, ASN, provider, country, tags, products,
+       CVE ids), case-insensitive; Enter opens the first match #}
+    <label class="field">Search domains <small data-domain-count>{{ posture_domains|length }} domains</small>
+      <input type="search" data-domain-search placeholder="host, address, AS, provider, CVE…" size="24"
+        spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Search the domains on any attribute"></label>
     <label class="field">Domain
       <select name="domain" data-autosubmit data-reset="host">
         <option value="">All domains</option>
-        {% for d in posture_domains %}<option value="{{ d }}" {% if d == posture_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}
+        {% for d in posture_domains %}<option value="{{ d }}" data-search="{{ domain_index.get(d, d) }}" {% if d == posture_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}
       </select></label>
     {% if posture_domain %}
     <label class="field">Host

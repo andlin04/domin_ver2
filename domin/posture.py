@@ -530,6 +530,26 @@ def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: dat
             "changed": len({(x["domain"], x["ip"]) for x in recent})}
 
 
+def domain_index(conn: sqlite3.Connection) -> dict[str, str]:
+    """Search text per domain for the Posture domain picker (lower case, space separated): the latest inventory
+    scan's records (host, address, ASN, prefix, network name, description, country), the host names' tags and the
+    latest posture result per address (service, product, version, port, CVE ids, severities, note, error)."""
+    words: dict[str, set[str]] = {}
+    for r in conn.execute(f"""SELECT d.name, r.host, r.ip, r.asn, r.prefix, r.netname, r.descr, r.country, t.tag
+                              FROM domains d JOIN ({db.LATEST}) s ON s.domain_id = d.id
+                              JOIN records r ON r.scan_id = s.id LEFT JOIN host_tags t ON t.host = r.host"""):
+        words.setdefault(r[0], {r[0]}).update(str(x) for x in r[1:] if x)
+    for r in conn.execute("""SELECT domain, services, note, error FROM posture_scans WHERE id IN
+                             (SELECT MAX(id) FROM posture_scans WHERE status = 'done' GROUP BY domain, ip)"""):
+        w = words.setdefault(r["domain"], {r["domain"]})
+        w.update(x for x in (r["note"], r["error"]) if x)
+        for s in json.loads(r["services"] or "[]"):
+            w.update(str(x) for x in (s.get("service"), s.get("product"), s.get("version"),
+                                      f"{s.get('port')}/{s.get('proto') or 'tcp'}") if x)
+            w.update(x for f in s.get("findings") or [] for x in (f.get("cve"), f.get("severity")) if x)
+    return {d: " ".join(sorted(w)).lower() for d, w in words.items()}
+
+
 def domains(conn: sqlite3.Connection) -> list[str]:
     """Domains with a finished inventory scan, for the target pick-list."""
     return [r[0] for r in conn.execute(f"SELECT d.name FROM domains d JOIN ({db.LATEST}) s ON s.domain_id = d.id "

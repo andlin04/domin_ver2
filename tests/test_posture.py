@@ -346,6 +346,11 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     assert '<td class="mono" title=' in table and "CVE-2024-9999" in table
     assert '<a href="#pa-172-20-4-50" data-open-details title="172.20.4.50">' in table
     assert 'id="pa-172-20-4-50"' in page and 'id="cve-findings"' not in page
+    # domain search: each option carries its lower-case search text (host names, addresses, products, CVE ids)
+    assert "data-domain-search" in page
+    opt = re.search(rf'<option value="{re.escape(DOM)}" data-search="([^"]*)"', page).group(1)
+    assert opt == opt.lower() and "www.corp.example" in opt and "172.20.4.50" in opt and "cve-2024-9999" in opt
+    assert "22/tcp" in opt and DOM in opt
 
 
 def test_analyst_scans_one_host(settings):

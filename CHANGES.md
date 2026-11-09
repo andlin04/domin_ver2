@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: search the Posture domain picker
+
+- A search box next to the Domain list narrows it to the domains whose data holds every typed word, any case: domain
+  and host names, addresses, ASN, prefix, network name, description, country, host tags, and the latest posture
+  results (service, product, version, port, CVE ids, severities). Enter opens the first match.
+- Rollback: revert this change.
+
 ## 2026-11-09: Admin menu in the top bar
 
 - Operations and Settings moved under one "Admin" entry that drops down (marked active on their pages; a click
