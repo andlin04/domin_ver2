@@ -930,7 +930,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
-                       host_list=posture.with_results(posture.host_list(c, dom), rep["rows"]) if dom else [],
+                       host_list=[h for h in posture.with_results(posture.host_list(c, dom), rep["rows"])
+                                  if not host or h["host"] == host] if dom else [],
+                       domain_rows=[] if dom else posture.domain_summary(rep["rows"]),
                        report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes, proxy.tests(c)),
                        scan_route=proxy.label(routes, default.get("route", "")),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))

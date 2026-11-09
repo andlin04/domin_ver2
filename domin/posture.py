@@ -384,11 +384,10 @@ def report(rows: list[dict], host: str = "") -> dict:
     table = sorted(vulns.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
     for v in table:
         v["products"] = sorted(v["products"])
+        v["addresses"] = list(dict.fromkeys((ip, name) for ip, name, _ in v["targets"]))   # each address once
     rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
     rows = sorted(rows, key=lambda r: (rank[r["worst"]], -r["high"], -r["cves"], r["ip"]))
     by_sev = {s: sum(1 for v in table if v["severity"] == s) for s in SEVERITIES}
-    risky = sorted((r for r in rows if r["vulns"]),
-                   key=lambda r: (*(-r["sev_n"].get(s, 0) for s in SEVERITIES), r["ip"]))[:TOP_HOSTS]
     return {
         "rows": rows, "vulns": table, "by_sev": by_sev,
         "kpi": {"addresses": len(rows), "exposed": sum(1 for r in rows if r["worst"] in ("critical", "high")),
@@ -399,20 +398,12 @@ def report(rows: list[dict], host: str = "") -> dict:
                 "pending": sum(1 for r in rows if r.get("pending") or r["status"] in ("queued", "running")),
                 "stale": sum(1 for r in rows if r["stale"]), "blocked": sum(1 for r in rows if r["blocked"])},
         "charts": {
-            # riskiest addresses: distinct CVEs per severity, worst first (click opens the address below)
-            "hosts": [{"label": (r.get("hosts") or "").split(",")[0] or r["ip"], "ip": r["ip"],
-                       "anchor": anchor(r["ip"]), **{s: r["sev_n"].get(s, 0) for s in SEVERITIES}} for r in risky],
             # per severity: distinct CVEs an update fixes today vs those still without a published fix
             "fix": [{"label": s, "fix": sum(1 for v in table if v["severity"] == s and v["fixable"]),
                      "nofix": sum(1 for v in table if v["severity"] == s and not v["fixable"])}
                     for s in SEVERITIES if by_sev[s]],
-            "age": age_buckets(rows),
             "services": [{"label": k, "n": n} for k, n in sorted(services.items(), key=lambda x: -x[1])[:8]]},
     }
-
-
-TOP_HOSTS = 10
-AGE_BUCKETS = ("under 7 days", "7-30 days", f"over {STALE_DAYS} days", "failed", "not finished")
 
 
 def anchor(ip: str) -> str:
@@ -420,41 +411,57 @@ def anchor(ip: str) -> str:
     return "pa-" + ip.replace(":", "-").replace(".", "-")
 
 
-def age_buckets(rows: list[dict], now: datetime | None = None) -> list[dict]:
-    """Addresses by the age of their current result: how current the picture is. Empty when nothing to show."""
-    now = now or datetime.now()
-    n = dict.fromkeys(AGE_BUCKETS, 0)
+def domain_summary(rows: list[dict]) -> list[dict]:
+    """The all-domains view: one row per domain from report()'s rows (worst first), so the overview lists domains,
+    not addresses. Each: domain, worst, rank, sev_n (distinct CVEs per severity), cves, fixable, addresses,
+    exposed (addresses with high+), open_ports, blocked, failed, pending, last (newest finished, YYYY-MM-DD HH:MM)."""
+    rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
+    out: dict[str, dict] = {}
     for r in rows:
-        if r["status"] == "failed":
-            n["failed"] += 1
-        elif r["status"] != "done" or not r.get("finished"):
-            n["not finished"] += 1
-        else:
-            age = now - datetime.fromisoformat(r["finished"])   # same edge as `stale`
-            n[AGE_BUCKETS[2] if age > timedelta(days=STALE_DAYS) else AGE_BUCKETS[0] if age < timedelta(days=7)
-              else AGE_BUCKETS[1]] += 1
-    return [{"label": k, "n": v} for k, v in n.items()] if rows else []
+        d = out.setdefault(r["domain"], {"domain": r["domain"], "cve": {}, "fix": set(), "addresses": 0, "exposed": 0,
+                                         "open_ports": 0, "blocked": 0, "failed": 0, "pending": 0, "last": "",
+                                         "worst": ""})
+        d["addresses"] += 1
+        d["exposed"] += r["worst"] in ("critical", "high")
+        d["open_ports"] += r["open_ports"] if r["status"] == "done" else 0
+        d["blocked"] += bool(r["blocked"])
+        d["failed"] += r["status"] == "failed"
+        d["pending"] += bool(r.get("pending") or r["status"] in ("queued", "running"))
+        d["last"] = max(d["last"], (r.get("finished") or "")[:16].replace("T", " "))
+        for v in r["vulns"]:
+            d["cve"][v["cve"]] = v["severity"]
+            if v["fixes"]:
+                d["fix"].add(v["cve"])
+        if rank[r["worst"]] < rank[d["worst"]]:
+            d["worst"] = r["worst"]
+    for d in out.values():
+        sevs = list(d.pop("cve").values())
+        d["sev_n"] = {s: n for s in SEVERITIES if (n := sevs.count(s))}
+        d["cves"], d["fixable"], d["rank"] = len(sevs), len(d.pop("fix")), rank[d["worst"]]
+    return sorted(out.values(), key=lambda d: (d["rank"], -d["sev_n"].get("critical", 0),
+                                               -d["sev_n"].get("high", 0), -d["cves"], d["domain"]))
 
 
 TREND_DAYS = 90
 
 
 def trend(conn: sqlite3.Connection, domain: str = "", host: str = "") -> list[dict]:
-    """Exposure over time: per day with a finished scan, the distinct critical and high CVEs across the addresses'
-    latest successful scans as of that day (the last TREND_DAYS such days). One day says nothing: empty then."""
+    """Exposure over time: per day with a finished scan, across the addresses' latest successful scans as of that
+    day (the last TREND_DAYS such days): distinct CVEs per severity, open ports and addresses scanned. One day says
+    nothing: empty then."""
     where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
-    state: dict[tuple[str, str], dict[str, str]] = {}   # (domain, ip) -> {cve: severity}
+    state: dict[tuple[str, str], tuple[dict[str, str], int]] = {}   # (domain, ip) -> ({cve: severity}, open ports)
     days: dict[str, dict] = {}
     for r in conn.execute(f"""SELECT domain, ip, hosts, finished, services FROM posture_scans
                               WHERE status = 'done' AND finished IS NOT NULL {where} ORDER BY finished, id""", args):
         if host and host not in (r["hosts"] or "").split(","):
             continue
-        state[(r["domain"], r["ip"])] = {f["cve"]: f["severity"] for s in json.loads(r["services"] or "[]")
-                                         for f in s.get("findings") or []}
-        cves = {c: sev for found in state.values() for c, sev in found.items()}
-        days[r["finished"][:10]] = {"day": r["finished"][:10],
-                                    "critical": sum(1 for s in cves.values() if s == "critical"),
-                                    "high": sum(1 for s in cves.values() if s == "high")}
+        svcs = json.loads(r["services"] or "[]")
+        state[(r["domain"], r["ip"])] = ({f["cve"]: f["severity"] for s in svcs for f in s.get("findings") or []},
+                                         len(svcs))
+        sevs = list({c: sev for found, _ in state.values() for c, sev in found.items()}.values())
+        days[r["finished"][:10]] = {"day": r["finished"][:10], **{s: sevs.count(s) for s in SEVERITIES[:4]},
+                                    "ports": sum(n for _, n in state.values()), "addresses": len(state)}
     out = list(days.values())[-TREND_DAYS:]
     return out if len(out) > 1 else []
 

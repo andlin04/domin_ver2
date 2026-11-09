@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: posture views by depth, trend charts
+
+- Posture, all domains: one row per domain (worst, CVEs per severity, fixable, addresses with high+, open ports,
+  last scan, blocked/failed/queued); a name opens the domain. No per-address lists; Changes shows its counters only.
+- Posture, one domain: the host table gets a CVEs tab (each CVE once, products, fixed versions, the addresses it
+  hits; an address opens its host row). `?host=` lists that host only and opens its row. The per-address CVE
+  findings table is gone (the CVEs tab and the host rows hold it).
+- Charts: CVEs over time per severity (critical, high, medium, low), attack surface over time (open ports,
+  addresses scanned), fix available, exposed services. Dropped: riskiest addresses (= the host table sorted by
+  Worst) and scan age (= the Last scan column).
+- Domain page (signed in): a posture summary (KPIs + CVE trend + Open in Posture) instead of the full report.
+- Rollback: revert this change.
+
 ## 2026-11-09: resizable columns in the posture host table
 
 - Drag a header's right edge to change a column's width; widths are kept per browser. The Addresses column starts

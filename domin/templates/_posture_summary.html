@@ -1,0 +1,16 @@
+{# Domain page, signed in: the posture at a glance (rep = posture.report + charts.trend); the hosts, CVEs and
+   changes live on the Posture page. #}
+{% set k = rep.kpi %}
+{% if not rep.rows %}<p class="muted card">No posture scans of this domain yet.</p>
+{% else %}
+<section class="kpis posture-kpis">
+  <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
+  <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
+  <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
+  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }} CVEs</i></b></div>
+  {% if k.blocked %}<div class="kpi warn"><span>Potentially blocked</span><b>{{ k.blocked }}</b></div>{% endif %}
+</section>
+<section class="card posture-charts"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
+  <div class="chart h200"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity per day with a finished scan"></canvas></div></section>
+<script type="application/json" id="posture-data">{{ {'trend': rep.charts.trend}|tojson }}</script>
+{% endif %}

@@ -144,6 +144,8 @@ function collapseHost(tr) {
 }
 function expandHost(a, openId) {
   const tr = a.closest("tr");
+  const panel = tr.closest("[data-panel]");   // e.g. a link on the CVEs tab: show the Hosts tab first
+  if (panel?.hidden) panel.closest("[data-tabs]")._show(panel.dataset.panel);
   if (!tr._detail) {
     const ids = a.dataset.hostDetails.split(" ");
     const boxes = ids.map((id) => document.getElementById(id)).filter(Boolean);
@@ -227,18 +229,23 @@ document.addEventListener("click", (ev) => {
 $("#search-form")?.addEventListener("formdata", (ev) => {
   for (const [k, v] of [...ev.formData]) if (!v && k !== "q") ev.formData.delete(k);
 });
-// tabbed cards: one panel shown; the choice is kept in the address (#drill)
+// tabbed cards: one panel shown; a tab other than the first is kept in the address (#drill, #cves)
 $$("[data-tabs]").forEach((card) => {
+  const tabs = $$("[data-tab]", card);
   const show = (name) => {
-    $$("[data-tab]", card).forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     $$("[data-panel]", card).forEach((p) => { p.hidden = p.dataset.panel !== name; });
   };
-  $$("[data-tab]", card).forEach((b) => b.addEventListener("click", () => {
+  card._show = show;
+  tabs.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
-    history.replaceState(null, "", b.dataset.tab === "drill" ? "#drill" : location.pathname);
+    history.replaceState(null, "", b === tabs[0] ? location.pathname + location.search : `#${b.dataset.tab}`);
   }));
-  if (location.hash === "#drill") show("drill");
+  const named = tabs.find((b) => `#${b.dataset.tab}` === location.hash);
+  if (named) show(named.dataset.tab);
 });
+// posture ?host=: that host's row opens on load
+$$("a[data-auto-open]").forEach((a) => expandHost(a));
 // sideways overflow: a fade and a "More columns" button while columns are hidden to the right
 $$(".table-wrap").forEach((wrap) => {
   const box = document.createElement("div");
@@ -643,34 +650,10 @@ function postureCharts() {
     return c;
   };
   const ints = { beginAtZero: true, ticks: { precision: 0 } };
-  const short = (s) => (s.length > 26 ? `${s.slice(0, 25)}…` : s);
-
-  // where to act first: the addresses with the most severe CVEs, stacked by severity; a click opens the address
-  const hosts = d.hosts || [];
-  let c = canvas("pc-hosts", hosts, "No CVEs on any scanned address.");
-  if (c) {
-    const used = SEV.filter((s) => hosts.some((h) => h[s]));
-    new Chart(c, {
-      type: "bar",
-      data: { labels: hosts.map((h) => h.label),
-              datasets: used.map((s) => ({ label: s, data: hosts.map((h) => h[s]), backgroundColor: sevColour(s), ...gap })) },
-      options: { indexAxis: "y", plugins: { legend: { position: "top" },
-                 tooltip: { callbacks: { title: (it) => `${hosts[it[0].dataIndex].label} (${hosts[it[0].dataIndex].ip})` } } },
-                 scales: { x: { stacked: true, ...ints }, y: { stacked: true, grid: { display: false }, ticks: { callback: (v) => short(hosts[v].label) } } },
-                 onHover: (ev, els) => { ev.native.target.style.cursor = els.length ? "pointer" : ""; },
-                 onClick: (_, els) => {
-                   const box = els.length && document.getElementById(hosts[els[0].index].anchor);
-                   if (!box) return;
-                   if (box.closest("#pa-pool, #posture-hosts")) { hostDetails(box.id); return; }
-                   box.open = true;
-                   box.scrollIntoView({ behavior: "smooth", block: "start" });
-                 } },
-    });
-  }
 
   // what an update removes today (accent) versus what waits on a vendor (grey): emphasis on the actionable part
   const fix = d.fix || [];
-  c = canvas("pc-fix", fix, "No CVEs.");
+  let c = canvas("pc-fix", fix, "No CVEs.");
   if (c) {
     new Chart(c, {
       type: "bar",
@@ -682,33 +665,23 @@ function postureCharts() {
     });
   }
 
-  // better or worse: distinct critical and high CVEs per day with a finished scan
+  // better or worse: distinct CVEs per severity per day with a finished scan (critical first, so it draws on top),
+  // then the attack surface: open ports and addresses scanned
   const tr = d.trend || [];
-  c = canvas("pc-trend", tr, "The trend appears once scans have finished on two or more days.");
-  if (c) {
-    const line = (s) => ({ label: s, data: tr.map((r) => r[s]), borderColor: sevColour(s), backgroundColor: sevColour(s),
-                           borderWidth: 2, tension: .2, pointRadius: tr.length > 40 ? 0 : 4, pointHoverRadius: 6 });
-    new Chart(c, {
+  const lines = (id, series) => {
+    const el = canvas(id, tr, "The trend appears once scans have finished on two or more days.");
+    if (!el) return;
+    const line = ([key, label, colour]) => ({ label, data: tr.map((r) => r[key]), borderColor: colour, backgroundColor: colour,
+                                             borderWidth: 2, tension: .2, pointRadius: tr.length > 40 ? 0 : 3, pointHoverRadius: 6 });
+    new Chart(el, {
       type: "line",
-      data: { labels: tr.map((r) => r.day), datasets: [line("critical"), line("high")] },
+      data: { labels: tr.map((r) => r.day), datasets: series.map(line) },
       options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "top" } },
                  scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: ints } },
     });
-  }
-
-  // how current the picture is: fresh results good, stale a warning, failed a fault
-  const age = (d.age || []).some((r) => r.n) ? d.age : [];
-  c = canvas("pc-age", age, "No results yet.");
-  if (c) {
-    const tone = { "under 7 days": css("--up"), failed: css("--down") };
-    new Chart(c, {
-      type: "bar",
-      data: { labels: age.map((r) => r.label), datasets: [{ label: "Addresses", data: age.map((r) => r.n), ...gap,
-              backgroundColor: age.map((r) => tone[r.label] || (r.label.startsWith("over") ? css("--flat") : css("--sev-unknown"))) }] },
-      options: { indexAxis: "y", plugins: { legend: { display: false } },
-                 scales: { x: ints, y: { grid: { display: false } } } },
-    });
-  }
+  };
+  lines("pc-trend", SEV.slice(0, 4).map((s) => [s, s, sevColour(s)]));
+  lines("pc-surface", [["ports", "Open ports", css("--accent")], ["addresses", "Addresses scanned", css("--sev-unknown")]]);
 
   // what is listening: ranked bars, one hue
   const svc = d.services || [];

@@ -1,6 +1,13 @@
 {# Host names of the picked domain with their current results (posture.with_results), ticks and "Scan now".
-   A host name expands a row under it with its addresses' details (moved from #pa-pool by app.js). #}
-<section class="card host-list">
+   A host name expands a row under it with its addresses' details (moved from #pa-pool by app.js).
+   Tab CVEs: the same findings per CVE (rep.vulns, each CVE once) with the addresses it hits. #}
+{% set cves = rep.vulns if rep is defined and rep.vulns else [] %}
+<section class="card host-list" {% if cves %}data-tabs{% endif %}>
+  {% if cves %}<div class="tabs" role="tablist">
+    <button type="button" role="tab" class="tab active" data-tab="hosts">Hosts <small>{{ host_list|length }}</small></button>
+    <button type="button" role="tab" class="tab" data-tab="cves">CVEs <small>{{ cves|length }}</small></button>
+  </div>{% endif %}
+  <div data-panel="hosts">
   <h2>Host names <small>{{ host_list|length }} with an address in the latest inventory scan of {{ posture_domain }}
     · {{ host_list|selectattr('last', 'equalto', '')|list|length }} never scanned · open a name for its findings</small></h2>
   <div class="table-tools">
@@ -20,7 +27,7 @@
       <th data-sort="text">Last scan</th></tr></thead>
     <tbody>{% for h in host_list %}<tr>
       <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
-      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"
+      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
         aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
       <td class="mono clip" title="{{ h.ips|join(', ') }}">{{ h.ips|join(', ') }}</td>
       <td data-key="{{ h.rank }}">{% if h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
@@ -32,6 +39,27 @@
       <td>{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %} <small class="muted">· {{ h.skip }}</small>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
+  </div>
+  {% if cves %}
+  <div data-panel="cves" hidden>
+    <div class="table-tools">
+      <span class="muted small-print">{{ cves|length }} CVEs, each once, worst first · an address opens its host on the Hosts tab</span>
+      <input class="filter" placeholder="Filter all columns…" data-filter="#posture-cves" aria-label="Filter CVEs">
+    </div>
+    <div class="table-wrap"><table id="posture-cves" class="sortable" data-colfilters>
+      <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
+        <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
+        <th data-sort="num">Addresses</th></tr></thead>
+      <tbody>{% for v in cves %}<tr>
+        <td class="mono" title="{{ v.summary or '' }}">{{ v.cve }}</td>
+        <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
+        <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+        <td>{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
+        <td>{{ v.products|join(', ') }}</td>
+        <td data-key="{{ v.addresses|length }}">{% for ip, name in v.addresses %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}" data-open-details title="{{ ip }}">{{ name or ip }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>{% endif %}
   {% if user.role in ('admin', 'analyst') %}
   <dialog class="confirm" id="scan-picked">
     <form method="post" action="{{ base }}/security/posture" data-posture-run>

@@ -1,5 +1,7 @@
 {# Posture report: rep = posture.report(...) (+ charts.trend); renew_base = admin base; can_run = analyst or admin; csrf.
-   Order: alarms (KPIs), where to act (riskiest addresses, fixable, trend), the findings, then coverage. #}
+   Two depths: show_domain (all domains) = KPIs, change counters, trends, one row per domain (domain_rows);
+   a picked domain = KPIs, changes with rows, trends, the host table with a CVEs tab (host_list), address details.
+   Order: alarms (KPIs), what changed, trends, then the list to act on. #}
 {% set k = rep.kpi %}
 {% if not rep.rows %}
 <p class="muted card">No posture scans yet.</p>
@@ -29,7 +31,8 @@
     <div class="kpi"><span>Ports closed</span><b>{{ '−' if ch.kpi.closed }}{{ ch.kpi.closed }}</b></div>
     <div class="kpi"><span>Version changes</span><b>{{ ch.kpi.version }}</b></div>
   </div>
-  {% if ch.rows %}
+  {% if show_domain %}<p class="muted small-print">Pick a domain for the list of changes.</p>
+  {% elif ch.rows %}
   <details class="posture-detail" {% if ch.rows|length <= 10 %}open{% endif %}><summary>{{ ch.rows|length }} changes, newest first</summary>
   <div class="table-wrap"><table>
     <thead><tr><th>When</th><th>Address</th><th>Change</th><th>Details</th></tr></thead>
@@ -47,49 +50,44 @@
 </section>
 {% endif %}
 
-<section class="grid g3 posture-charts">
-  <div class="card"><h2>Riskiest addresses <small>CVEs by severity · click to open</small></h2>
-    <div class="chart h260"><canvas id="pc-hosts" role="img" aria-label="Distinct CVEs per severity for the riskiest addresses; the same figures are in Findings by address"></canvas></div></div>
+<section class="grid g2 posture-charts">
+  <div class="card"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
+    <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity per day with a finished scan"></canvas></div></div>
+  <div class="card"><h2>Attack surface over time <small>open ports and addresses scanned, per scan day</small></h2>
+    <div class="chart h260"><canvas id="pc-surface" role="img" aria-label="Open ports and addresses scanned per day with a finished scan"></canvas></div></div>
   <div class="card"><h2>Fix available? <small>distinct CVEs per severity</small></h2>
-    <div class="chart h260"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
-  <div class="card"><h2>Critical &amp; high over time <small>distinct CVEs, per scan day</small></h2>
-    <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct critical and high CVEs per day with a finished scan"></canvas></div></div>
+    <div class="chart h200"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
+  <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
+    <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
-{% set nfind = rep.rows|sum(attribute='vulns', start=[])|length %}
-{% if nfind %}
+{% if show_domain %}
+{# all domains: one row per domain; a name opens its domain view #}
 <section class="card">
   <div class="card-head">
-    <h2>CVE findings <small>{{ nfind }}: one row per address and CVE · a box per column filters it ("!text" = without),
-      click a header to sort, an address to open it below</small></h2>
-    <input class="filter" placeholder="Filter all columns…" data-filter="#cve-findings" aria-label="Filter CVE findings">
+    <h2>Domains <small>{{ domain_rows|length }} with posture results, worst first · open one for its hosts and CVEs</small></h2>
+    <input class="filter" placeholder="Filter all columns…" data-filter="#posture-domains" aria-label="Filter domains">
   </div>
-  <details class="posture-detail"><summary>Show the table (typing a filter opens it)</summary>
-  <div class="table-wrap">
-    <table id="cve-findings" class="sortable" data-colfilters>
-      <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
-        <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="ip">Address</th>
-        <th data-sort="text">Host names</th><th data-sort="text">Product · port</th>
-        {% if show_domain %}<th data-sort="text">Domain</th>{% endif %}<th data-sort="text">Scanned</th></tr></thead>
-      <tbody>{% for p in rep.rows %}{% for v in p.vulns %}<tr>
-        <td class="mono" title="{{ v.summary or '' }}">{{ v.cve }}</td>
-        <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
-        <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
-        <td>{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
-        <td class="mono"><a href="#pa-{{ p.ip|replace(':', '-')|replace('.', '-') }}" data-open-details>{{ p.ip }}</a></td>
-        <td>{{ p.hosts.replace(',', ', ') }}</td>
-        <td>{% for prod, port, proto in v.where %}{{ prod }} · {{ port }}/{{ proto }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-        {% if show_domain %}<td>{{ p.domain }}</td>{% endif %}
-        <td>{{ (p.finished or p.created)[:10] }}</td>
-      </tr>{% endfor %}{% endfor %}</tbody>
-    </table>
-  </div>
-  </details>
+  <div class="table-wrap"><table id="posture-domains" class="sortable" data-colfilters>
+    <thead><tr><th data-sort="text">Domain</th><th data-sort="num">Worst</th><th data-sort="num">CVEs</th>
+      <th data-sort="num">Fixable</th><th data-sort="num">Addresses with high+</th><th data-sort="num">Open ports</th>
+      <th data-sort="text">Last scan</th></tr></thead>
+    <tbody>{% for d in domain_rows %}<tr>
+      <td><a href="{{ renew_base }}/security?domain={{ d.domain|urlencode }}">{{ d.domain }}</a></td>
+      <td data-key="{{ d.rank }}">{% if d.worst %}<span class="pill sev-{{ d.worst if d.worst in ('critical','high','medium','low') else 'unknown' }}">{{ d.worst }}</span>{% endif %}
+        {% if d.blocked %}<span class="pill blocked" title="No scanned port answered on {{ d.blocked }} address(es)">{{ d.blocked }} potentially blocked</span>{% endif %}
+        {% if d.failed %}<span class="pill fix-no">{{ d.failed }} failed</span>{% endif %}</td>
+      <td data-key="{{ d.cves }}">{{ d.cves }}{% for s, n in d.sev_n.items() %} <span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}</td>
+      <td data-key="{{ d.fixable }}">{% if d.cves %}{{ d.fixable }} of {{ d.cves }}{% endif %}</td>
+      <td data-key="{{ d.exposed }}">{{ d.exposed }} of {{ d.addresses }}</td>
+      <td data-key="{{ d.open_ports }}">{{ d.open_ports }}</td>
+      <td>{{ d.last or 'Never' }}{% if d.pending %} <em>· {{ d.pending }} queued</em>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
 </section>
-{% endif %}
-
-{# a picked domain: the host name table is the findings list; the address details wait in a hidden pool for its dialog #}
+{% else %}
+{# a picked domain: the host name table (with a CVEs tab) is the findings list; address details wait in #pa-pool #}
 {% if host_list %}{% include "_posture_hosts.html" %}
 <div id="pa-pool" hidden>
 {% else %}
@@ -169,11 +167,5 @@
   </details>
   {% endfor %}
 {% if host_list %}</div>{% else %}</section>{% endif %}
-
-<section class="grid g2 posture-charts">
-  <div class="card"><h2>Scan age <small>addresses by age of their current result</small></h2>
-    <div class="chart h200"><canvas id="pc-age" role="img" aria-label="Addresses by age of their current posture result"></canvas></div></div>
-  <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
-    <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
-</section>
+{% endif %}
 {% endif %}
