@@ -113,13 +113,23 @@
     {% if p.note %}<p class="note {{ 'warn' if p.blocked }}" role="status">{{ p.note }}</p>{% endif %}
     {% if p.vulns %}
     <div class="cve-list">
-      {% for v in p.vulns %}
+      {% for g in p.by_service %}
+      <details class="svc-group">
+        <summary class="cve-head">
+          <span class="pill sev-{{ g.worst }}">{{ g.worst }}</span>
+          <b>{{ g.product }}</b> <span class="mono">{{ g.port }}/{{ g.proto }}</span>
+          <span class="small-print">{{ g.vulns|length }} CVE(s)</span>
+          {% for s, n in g.sev_n.items() %}<span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}
+          <span class="pill {{ 'fix-yes' if g.fixable else 'fix-no' }}">{{ g.fixable }} of {{ g.vulns|length }} fixable</span>
+        </summary>
+      <div class="svc-cves">
+      {% for v in g.vulns %}
       <details class="cve-item">
         <summary class="cve-head">
           <b class="mono">{{ v.cve }}</b>
           <span class="pill sev-{{ v.severity }}">{{ v.severity }}</span>
           <span class="num">{{ '%.1f'|format(v.score) if v.score is not none else '—' }}</span>
-          <span class="small-print">{% for prod, port, proto in v.where %}{{ prod }} · {{ port }}/{{ proto }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          {% if v.where|length > 1 %}<span class="small-print">also: {% for prod, port, proto in v.where if (prod, port, proto) != (g.product, g.port, g.proto) %}{{ prod }} · {{ port }}/{{ proto }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
           {% if v.fixes %}<span class="pill fix-yes" title="Fixed in {{ v.fixes|join(', ') }}">fix: {{ v.fixes|length }} version{{ 's' if v.fixes|length > 1 }}</span>
           {% else %}<span class="pill fix-no">no fix yet</span>{% endif %}
         </summary>
@@ -128,6 +138,9 @@
           <p class="small-print">Fixed in: {% if v.fixes %}<span class="mono">{{ v.fixes|join(', ') }}</span>{% else %}<span class="muted">no fixed version published yet</span>{% endif %}</p>
           <p class="small-print">{% for name, url in v.links %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
         </div>
+      </details>
+      {% endfor %}
+      </div>
       </details>
       {% endfor %}
     </div>

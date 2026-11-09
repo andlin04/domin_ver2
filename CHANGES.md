@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: CVEs grouped per service
+
+- An address's CVE list is grouped per service (product, version, port), worst group first, each collapsed with
+  its CVE count, severity pills and fixable count. A CVE that hits several services is listed under each, with
+  "also: ..." naming the others.
+- Rollback: revert this change.
+
 ## 2026-11-09: "Potentially blocked" addresses
 
 - A finished scan where no port answered (all filtered; through a proxy or relay, all refused) is flagged

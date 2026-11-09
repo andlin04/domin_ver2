@@ -323,19 +323,25 @@ details.raw summary { cursor: pointer; }
 .cve-list { margin: .3rem 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius); }
 details.cve-item { border-top: 1px solid var(--border); }
 details.cve-item:first-child { border-top: 0; }
+details.svc-group { border-top: 1px solid var(--border); }
+details.svc-group:first-child { border-top: 0; }
+.svc-group > summary { font-weight: 600; }
+.svc-cves { margin: 0 .5rem .5rem 1.4rem; border: 1px solid var(--border); border-radius: var(--radius); }
 .cve-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; cursor: pointer; padding: .35rem .6rem; }
 .cve-head .num { min-width: 2.2rem; color: var(--muted); }
 .cve-body { padding: .2rem .8rem .6rem 1.6rem; background: var(--surface-2); }
 .cve-body p { margin: .35rem 0; }
 /* Posture expandables: a chevron that points right when closed and turns down when open (as in wg-admin) */
-.posture-detail > summary, .cve-item > summary, .scan-details > summary { list-style: none; }
+.posture-detail > summary, .cve-item > summary, .svc-group > summary, .scan-details > summary { list-style: none; }
 .posture-detail > summary::-webkit-details-marker, .cve-item > summary::-webkit-details-marker,
-.scan-details > summary::-webkit-details-marker { display: none; }
-.posture-detail > summary::before, .cve-item > summary::before, .scan-details > summary::before {
+.svc-group > summary::-webkit-details-marker, .scan-details > summary::-webkit-details-marker { display: none; }
+.posture-detail > summary::before, .cve-item > summary::before, .svc-group > summary::before,
+.scan-details > summary::before {
   content: ""; display: inline-block; flex: none; width: .45rem; height: .45rem; margin: 0 .45rem 0 .1rem;
   border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg);
   transition: transform .15s; vertical-align: .1rem; }
-.posture-detail[open] > summary::before, .cve-item[open] > summary::before, .scan-details[open] > summary::before {
+.posture-detail[open] > summary::before, .cve-item[open] > summary::before, .svc-group[open] > summary::before,
+.scan-details[open] > summary::before {
   transform: rotate(45deg); border-color: var(--text); }
 pre.raw-out { max-height: 24rem; overflow: auto; white-space: pre; font: .78rem/1.35 ui-monospace, "SF Mono", Consolas, monospace;
   background: rgba(0, 0, 0, .25); padding: .6rem .8rem; border-radius: 6px; }

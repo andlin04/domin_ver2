@@ -212,3 +212,24 @@ def test_no_answer_flags_potentially_blocked_addresses():
     from domin import posture
     rep = posture.report(rows)
     assert rep["kpi"]["blocked"] == 1 and rep["rows"][0]["note"] == fingerprint.BLOCKED_NOTE
+
+
+def test_cves_are_grouped_per_service_worst_first():
+    from domin import posture
+
+    def f(cid, sev, score):
+        return {"cve": cid, "severity": sev, "score": score, "summary": "", "fixed": []}
+    services = [
+        {"port": 22, "proto": "tcp", "service": "ssh", "product": "OpenSSH", "version": "9.2p1",
+         "findings": [f("CVE-2024-0001", "medium", 5.0)]},
+        {"port": 80, "proto": "tcp", "service": "http", "product": "Apache httpd", "version": "2.4.52",
+         "findings": [f("CVE-2024-0002", "low", 2.0), f("CVE-2024-0003", "critical", 9.8)]},
+        {"port": 8080, "proto": "tcp", "service": "http", "product": "Apache httpd", "version": "2.4.52",
+         "findings": [f("CVE-2024-0003", "critical", 9.8)]}]
+    rows = [{"ip": "172.20.4.50", "hosts": "host.home.arpa", "status": "done", "services": services,
+             "open_ports": 3, "cves": 3, "high": 1, "raw": "", "params": "nmap", "note": "",
+             "finished": "2026-11-09T00:00:00", "created": "2026-11-09T00:00:00"}]
+    groups = posture.report(rows)["rows"][0]["by_service"]
+    assert [(g["port"], g["worst"]) for g in groups] == [(80, "critical"), (8080, "critical"), (22, "medium")]
+    assert [v["cve"] for v in groups[0]["vulns"]] == ["CVE-2024-0003", "CVE-2024-0002"]   # worst first
+    assert groups[0]["sev_n"] == {"critical": 1, "low": 1} and groups[0]["product"] == "Apache httpd 2.4.52"

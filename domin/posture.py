@@ -321,6 +321,22 @@ def links(f: dict) -> list[tuple[str, str]]:
     return out
 
 
+def by_service(vulns: list[dict]) -> list[dict]:
+    """An address's CVEs grouped per service (product + port), worst group first; a CVE that hits two services
+    is listed under both."""
+    groups: dict[tuple, dict] = {}
+    for v in vulns:   # already worst first, so each group's list is too
+        for prod, port, proto in v["where"]:
+            g = groups.setdefault((prod, port, proto), {"product": prod, "port": port, "proto": proto, "vulns": []})
+            if v not in g["vulns"]:
+                g["vulns"].append(v)
+    for g in groups.values():
+        g["sev_n"] = {x: n for x in SEVERITIES if (n := sum(1 for v in g["vulns"] if v["severity"] == x))}
+        g["fixable"] = sum(1 for v in g["vulns"] if v["fixes"])
+        g["worst"] = next(iter(g["sev_n"]), "unknown")
+    return sorted(groups.values(), key=lambda g: (*(-g["sev_n"].get(s, 0) for s in SEVERITIES), g["port"]))
+
+
 def report(rows: list[dict], host: str = "") -> dict:
     """Summary of current posture rows for the report: KPIs, chart series and one vulnerability table (each CVE once,
     worst first, with the addresses and host names it affects). Rows gain `worst` (their worst severity, "none" for
@@ -350,6 +366,7 @@ def report(rows: list[dict], host: str = "") -> dict:
                 o = own.setdefault(f["cve"], {**f, "where": [], "fixes": fixes(f), "links": links(f)})
                 o["where"].append((prod, s["port"], s.get("proto") or "tcp"))
         r["vulns"] = sorted(own.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
+        r["by_service"] = by_service(r["vulns"])
         r["sev_n"] = {x: n for x in SEVERITIES if (n := sum(1 for v in r["vulns"] if v["severity"] == x))}
         r["fixable"] = sum(1 for v in r["vulns"] if v["fixes"])
         done = r["status"] == "done"
