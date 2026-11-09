@@ -22,23 +22,37 @@ RISKY_PORTS = {21: "FTP", 23: "Telnet", 69: "TFTP", 111: "RPC", 135: "MS-RPC", 1
 RATING = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low", "unknown": "Unrated",
           "none": "No known vulnerabilities", "": "Not assessed"}
 TOP_RISKS = 10
-MAX_HOSTS = 500
+MAX_HOSTS = 3000
+MAX_DOMAINS = 1000
 
 
-def build(conn: sqlite3.Connection, domain: str, picked: list[str], by: str = "") -> dict:
-    """The report's facts for the picked host names of `domain` (unknown names are ignored)."""
-    want = set(picked)
-    names = [h for h in posture.host_list(conn, domain) if h["host"] in want][:MAX_HOSTS]
-    ips = {ip for h in names for ip in h["ips"]}
-    rep = posture.report([r for r in posture.current(conn, domain) if r["ip"] in ips])
-    hosts = posture.with_results(names, rep["rows"])
-    hosts.sort(key=lambda h: (h["rank"], *(-h["sev_n"].get(s, 0) for s in posture.SEVERITIES), h["host"]))
+def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str = "") -> dict:
+    """The report's facts for picked domains: {domain: picked host names, or None for all of them}. Unknown names
+    are ignored. Several domains add a per-domain table, and the technical findings keep only the addresses with
+    CVEs, errors or notes (a clean address is a row in the host table)."""
+    names: list[dict] = []
+    raw: list[dict] = []
+    for dom, want in list(picks.items())[:MAX_DOMAINS]:
+        found = [h for h in posture.host_list(conn, dom) if want is None or h["host"] in set(want)]
+        ips = {ip for h in found for ip in h["ips"]}
+        raw += [r for r in posture.current(conn, dom) if r["ip"] in ips]
+        names += [{**h, "domain": dom} for h in found]
+    names = names[:MAX_HOSTS]
+    rep = posture.report(raw)
     rows = rep["rows"]
+    hosts = [h for dom in picks for h in posture.with_results([n for n in names if n["domain"] == dom],
+                                                                [r for r in rows if r["domain"] == dom])]
+    hosts.sort(key=lambda h: (h["rank"], *(-h["sev_n"].get(s, 0) for s in posture.SEVERITIES), h["host"]))
+    doms = sorted({h["domain"] for h in names})
+    many = len(doms) > 1
     done = [r for r in rows if r["status"] == "done"]
     worst = next((s for s in (*posture.SEVERITIES, "none") if any(r["worst"] == s for r in done)), "")
     finished = sorted(r["finished"] for r in done if r.get("finished"))
     return {
-        "domain": domain, "by": by, "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "domain": f"{len(doms)} domains" if many else (doms[0] if doms else ""), "domains": doms,
+        "domain_rows": posture.domain_summary(rows) if many else [],
+        "details": [r for r in rows if r["vulns"] or r.get("error") or r.get("note")] if many else rows,
+        "by": by, "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "hosts": hosts, "rows": rows, "vulns": rep["vulns"], "kpi": rep["kpi"], "by_sev": rep["by_sev"],
         "rating": RATING[worst], "worst": worst,
         "period": (finished[0][:10], finished[-1][:10]) if finished else ("", ""),
@@ -167,6 +181,23 @@ def _cell(s) -> str:
 
 SCOPE = ("Scope: the {n} host name(s) picked in the posture view of {domain}, with their addresses from the latest"
          " inventory scan.")
+SCOPE_MANY = ("Scope: every host name of the {n} domains picked in the posture view ({names}), with their addresses"
+              " from each domain's latest inventory scan. Technical findings list the addresses with vulnerabilities,"
+              " errors or notes.")
+
+
+def heads(m: dict) -> dict[str, str]:
+    """Section titles, numbered: the Domains section only in a report on several domains."""
+    names = ["Executive summary", "Recommendations", "Top risks", *(["Domains"] if m["domain_rows"] else []),
+             "Hosts", "Technical findings", "Scope and method"]
+    return {n: f"{i}. {n}" for i, n in enumerate(names, 1)}
+
+
+def _dom_cells(d: dict) -> list:
+    """One row of the Domains table: domain, worst, CVEs (critical/high), fixable, addresses with high+, open ports."""
+    return [d["domain"], (SHORT.get(d["worst"], d["worst"] or "Not assessed"), d["worst"]),
+            f"{d['cves']} ({d['sev_n'].get('critical', 0)}/{d['sev_n'].get('high', 0)})",
+            f"{d['fixable']}/{d['cves']}", f"{d['exposed']}/{d['addresses']}", d["open_ports"]]
 METHOD = ("Method: network service and version detection (scan profiles: {profiles}), matched against known"
           " vulnerabilities ({source}). Scans: {period}.")
 LIMITS = ("Limits: matches are by product version; vendors that backport fixes can show false positives, and services"
@@ -174,40 +205,48 @@ LIMITS = ("Limits: matches are by product version; vendors that backport fixes c
 
 
 def _method(m: dict) -> list[str]:
-    return [SCOPE.format(n=len(m["hosts"]), domain=m["domain"]),
+    scope = (SCOPE_MANY.format(n=len(m["domains"]), names=_more(m["domains"], 20)) if m["domain_rows"]
+             else SCOPE.format(n=len(m["hosts"]), domain=m["domain"]))
+    return [scope,
             METHOD.format(profiles=", ".join(m["profiles"]) or "none", source=m["source"], period=_period(m)),
             LIMITS] + ([f"Never scanned: {', '.join(m['never'])}."] if m["never"] else [])
 
 
 def markdown(m: dict) -> str:
     """The report as Markdown."""
-    k = m["kpi"]
+    k, h_ = m["kpi"], heads(m)
     md = [f"# Security posture report: {m['domain']}", "", _byline(m), "",
-          "## 1. Executive summary", "", *summary_lines(m), "",
+          f"## {h_['Executive summary']}", "", *summary_lines(m), "",
           "| Overall risk | Critical | High | Medium | Low | Fixable | Open ports | Addresses |",
           "|---|---:|---:|---:|---:|---:|---:|---:|",
           f"| **{m['rating']}** | {k['critical']} | {k['high']} | {m['by_sev']['medium']} | {m['by_sev']['low']}"
           f" | {k['fixable']}/{k['cves']} | {k['open_ports']} | {k['addresses']} |", "",
-          "## 2. Recommendations", ""]
+          f"## {h_['Recommendations']}", ""]
     if m["actions"]:
         md += [f"{i}. **P{a['priority']} · {a['title']}.** {a['detail']}" for i, a in enumerate(m["actions"], 1)]
     else:
         md.append("No action needed on the current results.")
-    md += ["", "## 3. Top risks", ""]
+    md += ["", f"## {h_['Top risks']}", ""]
     if m["top"]:
         md += ["| CVE | Severity | Product | Fixed in | Hosts |", "|---|---|---|---|---|"]
         md += [f"| [{v['cve']}]({posture.links(v)[0][1]}) | {_sev(v)} | {_cell(', '.join(v['products']))} |"
                f" {_cell(', '.join(v['fixes']) or 'no fix yet')} | {_cell(', '.join(_names(v)))} |" for v in m["top"]]
     else:
         md.append("No critical or high vulnerabilities.")
-    md += ["", "## 4. Hosts", "",
+    if m["domain_rows"]:
+        md += ["", f"## {h_['Domains']}", "",
+               "| Domain | Rating | CVEs (critical/high) | Fixable | Addresses with high+ | Open ports |",
+               "|---|---|---:|---:|---:|---:|"]
+        md += ["| " + " | ".join(str(x[0] if isinstance(x, tuple) else x) for x in _dom_cells(d)) + " |"
+               for d in m["domain_rows"]]
+    md += ["", f"## {h_['Hosts']}", "",
            "| Host name | Addresses | Rating | CVEs (critical/high) | Fixable | Open ports | Last scan |",
            "|---|---|---|---:|---:|---:|---|"]
     md += [f"| {h['host']} | {', '.join(h['ips'])} | {RATING[h['worst']]} | {h['cves']}"
            f" ({h['sev_n'].get('critical', 0)}/{h['sev_n'].get('high', 0)}) | {h['fixable']} | {h['open_ports']}"
            f" | {h['last'] or 'never'} |" for h in m["hosts"]]
-    md += ["", "## 5. Technical findings", ""]
-    for r in m["rows"]:
+    md += ["", f"## {h_['Technical findings']}", ""]
+    for r in m["details"]:
         md += [f"### {r['ip']} ({(r.get('hosts') or '').replace(',', ', ') or 'no name'})", "",
                _status(r), ""]
         for note in (r.get("note"), r.get("error") and f"Error: {r['error']}"):
@@ -222,7 +261,7 @@ def markdown(m: dict) -> str:
         md += [f"- **{v['cve']}** ({_sev(v)}; fixed in {', '.join(v['fixes']) or 'no fix yet'}):"
                f" {_cell(_cut(v.get('summary'), 300))}" for v in r["vulns"]]
         md.append("")
-    md += ["## 6. Scope and method", "", *(f"- {x}" for x in _method(m)), ""]
+    md += [f"## {h_['Scope and method']}", "", *(f"- {x}" for x in _method(m)), ""]
     return "\n".join(md)
 
 
@@ -342,32 +381,37 @@ def pdf(m: dict) -> bytes:
         d.set_text_color(*MUTED)
         d.cell(w, 5, label, align="C")
     d.set_xy(d.l_margin, y + 20)
-    d.h1("1. Executive summary")
+    h_ = heads(m)
+    d.h1(h_["Executive summary"])
     for line in summary_lines(m):
         d.para(line)
-    d.h1("2. Recommendations")
+    d.h1(h_["Recommendations"])
     if m["actions"]:
         d.grid(["Priority", "Action", "Detail"],
                [[f"P{a['priority']}", a["title"], a["detail"]] for a in m["actions"]], (16, 46, 116))
     else:
         d.para("No action needed on the current results.")
-    d.h1("3. Top risks")
+    d.h1(h_["Top risks"])
     if m["top"]:
         d.grid(["CVE", "Severity", "Product", "Fixed in", "Hosts"],
                [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["products"]), ", ".join(v["fixes"]) or "no fix yet",
                  _more(_names(v), 6)] for v in m["top"]], (30, 22, 44, 32, 50), sev_col=1)
     else:
         d.para("No critical or high vulnerabilities.")
-    d.h1("4. Hosts")
+    if m["domain_rows"]:
+        d.h1(h_["Domains"])
+        d.grid(["Domain", "Rating", "CVEs (c/h)", "Fixable", "High+ addr.", "Ports"],
+               [_dom_cells(x) for x in m["domain_rows"]], (62, 26, 24, 22, 24, 20), sev_col=1)
+    d.h1(h_["Hosts"])
     d.grid(["Host name", "Addresses", "Rating", "CVEs (c/h)", "Fixable", "Ports", "Last scan"],
            [[h["host"], _ips(h["ips"]), (SHORT[h["worst"]], h["worst"]),
              f"{h['cves']} ({h['sev_n'].get('critical', 0)}/{h['sev_n'].get('high', 0)})", h["fixable"],
              h["open_ports"], h["last"][:10] or "never"] for h in m["hosts"]],
            (44, 44, 22, 18, 13, 11, 26), sev_col=2)
-    if m["rows"]:
+    if m["details"]:
         d.add_page()
-        d.h1("5. Technical findings")
-    for r in m["rows"]:
+        d.h1(h_["Technical findings"])
+    for r in m["details"]:
         d.set_font("helvetica", "B", 10.5)
         d.set_text_color(*INK)
         d.multi_cell(0, 6, _t(f"{r['ip']}  ({(r.get('hosts') or '').replace(',', ', ') or 'no name'})"),
@@ -388,7 +432,7 @@ def pdf(m: dict) -> bytes:
                    [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["fixes"]) or "no fix yet",
                      _cut(v.get("summary"), 220)] for v in r["vulns"]], (28, 22, 30, 98), sev_col=1, size=7.5)
         d.ln(2)
-    d.h1("6. Scope and method")
+    d.h1(h_["Scope and method"])
     for line in _method(m):
         d.para(line, 9)
     return bytes(d.output())

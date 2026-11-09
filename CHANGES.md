@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture report on ticked domains
+
+- Posture, all domains: the domain table has tick boxes and a Report button. The report covers every host name of
+  the ticked domains, adds a Domains section (rating, CVEs, fixable, addresses with high+, open ports per domain),
+  and its technical findings keep only addresses with CVEs, errors or notes.
+- Rollback: revert this change.
+
 ## 2026-11-09: Posture report (PDF or Markdown) on ticked hosts
 
 - Posture, domain view: tick host names, then Report: download an executive and technical report as PDF or

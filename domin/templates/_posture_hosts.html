@@ -17,7 +17,7 @@
     <span class="muted small-print" data-picked-count>0 ticked</span>
     <input class="filter" placeholder="Filter all columns…" data-filter="#posture-hosts" aria-label="Filter host names">
   </div>
-  <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable>
+  <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable data-picker>
     {# start widths; drag a header's right edge to change one (kept per browser). Addresses: one IPv4 address #}
     <colgroup><col style="width:2.6rem"><col style="width:20rem"><col style="width:17ch"><col style="width:12rem">
       <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem"></colgroup>
@@ -66,7 +66,7 @@
     <form method="post" action="{{ base }}/security/posture" data-posture-run>
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="domain" value="{{ posture_domain }}">
-      <input type="hidden" name="hosts" value=""><input type="hidden" name="picked" value="1">
+      <input type="hidden" name="hosts" value="" data-picked-names><input type="hidden" name="picked" value="1">
       <p>Scan <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }} now?</p>
       <label class="field">Profile
         <select name="profile">
@@ -81,7 +81,7 @@
     <form method="post" action="{{ base }}/security/report">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="domain" value="{{ posture_domain }}">
-      <input type="hidden" name="hosts" value="">
+      <input type="hidden" name="hosts" value="" data-picked-names>
       <p>Report on <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }}: executive summary, risk rating,
         prioritised recommendations, top risks, per-host technical findings, scope and method.</p>
       <label class="field">Format

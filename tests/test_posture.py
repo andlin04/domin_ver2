@@ -778,3 +778,26 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         page = h.get(f"/admin/security?domain={DOM}").text
         assert 'data-picked-open="#report-picked"' in page and 'data-picked-open="#scan-picked"' not in page
         assert h.post("/admin/security/report", data={**form, "csrf": csrf, "format": "md"}).status_code == 200
+
+
+def test_report_on_ticked_domains(settings, nmap):
+    other = "corp2.example"
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, other, db.now(), "scan", [{"host": "web.corp2.example", "ip": "172.20.4.80"}])
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        for d in (DOM, other):
+            h.post("/admin/security/posture", data={"csrf": csrf, "domain": d})
+        run_queue(settings)
+        page = h.get("/admin/security").text
+        assert 'data-picked-open="#report-domains"' in page and 'name="domains"' in page
+        assert f'<input type="checkbox" data-pick value="{DOM}"' in page
+        md = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other},nope.example",
+                                                     "format": "md"})
+        assert md.status_code == 200 and "# Security posture report: 2 domains" in md.text
+        assert "## 4. Domains" in md.text and "## 5. Hosts" in md.text and "## 7. Scope and method" in md.text
+        assert md.headers["content-type"] == "text/markdown; charset=utf-8" and "by ana · scans" in md.text
+        assert f"| {DOM} |" in md.text and f"| {other} |" in md.text and "| web.corp2.example |" in md.text
+        pdf = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other}", "format": "pdf"})
+        assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+        assert h.post("/admin/security/report", data={"csrf": csrf, "domains": "nope.example"}).status_code == 422

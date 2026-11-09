@@ -549,9 +549,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     base = ADMIN
     cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
 
-    async def form(request: Request) -> dict[str, str]:
+    async def form(request: Request, limit: int = 10_000) -> dict[str, str]:
         body = await request.body()
-        if len(body) > 10_000:
+        if len(body) > limit:
             raise HTTPException(413, "Form too large")
         return {k: v[0] for k, v in parse_qs(body.decode("utf-8", "replace")).items()}
 
@@ -975,18 +975,25 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     async def security_report(request: Request):
         """Download a posture report (reports.py) on the ticked host names of one domain: format=pdf or md. Any
         signed-in user (it shows what the posture page shows)."""
-        data = await form(request)
+        data = await form(request, 200_000)   # every domain ticked: hundreds of names
+
+        def split(key: str) -> list[str]:
+            return [x.strip().lower() for x in (data.get(key) or "").split(",") if x.strip()]
         with conn() as c:
             _, u = current(request, c, data)
             if not u:
                 return back()
+            known = set(posture.domains(c))
             dom = (data.get("domain") or "").strip().lower()
-            picked = [h.strip().lower() for h in (data.get("hosts") or "").split(",") if h.strip()]
-            if dom not in posture.domains(c) or not picked:
-                raise HTTPException(422, "Pick a domain and tick at least one host name.")
-            m = reports.build(c, dom, picked, u["name"])
+            if data.get("domains") is not None:   # the all-domains view: whole domains
+                picks = {d: None for d in split("domains") if d in known}
+            else:                                 # one domain's ticked host names
+                picks = {dom: split("hosts")} if dom in known and split("hosts") else {}
+            if not picks:
+                raise HTTPException(422, "Tick at least one domain or host name.")
+            m = reports.build(c, picks, u["name"])
         if not m["hosts"]:
-            raise HTTPException(422, "None of the ticked host names belong to this domain.")
+            raise HTTPException(422, "None of the ticked names have hosts in the inventory.")
         ext = "pdf" if data.get("format") == "pdf" else "md"
         if ext == "pdf":
             body, kind = await run_in_threadpool(reports.pdf, m), "application/pdf"
