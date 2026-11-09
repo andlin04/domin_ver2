@@ -194,3 +194,21 @@ def test_viewer_cannot_fingerprint(settings):
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/scan", data={"csrf": csrf, "kind": "host", "target": "172.20.4.50"})
     assert r.status_code == 403 and "analyst role" in r.text
+
+
+def test_no_answer_flags_potentially_blocked_addresses():
+    filtered = '<extraports state="filtered" count="10">'
+    refused = '<port protocol="tcp" portid="80"><state state="closed" reason="conn-refused"/>'
+    reset = '<port protocol="tcp" portid="80"><state state="closed" reason="reset"/>'
+    opened = '<port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/>'
+    assert fingerprint.no_answer(filtered, routed=False)              # direct: nothing replied
+    assert fingerprint.no_answer(refused + refused, routed=True)     # relay: refused = no answer
+    assert not fingerprint.no_answer(reset, routed=False)            # direct reset: a live host
+    assert not fingerprint.no_answer(refused + opened, routed=True)
+    assert not fingerprint.no_answer("", routed=True)                # no nmap output: unknown
+    rows = [{"ip": "203.0.113.7", "hosts": "x.example", "status": "done", "services": [], "open_ports": 0, "cves": 0,
+             "high": 0, "raw": refused, "params": "nmap ... via Mullvad: mullvad se-x (se, automatic)",
+             "finished": "2026-11-09T00:00:00", "created": "2026-11-09T00:00:00", "note": "old note"}]
+    from domin import posture
+    rep = posture.report(rows)
+    assert rep["kpi"]["blocked"] == 1 and rep["rows"][0]["note"] == fingerprint.BLOCKED_NOTE

@@ -11,6 +11,7 @@
   <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }} CVEs</i></b></div>
   <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
   <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
+  {% if k.blocked %}<div class="kpi warn"><span>Potentially blocked</span><b>{{ k.blocked }} <i>no port answered</i></b></div>{% endif %}
   {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
 </section>
 
@@ -95,6 +96,7 @@
       <span class="pill sev-{{ p.worst if p.worst in ('critical','high','medium','low') else 'unknown' }}">{{ p.worst or p.status }}</span>
       <b>{{ p.ip }}</b> <span class="hosts">{{ p.hosts.replace(',', ', ') }}</span>
       {% if show_domain %}<small class="muted">{{ p.domain }}</small>{% endif %}
+      {% if p.blocked %}<span class="pill fix-no" title="No scanned port answered">potentially blocked</span>{% endif %}
       {% for s, n in p.sev_n.items() %}<span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}
       {% if p.vulns %}<span class="pill {{ 'fix-yes' if p.fixable else 'fix-no' }}">{% if p.fixable %}{{ p.fixable }} of {{ p.vulns|length }} fixable{% else %}no fix published yet{% endif %}</span>{% endif %}
       <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% endif %}

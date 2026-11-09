@@ -355,6 +355,11 @@ def report(rows: list[dict], host: str = "") -> dict:
         done = r["status"] == "done"
         r["worst"] = next((x for x in SEVERITIES if x in sevs), "none") if done else ""
         r["stale"] = bool(r.get("finished") and r["finished"] < cutoff)
+        # also for scans stored before the flag existed: read from their nmap output
+        r["blocked"] = (done and not r["services"] and not r.get("error")
+                        and fingerprint.no_answer(r.get("raw") or "", " via " in (r.get("params") or "")))
+        if r["blocked"]:
+            r["note"] = fingerprint.BLOCKED_NOTE
     table = sorted(vulns.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
     for v in table:
         v["products"] = sorted(v["products"])
@@ -371,7 +376,7 @@ def report(rows: list[dict], host: str = "") -> dict:
                 "open_ports": sum(r["open_ports"] for r in rows if r["status"] == "done"),
                 "failed": sum(1 for r in rows if r["status"] == "failed"),
                 "pending": sum(1 for r in rows if r.get("pending") or r["status"] in ("queued", "running")),
-                "stale": sum(1 for r in rows if r["stale"])},
+                "stale": sum(1 for r in rows if r["stale"]), "blocked": sum(1 for r in rows if r["blocked"])},
         "charts": {
             # riskiest addresses: distinct CVEs per severity, worst first (click opens the address below)
             "hosts": [{"label": (r.get("hosts") or "").split(",")[0] or r["ip"], "ip": r["ip"],

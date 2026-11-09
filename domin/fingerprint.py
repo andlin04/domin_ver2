@@ -203,6 +203,22 @@ def _port_spec(ports: list[int]) -> str:
     return ",".join(parts)
 
 
+BLOCKED_NOTE = ("Potentially blocked: no scanned port answered. The address may be offline, unused or dropping this "
+                "traffic; the same result from another route or relay means it isn't our scanner being blocked.")
+_STATE = re.compile(r'<state state="([a-z|]+)" reason="([a-z-]+)"')
+_EXTRA = re.compile(r'<extraports state="([a-z|]+)" count="\d+"')
+
+
+def no_answer(xml: str, routed: bool) -> bool:
+    """No port gave a sign of life: every port filtered (no reply), or, through a proxy, refused (a relay reports a
+    target that doesn't answer as refused, so closed and unreachable look the same there). A direct scan that got a
+    reset (closed) reached a live host."""
+    states = [s for s, _ in _STATE.findall(xml)] + _EXTRA.findall(xml)
+    if not states or "open" in states:
+        return False
+    return all(s in ("filtered", "open|filtered") or (routed and s == "closed") for s in states)
+
+
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
          timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
          timing: int = 3, via: dict | None = None, resume: dict | None = None,
@@ -257,7 +273,8 @@ def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports
         error = (f"Timed out{where}: nmap stopped after the {timeout} s limit per run of {CHUNK_PORTS} ports, so the "
                  "result is incomplete. Routes through a proxy, Tor or Mullvad are slow: use a profile with a longer "
                  "timeout or fewer ports.")
-    note = "" if services or error else "No open TCP ports found in the scanned range."
+    note = "" if services or error else (BLOCKED_NOTE if no_answer(xml, bool(via)) else
+                                         "No open TCP ports found in the scanned range.")
     return {"target": display or ip, "ip": ip, "services": services, "note": note, "error": error, "raw": xml,
             "params": params}
 
