@@ -154,9 +154,10 @@ def _run(args: list[str], timeout: int) -> str:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 30)
     except subprocess.TimeoutExpired as exc:
         raise NmapError("the scan timed out") from exc
-    if not p.stdout.strip():
-        last = (p.stderr or "nmap produced no output").strip().splitlines()
-        raise NmapError(last[-1][:200] if last else "nmap produced no output")
+    if "</nmaprun>" not in p.stdout:   # no output or cut short: nmap's own last error line, not a ParseError
+        last = (p.stderr or "").strip().splitlines()
+        cut = "nmap stopped early" if p.stdout.strip() else "nmap produced no output"
+        raise NmapError(f"{cut}: {last[-1][:200]}" if last else cut)
     return p.stdout
 
 

@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: nmap errors shown instead of ParseError
+
+- nmap output cut short (no `</nmaprun>`) fails the scan with nmap's own last error line ("nmap stopped early:
+  ..."), not "internal error (ParseError)". Rollback: revert this commit.
+
 ## 2026-11-09: Network tags; raw scans; richer identification; account in the Admin menu
 
 - Settings > Network tags: address or CIDR -> tag; every host name with an address inside carries it (domain page,

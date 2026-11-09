@@ -128,6 +128,18 @@ def test_scan_reports_missing_nmap(tmp_path, monkeypatch):
     assert res["services"] == [] and "not installed" in res["error"]
 
 
+def test_cut_short_nmap_output_reports_nmaps_error(monkeypatch):
+    class Done:
+        stdout = '<?xml version="1.0"?>\n<nmaprun scanner="nmap">\n<scaninfo type="syn"/>\n'
+        stderr = "Starting Nmap\nexample failure line\n"
+    monkeypatch.setattr(fingerprint.subprocess, "run", lambda *a, **k: Done)
+    with pytest.raises(fingerprint.NmapError, match="nmap stopped early: example failure line"):
+        fingerprint._run(["nmap"], 10)
+    Done.stdout = ""
+    with pytest.raises(fingerprint.NmapError, match="nmap produced no output: example failure line"):
+        fingerprint._run(["nmap"], 10)
+
+
 def test_a_host_timeout_is_an_incomplete_result_not_no_open_ports(tmp_path, monkeypatch):
     xml = SCAN_XML.replace("<host>", '<host timedout="true">', 1)
     monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: xml)
