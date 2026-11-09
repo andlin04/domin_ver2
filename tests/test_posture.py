@@ -566,7 +566,7 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         look = h.get("/admin/security/lookup").text
         assert "Product (CPE)" in look and 'aria-label="Settings sections"' in look
         # an analyst's Settings opens Scan profiles; General and Routes stay admin-only
-        assert '<a href="/admin/security/profiles" class="active">Settings</a>' in look
+        assert '<a href="/admin/security/profiles" class="active" aria-current="page">Settings</a>' in look
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
 

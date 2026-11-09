@@ -49,7 +49,8 @@ h2 small, h3 small { color: var(--muted); font-weight: 400; margin-left: .35rem;
 .topbar nav { display: flex; gap: .25rem; align-self: stretch; padding-left: 1.25rem; border-left: 1px solid var(--border); }
 .topbar nav a { display: flex; align-items: center; color: var(--muted); padding: 0 .75rem; font-weight: 500; border-bottom: 2px solid transparent; }
 .topbar nav a:hover { color: var(--text); text-decoration: none; }
-.topbar nav a.active { color: var(--text); border-bottom-color: var(--accent); }
+.topbar nav a.active { color: var(--accent); font-weight: 650; border-bottom: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .jump { margin-left: auto; position: relative; display: flex; align-items: center; }
 .jump svg { position: absolute; left: .7rem; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; pointer-events: none; }
 .jump input { width: 300px; padding-left: 2.1rem; padding-right: 2rem; }

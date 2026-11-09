@@ -14,23 +14,26 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
       domin
     </a>
+    {# The menu entry of the current section: sub-pages map to their parent section. #}
+    {% set pg = self.page() %}{% set sec = {'domain': 'overview', 'compare': 'overview'}.get(pg, pg) %}
+    {% macro here(name) %}{% if sec == name %}class="active" aria-current="page"{% endif %}{% endmacro %}
     <nav>
-      <a href="/" class="{{ 'active' if self.page() == 'overview' }}">Inventory</a>
-      <a href="/all" class="{{ 'active' if self.page() == 'all' }}">All records</a>
-      <a href="/tools" class="{{ 'active' if self.page() == 'tools' }}">Whois &amp; e-mail</a>
+      <a href="/" {{ here('overview') }}>Inventory</a>
+      <a href="/all" {{ here('all') }}>All records</a>
+      <a href="/tools" {{ here('tools') }}>Whois &amp; e-mail</a>
       {% if user %}
       <span class="nav-sep" aria-hidden="true"></span>
-      <a href="/admin/security" class="{{ 'active' if self.page() == 'security' }}">Posture</a>
-      {% if user.role in ('admin', 'analyst') %}<a href="/admin" class="{{ 'active' if self.page() == 'admin' }}">Operations</a>{% endif %}
-      <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" class="{{ 'active' if self.page() == 'settings' }}">Settings</a>
-      {% if user.role == 'admin' %}<a href="/admin/users" class="{{ 'active' if self.page() == 'users' }}">Users</a>{% endif %}
-      <a href="/admin/account" class="{{ 'active' if self.page() == 'account' }}">{{ user.name }}</a>
+      <a href="/admin/security" {{ here('security') }}>Posture</a>
+      {% if user.role in ('admin', 'analyst') %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
+      <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" {{ here('settings') }}>Settings</a>
+      {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
+      <a href="/admin/account" {{ here('account') }}>{{ user.name }}</a>
       {% elif signed_in_hint %}
       <span class="nav-sep" aria-hidden="true"></span>
       <a href="/admin/account">Account</a>
       {% elif net_ok %}
       <span class="nav-sep" aria-hidden="true"></span>
-      <a href="/admin" class="{{ 'active' if self.page() == 'login' }}">Sign in</a>
+      <a href="/admin" {{ here('login') }}>Sign in</a>
       {% endif %}
     </nav>
     <form class="jump" action="/d/" data-jump role="search">

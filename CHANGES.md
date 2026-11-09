@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: menu shows where you are
+
+- The current section's menu entry is accent-coloured, bold, tinted and underlined, with `aria-current="page"`;
+  a domain's page and its compare view mark Inventory.
+- Rollback: revert this change.
+
 ## 2026-11-08: daily CVE refresh
 
 - Once a day (the worker's hourly loop, not at startup) CVE entries older than a day are fetched again and the

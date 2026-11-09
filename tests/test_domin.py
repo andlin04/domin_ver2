@@ -68,8 +68,11 @@ def test_web(settings):
         assert r.status_code == 200 and "new.example.se" in r.text and "Changes since 2025-03-01" in r.text
         hist = h.get("/api/domains/example.se/history").json()
         assert [x["hosts"] for x in hist] == [2, 2]
-        assert "old.example.se" in h.get(f"/d/example.se?scan={hist[0]['id']}").text
-        assert h.get(f"/d/example.se/compare?a={hist[0]['id']}&b={hist[1]['id']}").status_code == 200
+        page = h.get(f"/d/example.se?scan={hist[0]['id']}").text
+        assert "old.example.se" in page
+        assert '<a href="/" class="active" aria-current="page">Inventory</a>' in page  # sub-page -> its section
+        cmp = h.get(f"/d/example.se/compare?a={hist[0]['id']}&b={hist[1]['id']}")
+        assert cmp.status_code == 200 and 'aria-current="page">Inventory</a>' in cmp.text
         assert h.get("/d/nothere.se").status_code == 404
         assert h.get("/tools").status_code == 200
         assert h.get(f"/scans/{hist[0]['id']}.csv").text.startswith("host,ip")
@@ -131,7 +134,7 @@ def test_search_across_domains(settings):
         assert "drill.js" in h.get("/").text and 'data-drill="/data/drill.json?scope=latest' in h.get("/").text
         r = h.get("/all", params={"q": "old", "scope": "all"})
         assert r.status_code == 200 and "old.example.se" in r.text and "First seen" in r.text
-        assert '<a href="/all" class="active">All records</a>' in r.text and 'id="page-data"' in r.text
+        assert '<a href="/all" class="active" aria-current="page">All records</a>' in r.text and 'id="page-data"' in r.text
         assert "old.example.se" in h.get("/search", params={"q": "old", "scope": "all"}).text   # first address
         assert "old.example.se" not in h.get("/all", params={"q": "old"}).text
         r = h.get("/all", params={"q": "nothing-like-this"})
