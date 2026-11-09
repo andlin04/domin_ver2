@@ -62,6 +62,9 @@
   </form>
   {% endif %}
 </section>
+{% if current.error and current.status == 'done' %}
+<p class="note" role="status">This scan may be incomplete: {{ current.error }}.</p>
+{% endif %}
 
 <section class="kpis">
   <div class="kpi"><span>Host names</span><b>{{ current.hosts }}</b>{{ delta(current, previous, 'hosts') }}</div>

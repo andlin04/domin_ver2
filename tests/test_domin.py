@@ -216,7 +216,90 @@ def test_response_size_is_capped(monkeypatch):
     with httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"[" + b"1," * 50 + b"1]"))) as c:
         with pytest.raises(httpx.RequestError, match="too large"):
             tools.get_json(c, "https://crt.example/", timeout=5)
-        assert scanner.from_crtsh("example.se", c) == set()
+        notes = []
+        assert scanner.from_crtsh("example.se", c, notes, sleep=lambda s: None) == set()
+        assert "certspotter failed" in notes[0]
+
+
+def _cert_transport(crtsh_fails: int, spotter_pages: list):
+    """crt.sh answers 502 `crtsh_fails` times, then a list; certspotter serves `spotter_pages` in order."""
+    calls = {"crt": 0, "spot": 0}
+
+    def handle(req):
+        if req.url.host == "crt.sh":
+            calls["crt"] += 1
+            if calls["crt"] <= crtsh_fails:
+                return httpx.Response(502)
+            return httpx.Response(200, json=[{"name_value": "a.ex.se\n*.b.ex.se"}, {"name_value": "other.se"}])
+        page = spotter_pages[calls["spot"]] if calls["spot"] < len(spotter_pages) else []
+        calls["spot"] += 1
+        return httpx.Response(200, json=page)
+    return httpx.MockTransport(handle), calls
+
+
+def test_crtsh_retries_then_succeeds():
+    transport, calls = _cert_transport(2, [])
+    waits, notes = [], []
+    with httpx.Client(transport=transport) as c:
+        assert scanner.from_crtsh("ex.se", c, notes, sleep=waits.append) == {"a.ex.se", "b.ex.se"}
+    assert calls == {"crt": 3, "spot": 0} and waits == list(scanner.CRTSH_WAITS) and notes == []
+
+
+def test_crtsh_down_falls_back_to_certspotter(monkeypatch):
+    monkeypatch.setattr(scanner, "CERTSPOTTER_PAGES", 2)
+    pages = [[{"id": "1", "dns_names": ["x.ex.se", "*.y.ex.se"]}], [{"id": "2", "dns_names": ["z.ex.se", "no.se"]}]]
+    transport, calls = _cert_transport(9, pages)
+    notes = []
+    with httpx.Client(transport=transport) as c:
+        assert scanner.from_crtsh("ex.se", c, notes, sleep=lambda s: None) == {"x.ex.se", "y.ex.se", "z.ex.se"}
+    assert calls == {"crt": 3, "spot": 2}
+    assert "certspotter used instead (3 names, first pages only" in notes[0]
+    transport, _ = _cert_transport(9, pages[:1])   # an empty page ends the list: complete
+    notes = []
+    with httpx.Client(transport=transport) as c:
+        scanner.from_crtsh("ex.se", c, notes, sleep=lambda s: None)
+    assert notes == ["crt.sh failed 3 times; certspotter used instead (2 names)"]
+
+
+def test_scan_notes_host_cap_and_missing_amass(monkeypatch, settings):
+    names = {f"h{i}.ex.se" for i in range(5)}
+    monkeypatch.setattr(scanner, "from_crtsh", lambda d, c, notes: set(names))
+    monkeypatch.setattr(scanner, "from_dns", lambda d, r: set())
+    monkeypatch.setattr(scanner, "wildcard_ips", lambda d, r: set())
+    monkeypatch.setattr(scanner, "resolve", lambda h, r=None: [])
+    checked = []
+    monkeypatch.setattr(scanner, "ThreadPoolExecutor", lambda n: _Pool(checked))
+    s = replace(settings, max_hosts=3, amass="/nonexistent/amass")
+    notes = []
+    with db.connect(settings.db_path) as c:
+        scanner.run(c, "ex.se", s, client=httpx.Client(), resolver=object(), notes=notes)
+    assert len(checked) == 3   # the cap holds; guesses get no room
+    assert notes == ["amass is not installed: its names are missing",
+                     "3 of 6 names found were not checked: over the limit of 3 names per scan"]
+
+
+class _Pool:
+    def __init__(self, seen):
+        self.seen = seen
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def map(self, fn, items):
+        items = list(items)
+        self.seen.extend(items)
+        return [fn(i) for i in items]
+
+
+def test_done_scan_shows_its_notes(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "noted.se", "2025-03-01T00:00:00", "scan", [{**ROW, "host": "noted.se"}],
+                     error="crt.sh failed 3 times; certspotter used instead (2 names)")
+    with TestClient(create_app(settings)) as h:
+        assert "This scan may be incomplete: crt.sh failed 3 times" in h.get("/d/noted.se").text
 
 
 def test_scan_api_hardening(settings):

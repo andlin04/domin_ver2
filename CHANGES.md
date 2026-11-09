@@ -2,6 +2,15 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: certificate-log retries, scan notes, host cap warning
+
+- crt.sh gets 3 attempts (waits 10 s and 30 s, 120 s each); when all fail, certspotter's keyless API (up to 8 pages
+  of 100 certificates) is used instead. A failed crt.sh used to drop every certificate name without notice.
+- A scan stores what made it incomplete (crt.sh replaced or failed, amass missing or failing, names over the
+  per-scan limit) in the scan's `error` column; the domain page shows it as "This scan may be incomplete: ...".
+- Names found by a source go first under `DOMIN_MAX_HOSTS`; common-name guesses only fill what the cap leaves.
+- Rollback: revert this change and run `deploy/install.sh` again.
+
 ## 2026-11-09: menu shows where you are
 
 - The current section's menu entry is accent-coloured, bold, tinted and underlined, with `aria-current="page"`;

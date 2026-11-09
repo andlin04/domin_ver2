@@ -129,16 +129,59 @@ def resolve(host: str, resolver: dns.resolver.Resolver | None = None) -> list[st
     return sorted(set(ips))
 
 
-def from_crtsh(domain: str, client: httpx.Client) -> set[str]:
-    try:
-        got = tools.get_json(client, "https://crt.sh/", timeout=90, params={"q": f"%.{domain}", "output": "json"})
-        names = [n for e in (got[1] if got else []) for n in str(e.get("name_value", "")).splitlines()]
-    except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # also JSON of an unexpected shape
-        log.warning("crt.sh %s: %s", domain, exc)
-        return set()
+CRTSH_WAITS = (10, 30)       # seconds before the 2nd and 3rd crt.sh attempt (it often answers 502 under load)
+CERTSPOTTER_PAGES = 8        # fallback pages of 100 certificates; the keyless API allows few queries an hour
+
+
+def _cert_names(names, domain: str) -> set[str]:
     # normalize_domain strips a leading www.; keep the www host itself as a candidate too
-    found = {n.strip().lstrip("*.").lower().rstrip(".") for n in names}
+    found = {str(n).strip().lstrip("*.").lower().rstrip(".") for n in names}
     return {h for h in found if normalize_domain(h) and is_under(h, domain)}
+
+
+def from_certspotter(domain: str, client: httpx.Client) -> tuple[set[str], bool]:
+    """Second certificate-transparency source: (names, complete). Stops early at the page cap or a refusal."""
+    found: set[str] = set()
+    after = None
+    for _ in range(CERTSPOTTER_PAGES):
+        params = {"domain": domain, "include_subdomains": "true", "expand": "dns_names"}
+        if after:
+            params["after"] = after
+        got = tools.get_json(client, "https://api.certspotter.com/v1/issuances", timeout=60, params=params)
+        page = got[1] if got else []
+        if not page:
+            return found, True
+        found |= _cert_names([n for e in page for n in e.get("dns_names") or []], domain)
+        after = page[-1].get("id")
+        if not after:
+            return found, True
+    return found, False
+
+
+def from_crtsh(domain: str, client: httpx.Client, notes: list[str] | None = None,
+               sleep: Callable[[float], None] = time.sleep) -> set[str]:
+    """crt.sh, 3 attempts; when all fail, certspotter. Failures go to `notes` (shown with the scan)."""
+    notes = notes if notes is not None else []
+    for attempt in range(len(CRTSH_WAITS) + 1):
+        try:
+            got = tools.get_json(client, "https://crt.sh/", timeout=120, params={"q": f"%.{domain}", "output": "json"})
+            names = [n for e in (got[1] if got else []) for n in str(e.get("name_value", "")).splitlines()]
+            return _cert_names(names, domain)
+        except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # also JSON of an unexpected shape
+            log.warning("crt.sh %s (attempt %d): %s", domain, attempt + 1, exc)
+            if attempt < len(CRTSH_WAITS):
+                sleep(CRTSH_WAITS[attempt])
+    try:
+        found, complete = from_certspotter(domain, client)
+    except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:
+        log.warning("certspotter %s: %s", domain, exc)
+        notes.append("Certificate logs unavailable: crt.sh failed 3 times and certspotter failed; "
+                     "names from certificates are missing")
+        return set()
+    log.info("certspotter %s: %d names (%s)", domain, len(found), "complete" if complete else "first pages")
+    notes.append(f"crt.sh failed 3 times; certspotter used instead ({len(found)} names"
+                 f"{'' if complete else ', first pages only: some names may be missing'})")
+    return found
 
 
 def from_dns(domain: str, resolver: dns.resolver.Resolver) -> set[str]:
@@ -207,10 +250,13 @@ def amass_hosts(out: str, domain: str) -> set[str]:
     return {h for h in names if normalize_domain(h) and is_under(h, domain)}
 
 
-def from_amass(domain: str, amass: str) -> set[str]:
+def from_amass(domain: str, amass: str, notes: list[str] | None = None) -> set[str]:
     """Passive, then active (resolvers.txt, 100 queries/s, at most 20000), 15 min each, as the old version did."""
+    notes = notes if notes is not None else []
     exe = shutil.which(amass) or (amass if os.path.exists(amass) else None)
     if not exe:
+        log.warning("amass not found at %s", amass)
+        notes.append("amass is not installed: its names are missing")
         return set()
     found: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="amass-") as work:
@@ -220,10 +266,19 @@ def from_amass(domain: str, amass: str) -> set[str]:
         for mode in (["-passive"], active):
             # names go to a file as they are found: a run cut off at the time limit keeps what it had
             names = os.path.join(work, f"names{mode[0]}.txt")
+            failed = ""
             try:
-                subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-o", names, "-timeout", "15"],
-                               capture_output=True, text=True, timeout=960, env=env)
-            except (OSError, subprocess.TimeoutExpired) as exc:
+                done = subprocess.run([exe, "enum", *mode, "-d", domain, "-dir", work, "-o", names, "-timeout", "15"],
+                                      capture_output=True, text=True, timeout=960, env=env)
+                rc = getattr(done, "returncode", 0)
+                if rc:
+                    failed = f"exit {rc}"
+                    log.warning("amass %s %s: exit %d: %s", mode[0], domain, rc,
+                                (getattr(done, "stderr", "") or "").strip()[-200:])
+            except subprocess.TimeoutExpired:
+                log.warning("amass %s %s: stopped at the time limit", mode[0], domain)
+            except OSError as exc:
+                failed = type(exc).__name__
                 log.warning("amass %s %s: %s", mode[0], domain, str(exc)[:80])
             try:
                 with open(names) as f:
@@ -232,6 +287,8 @@ def from_amass(domain: str, amass: str) -> set[str]:
                 out = ""
             new = amass_hosts(out, domain) - found
             log.info("amass %s %s: %d names", mode[0], domain, len(new))
+            if failed and not new:
+                notes.append(f"amass {mode[0].lstrip('-')} failed ({failed}): its names are missing")
             found |= new
     return found
 
@@ -332,7 +389,9 @@ def _lan_address(ip: str) -> bool:
 
 def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Progress = lambda _: None,
         client: httpx.Client | None = None, resolver: dns.resolver.Resolver | None = None,
-        enricher: Enricher | None = None) -> list[dict]:
+        enricher: Enricher | None = None, notes: list[str] | None = None) -> list[dict]:
+    """The scan's records. `notes` collects what made the result incomplete (failed sources, the host cap)."""
+    notes = notes if notes is not None else []
     internal = is_internal(domain, settings.internal_zones)
     via = None
     if not internal:   # internal zones never leave the LAN: always direct
@@ -362,15 +421,23 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
             progress(f"reverse look-ups of {len(sweep)} addresses")
             found |= from_ptr(sweep, zone, domain, resolver, settings.scan_workers)
         else:
-            found = {domain} | from_crtsh(domain, client) | from_dns(domain, resolver)
+            progress("discovering host names: certificate logs")
+            found = {domain} | from_crtsh(domain, client, notes) | from_dns(domain, resolver)
             if via:   # amass sends its own UDP DNS, which no proxy carries: skipped, never run direct
                 log.info("amass skipped for %s: routed via %s", domain, proxy.route(via))
                 progress("amass skipped (routed scan)")
+                notes.append("amass skipped: the inventory route is not Direct (Settings · Routes)")
             else:
-                found |= from_amass(domain, settings.amass)
+                progress("discovering host names: amass")
+                found |= from_amass(domain, settings.amass, notes)
         guessed = {f"{w}.{domain}" for w in COMMON} - found
         wildcard = wildcard_ips(domain, resolver)
-        candidates = sorted(found | guessed)[: settings.max_hosts]
+        if len(found) > settings.max_hosts:   # found names first; guesses only fill what the cap leaves
+            notes.append(f"{len(found) - settings.max_hosts} of {len(found)} names found were not checked: "
+                         f"over the limit of {settings.max_hosts} names per scan")
+            log.warning("scan %s: %d names over max_hosts %d", domain, len(found) - settings.max_hosts,
+                        settings.max_hosts)
+        candidates = sorted(found)[: settings.max_hosts] + sorted(guessed)[: max(0, settings.max_hosts - len(found))]
         progress(f"resolving {len(candidates)} names")
         with ThreadPoolExecutor(settings.scan_workers) as pool:
             resolved = dict(zip(candidates, pool.map(lambda h: resolve(h, resolver), candidates), strict=True))

@@ -135,7 +135,8 @@ def run_job(settings: Settings, job: dict) -> None:
 
         started = db.now()
         try:
-            records = scanner.run(conn, job["domain"], settings, progress)
+            notes: list[str] = []
+            records = scanner.run(conn, job["domain"], settings, progress, notes=notes)
             progress("saving")
         except Cancelled:
             log.info("scan %s cancelled", job["domain"])
@@ -157,7 +158,9 @@ def run_job(settings: Settings, job: dict) -> None:
             conn.execute("UPDATE jobs SET status = 'failed', finished = ?, error = ? WHERE id = ?",
                          (db.now(), f"internal error ({type(exc).__name__})", job["id"]))   # details: the log
             return
-        sid = db.save_scan(conn, job["domain"], started, "scan", records, finished=db.now())
+        # a done scan's error column holds its notes: what made the result incomplete
+        sid = db.save_scan(conn, job["domain"], started, "scan", records, finished=db.now(),
+                           error="; ".join(notes) or None)
         conn.execute("UPDATE jobs SET status = 'done', finished = ?, scan_id = ?, progress = '' WHERE id = ?",
                      (db.now(), sid, job["id"]))
         log.info("scan %s done: %d records", job["domain"], len(records))
