@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Scan dialog fits; progress shows only the started scan
+
+- Confirm dialogs with a picker are wider (up to 40rem) and the picker never runs past the frame.
+- The progress window after Scan follows only the scans just queued; nothing new queued: that domain's pending
+  scans. Before, unfinished scans kept from earlier batches (other domains) were listed too.
+- Rollback: revert this change.
+
 ## 2026-11-09: Posture Scan asks for the profile
 
 - The scan button just says "Scan". It opens a confirm dialog naming the target, with the profile picker; Confirm

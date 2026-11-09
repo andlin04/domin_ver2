@@ -296,6 +296,10 @@ form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: 
 .btn.danger:hover { filter: brightness(1.08); }
 dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
   color: var(--text); max-width: 26rem; padding: 1.25rem 1.3rem; box-shadow: var(--shadow); }
+/* scan confirm: room for long profile names; a field never runs past the frame */
+dialog.confirm:has(select) { width: min(40rem, calc(100vw - 2rem)); max-width: none; }
+dialog.confirm select { width: 100%; max-width: 100%; box-sizing: border-box; }
+dialog.confirm p { overflow-wrap: anywhere; }
 dialog.confirm::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
 dialog.confirm p { margin: 0 0 1.1rem; line-height: 1.45; }
 dialog.confirm menu { display: flex; gap: .6rem; justify-content: flex-end; margin: 0; padding: 0; }

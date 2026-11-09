@@ -684,7 +684,9 @@ function postureProgress() {
     if (dlg.open && !(st.last?.finished && !st.error)) st.timer = setTimeout(poll, 2000);
   }
   function open(ids, extra = "", error = "") {
-    st.ids = [...new Set([...load(), ...ids])];
+    // a new scan follows only its own batch (earlier unfinished batches may be other domains); the "N left" link
+    // follows the pending rows; only a bare reopen falls back to the batch kept in this tab
+    st.ids = ids.length || extra ? ids : load();
     st.last = null; st.error = error;
     $("[data-pp-line]", dlg).textContent = error || "Loading…";
     $("[data-pp-now]", dlg).textContent = $("[data-pp-elapsed]", dlg).textContent = "";
@@ -714,7 +716,9 @@ function postureProgress() {
       let d = {};
       try { d = await r.json(); } catch (e) { /* an HTML error page */ }
       if (!r.ok) throw new Error(d.error || (r.status === 403 ? "The form expired; reload the page and try again." : `HTTP ${r.status}`));
-      open(d.batch || []);
+      // nothing new queued (already pending): follow that domain's pending scans, not other domains'
+      if (d.batch?.length) open(d.batch);
+      else open([], `&pending=1&domain=${encodeURIComponent(d.domain || "")}`);
     } catch (e) {
       open([], "", e.message);
     } finally {
