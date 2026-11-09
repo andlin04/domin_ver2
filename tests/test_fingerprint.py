@@ -128,6 +128,12 @@ def test_scan_reports_missing_nmap(tmp_path, monkeypatch):
     assert res["services"] == [] and "not installed" in res["error"]
 
 
+def test_raw_drop_in_lets_nmap_see_interfaces():
+    import pathlib
+    text = (pathlib.Path(__file__).parents[1] / "deploy" / "worker-raw.conf").read_text(encoding="utf-8")
+    assert "ProcSubset=all" in text and "AF_PACKET" in text and "AmbientCapabilities=CAP_NET_RAW" in text
+
+
 def test_cut_short_nmap_output_reports_nmaps_error(monkeypatch):
     class Done:
         stdout = '<?xml version="1.0"?>\n<nmaprun scanner="nmap">\n<scaninfo type="syn"/>\n'

@@ -6,6 +6,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - nmap output cut short (no `</nmaprun>`) fails the scan with nmap's own last error line ("nmap stopped early:
   ..."), not "internal error (ParseError)". Rollback: revert this commit.
+- deploy/worker-raw.conf adds `ProcSubset=all`: raw (SYN) scans failed with `can't find interface "eth0"` because
+  the worker's ProcSubset=pid hides /proc/net. Reinstall the drop-in (daemon-reload, restart the worker). Rollback:
+  remove the line, same steps.
 
 ## 2026-11-09: Network tags; raw scans; richer identification; account in the Admin menu
 
