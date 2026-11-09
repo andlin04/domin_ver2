@@ -226,11 +226,23 @@ document.addEventListener("click", (ev) => {
   $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
   $("form", dlg).addEventListener("submit", () => dlg.close());   // the posture-run handler sends it and shows progress
 })();
-// posture: the scan button says what it will scan
-$$("[data-scan-target]").forEach((sel) => sel.addEventListener("change", () => {
-  const btn = $("[data-scan-button]", sel.form);
-  if (btn) btn.textContent = sel.value ? "Scan / renew 1 host" : "Scan / renew whole domain";
-}));
+// posture: Scan opens the confirm dialog (target + profile); Confirm submits the form the dialog sits in
+$$("[data-scan-open]").forEach((btn) => {
+  const dlg = $(btn.dataset.scanOpen);
+  const ask = () => {
+    $("[data-scan-what]", dlg).textContent = $("[data-scan-target]", btn.form)?.value || "the whole domain";
+    dlg.showModal();
+  };
+  btn.addEventListener("click", ask);
+  $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());
+  // registered before the posture-run handler: Enter in a field asks first instead of scanning
+  btn.form.addEventListener("submit", (ev) => {
+    if (dlg.open) { dlg.close(); return; }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    ask();
+  });
+});
 // a link to a collapsed section (posture: CVE findings -> the address) opens it before scrolling there
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("a[data-open-details]");

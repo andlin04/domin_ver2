@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: Posture Scan asks for the profile
+
+- The scan button just says "Scan". It opens a confirm dialog naming the target, with the profile picker; Confirm
+  starts the scan. Enter in the Ports box opens the dialog too.
+- Rollback: revert this change.
+
 ## 2026-11-09: Every table sorts on its column headers
 
 - Click a column header in any table (admin, settings, profiles, users, lookup, posture) to sort; click again to

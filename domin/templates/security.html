@@ -37,14 +37,20 @@
         <option value="">Whole domain ({{ posture_hosts|length }} host names)</option>
         {% for h in posture_hosts %}<option value="{{ h }}" {% if form.get('host') == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
       </select></label>
-    <label class="field">Profile
-      <select name="profile">
-        {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %} · route {{ route_names.get(pr.route, 'a deleted route') }}</option>{% endfor %}
-      </select></label>
     <label class="field">Ports <small>optional override</small>
       <input name="ports" value="{{ form.get('ports', '') }}" placeholder="from the profile" size="12"
         spellcheck="false" autocapitalize="off"></label>
-    <button class="btn primary" type="submit" data-scan-button>{{ 'Scan / renew 1 host' if form.get('host') else 'Scan / renew whole domain' }}</button>
+    <button class="btn primary" type="button" data-scan-open="#scan-confirm">Scan</button>
+    {# the profile is picked when confirming; the dialog sits in the form, so its fields are sent with it #}
+    <dialog class="confirm" id="scan-confirm">
+      <p>Scan <b data-scan-what>{{ form.get('host') or 'the whole domain' }}</b> of {{ posture_domain }} now?</p>
+      <label class="field">Profile
+        <select name="profile">
+          {% for pr in profiles %}<option value="{{ pr.name }}" {% if form.get('profile') == pr.name %}selected{% endif %}>{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %} · route {{ route_names.get(pr.route, 'a deleted route') }}</option>{% endfor %}
+        </select></label>
+      <menu><button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary">Confirm</button></menu>
+    </dialog>
   </form>
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}

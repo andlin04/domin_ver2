@@ -378,7 +378,7 @@ def test_viewer_cannot_start_posture(settings):
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         assert r.status_code == 403 and "analyst role" in r.text
-        assert "Scan / renew" not in h.get(f"/admin/security?domain={DOM}").text
+        assert "data-scan-open" not in h.get(f"/admin/security?domain={DOM}").text
 
 
 def test_posture_refuses_unknown_domain_and_out_of_scope_host(settings):
@@ -635,7 +635,7 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
         page = h.get(f"/admin/security?domain={DOM}").text
-        order = [page.index(x) for x in ("Scan / renew", "Authorized use only", "Critical CVEs", 'id="pc-trend"',
+        order = [page.index(x) for x in ("data-scan-open", "Authorized use only", "Critical CVEs", 'id="pc-trend"',
                                          'id="posture-hosts"', 'id="posture-cves"')]   # host table = findings list
         assert order == sorted(order)
         assert 'id="posture-data"' in page and "CVE-2024-9999" in page
@@ -644,7 +644,10 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         # viewing one host doesn't narrow the next scan: the form starts at the whole domain
         one = h.get(f"/admin/security?domain={DOM}&host=nas.corp.example").text
         form = one.split("data-scan-target>")[1].split("</select>")[0]
-        assert "selected" not in form and "Scan / renew whole domain" in one
+        assert "selected" not in form and "<b data-scan-what>the whole domain</b>" in one
+        # the button just says Scan; the profile is picked in its confirm dialog, inside the same form
+        run = one.split("data-posture-run>")[1].split("</form>")[0]
+        assert '>Scan</button>' in run and 'name="profile"' in run.split('id="scan-confirm"')[1]
         # one host: its row only, opened on load
         rows = one.split('id="posture-hosts"')[1].split("</table>")[0]
         assert rows.count('<td class="tick">') == 1 and "data-auto-open" in rows and "nas.corp.example" in rows
