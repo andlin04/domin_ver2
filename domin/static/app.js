@@ -98,6 +98,40 @@ $$("table[data-colfilters]").forEach((table) => {
   });
 });
 $$("[data-filter]").forEach((input) => input.addEventListener("input", () => applyFilters($(input.dataset.filter))));
+// resizable columns (table[data-resizable] with a <colgroup>): drag a header's right edge; widths kept per browser
+$$("table[data-resizable]").forEach((table) => {
+  const cols = $$("colgroup col", table);
+  const store = `colw:${table.id}`;
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(store) || "[]"); } catch (e) { saved = []; }
+  if (saved.length === cols.length) cols.forEach((c, i) => { c.style.width = saved[i]; });
+  const fit = () => { table.style.width = `${cols.reduce((s, c) => s + c.getBoundingClientRect().width, 0)}px`; };
+  $$("thead th", table).forEach((th, i) => {
+    if (!cols[i]) return;
+    const grip = document.createElement("span");
+    grip.className = "col-resize";
+    grip.setAttribute("aria-hidden", "true");
+    grip.addEventListener("click", (ev) => ev.stopPropagation());   // not a sort click
+    grip.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const x0 = ev.clientX;
+      const w0 = cols[i].getBoundingClientRect().width;
+      grip.classList.add("dragging");
+      grip.setPointerCapture(ev.pointerId);
+      const move = (e) => { cols[i].style.width = `${Math.max(40, w0 + e.clientX - x0)}px`; fit(); };
+      const up = () => {
+        grip.classList.remove("dragging");
+        grip.removeEventListener("pointermove", move);
+        localStorage.setItem(store, JSON.stringify(cols.map((c) => c.style.width)));
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up, { once: true });
+    });
+    th.append(grip);
+  });
+  fit();
+});
 // posture host table: a host name expands a row under it with its addresses' findings (the <details> trees, moved
 // from the hidden #pa-pool and put back on collapse). An address shared by two names shows under one at a time.
 function collapseHost(tr) {

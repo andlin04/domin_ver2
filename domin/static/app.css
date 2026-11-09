@@ -206,6 +206,14 @@ dl.facts dd { margin: 0; word-break: break-word; }
 .table-tools .filter { margin-left: auto; }
 th.tick, td.tick { width: 2.2rem; text-align: center; }
 dialog.confirm .field { display: block; margin: 0 0 1.1rem; }
+/* resizable tables (data-resizable): fixed layout from the <col> widths; a handle on each header's right edge */
+table[data-resizable] { table-layout: fixed; }
+table[data-resizable] th { position: relative; overflow: hidden; }
+table[data-resizable] td { overflow: hidden; overflow-wrap: anywhere; }
+table[data-resizable] td.clip { white-space: nowrap; text-overflow: ellipsis; }
+.col-resize { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; user-select: none;
+  border-right: 2px solid transparent; }
+.col-resize:hover, .col-resize.dragging { border-right-color: var(--accent); }
 /* posture host table: a host name expands its findings in a row below (chevron as on the other expandables) */
 a.host-toggle::before { content: ""; display: inline-block; width: .4rem; height: .4rem; margin: 0 .45rem .1rem 0;
   border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg);

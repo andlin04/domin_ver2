@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: resizable columns in the posture host table
+
+- Drag a header's right edge to change a column's width; widths are kept per browser. The Addresses column starts
+  one IPv4 address wide; more addresses end in "…" with the full list on hover. Generic: any table with
+  `data-resizable` and a `<colgroup>`.
+- Rollback: revert this change.
+
 ## 2026-11-09: host rows expand in place
 
 - A host name in the posture host table expands a row under it with its addresses' findings (the same tree: address,

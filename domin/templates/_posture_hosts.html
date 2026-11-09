@@ -9,7 +9,10 @@
     <span class="muted small-print" data-picked-count>0 ticked</span>{% endif %}
     <input class="filter" placeholder="Filter all columns…" data-filter="#posture-hosts" aria-label="Filter host names">
   </div>
-  <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters>
+  <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable>
+    {# start widths; drag a header's right edge to change one (kept per browser). Addresses: one IPv4 address #}
+    <colgroup><col style="width:2.6rem"><col style="width:20rem"><col style="width:17ch"><col style="width:12rem">
+      <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem"></colgroup>
     <thead><tr>
       <th class="tick" data-nofilter><input type="checkbox" data-pick-all aria-label="Tick every visible host name"></th>
       <th data-sort="text">Host name</th><th data-sort="ip">Addresses</th><th data-sort="num">Worst</th>
@@ -19,7 +22,7 @@
       <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
       <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"
         aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
-      <td class="mono">{{ h.ips|join(', ') }}</td>
+      <td class="mono clip" title="{{ h.ips|join(', ') }}">{{ h.ips|join(', ') }}</td>
       <td data-key="{{ h.rank }}">{% if h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
         {% if h.blocked %}<span class="pill blocked" title="{{ h.blocked }} of {{ h.results }} address(es): no scanned port answered">potentially blocked</span>{% endif %}
         {% if h.errors %}<span class="pill fix-no">{{ h.errors }} failed</span>{% endif %}</td>
