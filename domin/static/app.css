@@ -340,7 +340,7 @@ dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inheri
 .subnav a.active { color: var(--text, inherit); border-bottom-color: var(--accent); font-weight: 600; }
 .card.controls { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; align-items: flex-end; }
 .card.controls form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-end; margin: 0; }
-.card.controls .field { margin: 0; }
+.card.controls .field:not(dialog .field) { margin: 0; }   /* the scan dialog in this card keeps its spacing */
 .posture-kpis { margin-bottom: 1rem; }
 .kpi.alarm { border-color: var(--down); }
 .kpi.alarm b { color: var(--down); }

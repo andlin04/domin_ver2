@@ -134,6 +134,13 @@ def test_raw_drop_in_lets_nmap_see_interfaces():
     assert "ProcSubset=all" in text and "AF_PACKET" in text and "AmbientCapabilities=CAP_NET_RAW" in text
 
 
+def test_controls_card_rules_leave_the_scan_dialog_spacing_alone():
+    import pathlib
+    css = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.css").read_text(encoding="utf-8")
+    assert ".card.controls .field:not(dialog .field) { margin: 0; }" in css
+    assert ".card.controls .field { margin: 0; }" not in css
+
+
 def test_cut_short_nmap_output_reports_nmaps_error(monkeypatch):
     class Done:
         stdout = '<?xml version="1.0"?>\n<nmaprun scanner="nmap">\n<scaninfo type="syn"/>\n'
