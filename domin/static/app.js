@@ -304,6 +304,24 @@ $$("[data-domain-search]").forEach((box) => {
     }
     count.textContent = parts.join(" · ");
     box.dispatchEvent(new Event("pagefilter", { bubbles: true }));   // the host picker recounts its ticks
+    kpis(names ? box.value.trim() : "");
+  };
+  // the KPI tiles follow the Filter: the server counts what it leaves; an empty box puts the page's own tiles back
+  const tiles = $("[data-kpis]");
+  const own = tiles?.outerHTML;
+  let kseq = 0;
+  const kpis = async (q) => {
+    const now = $("[data-kpis]");
+    if (!now) return;
+    const mine = ++kseq;
+    if (!q) { now.outerHTML = own; return; }
+    const host = $(".posture-pick select[name=host]")?.value || "";
+    const url = `${box.dataset.domainSearch.replace(/domain-search$/, "kpis")}?domain=${encodeURIComponent(sel.value)}`
+      + `&host=${encodeURIComponent(host)}&q=${encodeURIComponent(q)}`;
+    try {
+      const r = await fetch(url);
+      if (r.ok && mine === kseq) $("[data-kpis]").outerHTML = await r.text();
+    } catch { /* the page's tiles stay */ }
   };
   const search = async () => {
     const q = box.value.trim();
@@ -763,8 +781,7 @@ function postureCharts() {
 
   // better or worse: distinct CVEs per severity per day with a finished scan (critical first, so it draws on top),
   // then the attack surface: open ports and addresses scanned
-  const tr = d.trend || [];
-  const lines = (id, series) => {
+  const lines = (id, series, tr = d.trend || []) => {
     const el = canvas(id, tr, "The trend appears once scans have finished on two or more days.");
     if (!el) return;
     const line = ([key, label, colour]) => ({ label, data: tr.map((r) => r[key]), borderColor: colour, backgroundColor: colour,
@@ -778,6 +795,10 @@ function postureCharts() {
   };
   lines("pc-trend", SEV.slice(0, 4).map((s) => [s, s, sevColour(s)]));
   lines("pc-surface", [["ports", "Open ports", css("--accent")], ["addresses", "Addresses scanned", css("--sev-unknown")]]);
+  if (d.footprint) {
+    lines("pc-footprint", [["hosts", "Host names", css("--accent")], ["resolved", "Resolving", css("--sev-medium")],
+                           ["ips", "Addresses", css("--sev-unknown")]], d.footprint);
+  }
 
   // what is listening: ranked bars, one hue
   const svc = d.services || [];

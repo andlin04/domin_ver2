@@ -598,6 +598,20 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
     return list(names.values())
 
 
+def narrow(conn: sqlite3.Connection, rows: list[dict], domain: str, query: str) -> list[dict]:
+    """The report rows the posture page's Filter box leaves (report() rows): all domains = the rows of the domains
+    search_domains finds; one domain = the addresses of its host names whose Filter text holds every word."""
+    words = query.lower().split()
+    if not words:
+        return rows
+    if not domain:
+        keep = set(search_domains(conn, query))
+        return [r for r in rows if r["domain"] in keep]
+    ips = {ip for h in with_results(host_list(conn, domain), rows) if all(w in h["text"] for w in words)
+           for ip in h["ips"]}
+    return [r for r in rows if r["ip"] in ips]
+
+
 def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
     """host_list entries joined with their addresses' current results (report rows): worst severity (`rank`: 0 =
     critical, for sorting), CVEs counted once per host name (`sev_n`, `cves`, `fixable`), open ports, how many of its

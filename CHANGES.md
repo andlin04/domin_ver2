@@ -2,6 +2,15 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-09: KPIs follow the Filter; footprint trend; Users under Admin
+
+- Posture: while the Filter box holds text, the KPI tiles count only what it leaves (all domains: the domains it
+  finds; one domain: the addresses of the host names it matches), with a Filter tile naming the text.
+- Posture, all domains: "Public footprint over time" chart: host names, resolving host names and addresses across
+  all inventoried domains, each domain's latest inventory scan as of the day, last 90 days.
+- Nav: Users moved into the Admin menu.
+- Rollback: revert this change.
+
 ## 2026-11-09: Posture report on ticked domains
 
 - Posture, all domains: the domain table has tick boxes and a Report button. The report covers every host name of

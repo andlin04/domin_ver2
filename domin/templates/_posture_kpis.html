@@ -1,0 +1,14 @@
+{# Posture KPIs: rep.kpi; filter = the page's Filter text when the KPIs cover only what it leaves (GET security/kpis
+   swaps this section in while the box holds text). #}
+{% set k = rep.kpi %}
+<section class="kpis posture-kpis" data-kpis>
+  {% if filter %}<div class="kpi"><span>Filter</span><b>{{ filter }}</b></div>{% endif %}
+  <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
+  <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
+  <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
+  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }} CVEs</i></b></div>
+  <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
+  <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
+  {% if k.blocked %}<div class="kpi warn"><span>Potentially blocked</span><b>{{ k.blocked }} <i>no port answered</i></b></div>{% endif %}
+  {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
+</section>

@@ -449,6 +449,24 @@ def eu_pct(eu: int, known: int) -> float | None:
     return round(100 * eu / known, 1) if known else None
 
 
+FOOTPRINT = ("hosts", "resolved", "ips")
+
+
+def footprint_per_day(conn: sqlite3.Connection, since: str = "") -> list[dict]:
+    """The public footprint across all domains per day with a finished scan: each domain's latest finished scan as of
+    that day (carried forward), summed: domains, host names, host names with an address, addresses. Days from since
+    (YYYY-MM-DD) on; earlier scans still count as the state a domain was in."""
+    latest: dict[int, tuple] = {}
+    out: dict[str, dict] = {}
+    for r in conn.execute("""SELECT domain_id, substr(started, 1, 10) AS day, hosts, resolved, ips FROM scans
+                             WHERE status = 'done' ORDER BY started"""):
+        latest[r["domain_id"]] = (r["hosts"] or 0, r["resolved"] or 0, r["ips"] or 0)
+        if r["day"] >= since:
+            out[r["day"]] = {"day": r["day"], "domains": len(latest),
+                             **{k: sum(v[i] for v in latest.values()) for i, k in enumerate(FOOTPRINT)}}
+    return list(out.values())
+
+
 def eu_per_day(conn: sqlite3.Connection) -> list[dict]:
     """Share of addresses in the EU across all scans per day, as the old version's EU changes report."""
     sql = """SELECT substr(started, 1, 10) AS day, SUM(eu) AS eu, SUM(eu_known) AS known FROM scans

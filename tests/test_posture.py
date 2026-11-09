@@ -801,3 +801,25 @@ def test_report_on_ticked_domains(settings, nmap):
         pdf = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other}", "format": "pdf"})
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
         assert h.post("/admin/security/report", data={"csrf": csrf, "domains": "nope.example"}).status_code == 422
+        # the KPI tiles follow the Filter: all domains narrowed to the domains it finds, one domain to its host names
+        assert "data-kpis" in page and 'id="pc-footprint"' in page and '"footprint": [' in page
+        assert 'id="pc-footprint"' not in h.get("/admin/security", params={"domain": other}).text
+        every = h.get("/admin/security/kpis").text
+        assert "<span>Filter</span>" not in every and "<span>Critical CVEs</span>" in every and "<i>of 1</i>" not in every
+        lab2 = h.get("/admin/security/kpis", params={"q": "lab2"}).text
+        assert "<span>Filter</span><b>lab2</b>" in lab2 and "<i>of 1</i>" in lab2
+        assert "<i>of 1</i>" in h.get("/admin/security/kpis", params={"domain": other, "q": "web"}).text
+        assert "<i>of 0</i>" in h.get("/admin/security/kpis", params={"domain": other, "q": "zzz"}).text
+
+
+def test_footprint_per_day_carries_each_domains_latest_scan(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "a.home.arpa", "2026-01-01T10:00:00", "scan",
+                     [{"host": "www.a.home.arpa", "ip": "172.20.4.10"}, {"host": "old.a.home.arpa", "ip": ""}])
+        db.save_scan(c, "b.home.arpa", "2026-01-02T10:00:00", "scan", [{"host": "b.home.arpa", "ip": "172.20.4.11"}])
+        db.save_scan(c, "a.home.arpa", "2026-01-03T10:00:00", "scan", [{"host": "www.a.home.arpa", "ip": "172.20.4.10"}])
+        days = db.footprint_per_day(c)[:3]   # the fixture's own scans come later (today)
+        assert [(d["day"], d["domains"], d["hosts"], d["resolved"], d["ips"]) for d in days] == [
+            ("2026-01-01", 1, 2, 1, 1), ("2026-01-02", 2, 3, 2, 2), ("2026-01-03", 2, 2, 2, 2)]
+        assert [d["day"] for d in db.footprint_per_day(c, "2026-01-02")][:2] == ["2026-01-02", "2026-01-03"]
+        assert db.footprint_per_day(c, "2026-01-02")[0]["domains"] == 2   # earlier scans still count

@@ -924,6 +924,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
+            if not dom:   # all domains: the public footprint over time (inventory scans)
+                since = (datetime.now() - timedelta(days=posture.TREND_DAYS)).strftime("%Y-%m-%d")
+                rep["charts"]["footprint"] = db.footprint_per_day(c, since)
             rep["changes"] = posture.changes(c, dom, host)
             at = json.loads(admin.kv_get(c, jobs.CVE_REFRESH_KEY) or "{}").get("at")
             rep["cve_refreshed"] = datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M") if at else ""
@@ -970,6 +973,20 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return JSONResponse({"error": "Sign in first."}, status_code=401)
             return JSONResponse({"domains": posture.search_domains(c, request.query_params.get("q", "")[:200])})
+
+    @app.get(base + "/security/kpis", response_class=HTMLResponse, include_in_schema=False)
+    def security_kpis(request: Request):
+        """The posture KPIs for what the page's Filter box leaves (domain, host and q as on the page): HTML section."""
+        q = request.query_params.get("q", "")[:200].strip()
+        dom, host = request.query_params.get("domain", ""), request.query_params.get("host", "")
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return HTMLResponse("", status_code=401)
+            dom = dom if dom in posture.domains(c) else ""
+            rows = posture.narrow(c, posture.report(posture.current(c, dom), host)["rows"], dom, q)
+            rep = posture.report(rows)
+        return shell(request, "_posture_kpis.html", u, s, rep=rep, filter=q)
 
     @app.post(base + "/security/report", include_in_schema=False)
     async def security_report(request: Request):

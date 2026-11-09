@@ -7,16 +7,7 @@
 <p class="muted card">No posture scans yet.</p>
 {% if host_list %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
-<section class="kpis posture-kpis">
-  <div class="kpi {{ 'alarm' if k.critical }}"><span>Critical CVEs</span><b>{{ k.critical }}</b></div>
-  <div class="kpi {{ 'alarm' if k.high }}"><span>High CVEs</span><b>{{ k.high }}</b></div>
-  <div class="kpi {{ 'alarm' if k.exposed }}"><span>Addresses with high+</span><b>{{ k.exposed }} <i>of {{ k.addresses }}</i></b></div>
-  <div class="kpi {{ 'warn' if k.fixable }}"><span>Fix available</span><b>{{ k.fixable }} <i>of {{ k.cves }} CVEs</i></b></div>
-  <div class="kpi {{ 'warn' if k.stale or k.failed }}"><span>Stale (&gt;30 d) · failed</span><b>{{ k.stale }} · {{ k.failed }}</b></div>
-  <div class="kpi"><span>Open ports</span><b>{{ k.open_ports }}</b></div>
-  {% if k.blocked %}<div class="kpi warn"><span>Potentially blocked</span><b>{{ k.blocked }} <i>no port answered</i></b></div>{% endif %}
-  {% if k.pending %}<div class="kpi"><span>Queued / running</span><b>{{ k.pending }}</b></div>{% endif %}
-</section>
+{% with filter="" %}{% include "_posture_kpis.html" %}{% endwith %}
 
 {% set ch = rep.changes %}
 {% if ch %}
@@ -59,6 +50,10 @@
     <div class="chart h200"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
   <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
     <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
+  {% if rep.charts.footprint is defined %}
+  <div class="card wide"><h2>Public footprint over time <small>all inventoried domains: each one's latest scan as of the day, summed</small></h2>
+    <div class="chart h260"><canvas id="pc-footprint" role="img" aria-label="Host names, resolving host names and addresses across all domains per scan day"></canvas></div></div>
+  {% endif %}
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
