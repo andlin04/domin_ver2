@@ -141,6 +141,14 @@ def test_controls_card_rules_leave_the_scan_dialog_spacing_alone():
     assert ".card.controls .field { margin: 0; }" not in css
 
 
+def test_posture_chart_and_map_clicks_add_to_the_filter():
+    import pathlib
+    js = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.js").read_text(encoding="utf-8")
+    assert js.count("...filterClick") == 2            # fix-by-severity and services bars
+    assert "if (p) addToFilter(p.country);" in js     # map: added, not replacing
+    assert "box.value = p.country" not in js
+
+
 def test_cut_short_nmap_output_reports_nmaps_error(monkeypatch):
     class Done:
         stdout = '<?xml version="1.0"?>\n<nmaprun scanner="nmap">\n<scaninfo type="syn"/>\n'

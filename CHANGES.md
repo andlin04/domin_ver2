@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture chart clicks add to the Filter
+
+- Posture view: a click on a bar (CVEs by severity and fix, open services) or a map country adds that value to
+  the Filter box instead of replacing it; KPIs, tables and map follow. Rollback: revert this commit.
+
 ## 2026-11-10: Edit scan profiles
 
 - Settings > Scan profiles: an Edit button per profile (analyst, admin; also default) fills the form with its

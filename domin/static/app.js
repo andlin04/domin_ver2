@@ -758,6 +758,24 @@ postureProgress();
 
 // posture report charts (data: #posture-data, posture.report + trend). Severity colours come from the --sev-* vars,
 // read at render time like every chart colour; an empty series shows a sentence instead of an empty canvas.
+// posture: a clicked chart value or map country is added to the page's Filter box (every word must match), so it
+// narrows what is already filtered; a term the box already holds is not added twice
+function addToFilter(term) {
+  const box = $("[data-domain-search]");
+  const t = String(term || "").trim().toLowerCase();
+  if (!box || !t) return;
+  const have = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+  if (t.split(/\s+/).every((w) => have.includes(w))) return;
+  box.value = `${box.value.trim()} ${t}`.trim();
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  box.scrollIntoView({ block: "nearest" });
+}
+// Chart.js options for a bar chart whose bars add their label to the Filter
+const filterClick = {
+  onClick: (ev, els, chart) => { if (els.length) addToFilter(chart.data.labels[els[0].index]); },
+  onHover: (ev, els, chart) => { chart.canvas.style.cursor = els.length ? "pointer" : ""; },
+};
+
 function postureCharts() {
   const el = document.getElementById("posture-data");
   if (!el) return;
@@ -781,7 +799,7 @@ function postureCharts() {
       data: { labels: fix.map((r) => r.label),
               datasets: [{ label: "Fix published", data: fix.map((r) => r.fix), backgroundColor: css("--accent"), ...gap },
                          { label: "No fix yet", data: fix.map((r) => r.nofix), backgroundColor: css("--sev-unknown"), ...gap }] },
-      options: { indexAxis: "y", plugins: { legend: { position: "top" } },
+      options: { indexAxis: "y", plugins: { legend: { position: "top" } }, ...filterClick,
                  scales: { x: { stacked: true, ...ints }, y: { stacked: true, grid: { display: false } } } },
     });
   }
@@ -814,15 +832,16 @@ function postureCharts() {
     new Chart(c, {
       type: "bar",
       data: { labels: svc.map((r) => r.label), datasets: [{ label: "Open ports", data: svc.map((r) => r.n), backgroundColor: css("--accent"), ...gap }] },
-      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: ints, y: { grid: { display: false } } } },
+      options: { indexAxis: "y", plugins: { legend: { display: false } }, ...filterClick,
+                 scales: { x: ints, y: { grid: { display: false } } } },
     });
   }
 }
 
 // posture map, country level and offline (static/world.json: Natural Earth 110m, public domain): one bubble per
 // country with scanned addresses (size = addresses, colour = worst severity, C/H counts beside it). It opens fitted to
-// those countries; the wheel zooms at the pointer, drag moves, hover shows a summary, a click puts the country in the
-// page's Filter box. Colours are read at draw time, so a theme change applies on the next draw.
+// those countries; the wheel zooms at the pointer, drag moves, hover shows a summary, a click adds the country to the
+// page's Filter box (addToFilter). Colours are read at draw time, so a theme change applies on the next draw.
 async function postureMap() {
   const cv = document.getElementById("pc-map");
   const data = document.getElementById("posture-data");
@@ -932,11 +951,7 @@ async function postureMap() {
     const was = drag; drag = null;
     if (!was || was.moved) return;
     const p = pick(at(ev));
-    const box = $("[data-domain-search]");
-    if (!p || !box) return;
-    box.value = p.country;
-    box.dispatchEvent(new Event("input", { bubbles: true }));
-    box.scrollIntoView({ block: "nearest" });
+    if (p) addToFilter(p.country);
   });
   cv.addEventListener("pointerleave", () => { tip.hidden = true; });
   cv.addEventListener("dblclick", () => { fit(); draw(); });
