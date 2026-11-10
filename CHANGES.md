@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: On-prem install fixes from clean-VM tests
+
+- Tested from scratch on Debian 13 and Ubuntu 24.04: install, re-run, uninstall + reinstall (data and users kept),
+  `--purge`, scan sandbox (scan networks and DNS reachable; this host and other private networks refused).
+- nginx: `http2 on` on 1.25.1+ (Debian 13), `listen ... http2` on older (Ubuntu 24.04); localhost may open the site
+  (own checks); the closing HTTPS check bypasses the proxy and waits for the nginx reload.
+- Rollback: revert this change and re-run install.sh.
+
 ## 2026-11-10: On-prem install package
 
 - `deploy/install.sh --internal`: installs on a vanilla Debian 13 / Ubuntu 24.04 host with every dependency, HTTPS

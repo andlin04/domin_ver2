@@ -483,6 +483,15 @@ def test_install_starts_nginx_so_reinstall_after_uninstall_works():
     assert install.index("systemctl enable -q --now nginx") < install.index("systemctl reload nginx")
 
 
+def test_internal_install_checks_itself_and_fits_both_nginx_versions():
+    # found on clean Debian 13 / Ubuntu 24.04 VMs: the status check went through the exported proxy and got 403
+    # from the source list; nginx 1.26 warns on "listen ... http2", 1.24 lacks "http2 on"
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    assert 'echo "allow 127.0.0.1;"' in install
+    assert "curl -sk --noproxy '*'" in install and "nginx reloads its workers" in install
+    assert "ge 1.25.1" in install and "listen 443 ssl$H2L default_server;" in install
+
+
 def test_internal_ips_skip_scan_limits(settings):
     s = replace(settings, scans_per_hour=1, scans_per_day=1, queue_max=1, internal_ips=("192.0.2.0/24",))
     with TestClient(create_app(s), client=("192.0.2.9", 50000)) as h:

@@ -341,8 +341,13 @@ if [ "$INTERNAL" = 1 ]; then
   fi
   # Who may open the site at all (--admin-sources); "any" = no network limit, the sign-in alone governs /admin
   { echo "# install.sh --admin-sources (DOMIN_ADMIN_SOURCES in /etc/domin.env)"
-    if [ "$SOURCES" != any ]; then for n in ${SOURCES//,/ }; do echo "allow $n;"; done; echo "deny all;"; fi
+    if [ "$SOURCES" != any ]; then
+      echo "allow 127.0.0.1;"; echo "allow ::1;"   # this host's own checks
+      for n in ${SOURCES//,/ }; do echo "allow $n;"; done; echo "deny all;"
+    fi
   } > /etc/nginx/domin-sources.conf
+  # nginx 1.25.1+ deprecates "listen ... http2" (Debian 13: 1.26); Ubuntu 24.04's 1.24 has only that form
+  if dpkg --compare-versions "$(dpkg-query -W -f='${Version}' nginx)" ge 1.25.1; then H2L="" H2="http2 on;"; else H2L=" http2" H2=""; fi
   cat > /etc/nginx/sites-available/domin <<EOF
 limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;
 limit_req_zone \$binary_remote_addr zone=domin_pages:10m rate=10r/s;
@@ -355,8 +360,9 @@ server {   # plain HTTP: only a redirect to HTTPS (the sign-in cookies are Secur
     location / { return 301 https://$DOMAIN\$request_uri; }
 }
 server {   # any name or address on this host: on-prem users often type the IP
-    listen 443 ssl http2 default_server;   # 'http2 on' needs nginx 1.25; Ubuntu 24.04 has 1.24
-    listen [::]:443 ssl http2 default_server;
+    listen 443 ssl$H2L default_server;
+    listen [::]:443 ssl$H2L default_server;
+    $H2
     server_name $DOMAIN $ALIAS;
     ssl_certificate /etc/domin/tls.crt;
     ssl_certificate_key /etc/domin/tls.key;
@@ -493,8 +499,11 @@ fi
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
 CLI="cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin"
 if [ "$INTERNAL" = 1 ]; then
-  echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
-    "HTTPS $(curl -sk -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/")," \
+  for _ in $(seq 10); do   # nginx reloads its workers in the background
+    CODE=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/" || true)
+    [ "$CODE" = 200 ] && break; sleep 1
+  done
+  echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true), HTTPS $CODE," \
     "TLS $(selfsigned /etc/domin/tls.crt && echo "self-signed (CA request: /etc/domin/tls.csr)" || echo "CA-signed")"
   if [ -n "$ADMIN_USER" ]; then
     if ( eval "$CLI user-list" ) | cut -f1 | grep -qx "$ADMIN_USER"; then

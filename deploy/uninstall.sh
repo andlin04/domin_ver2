@@ -45,5 +45,5 @@ if [ "$purge" = 1 ]; then
   id -u domin >/dev/null 2>&1 && userdel domin 2>/dev/null || true
   echo "domin removed, data deleted"
 else
-  echo "domin removed; data kept in /var/lib/domin and /etc/domin.env (reinstall: install.sh)"
+  echo "domin removed; data kept in /var/lib/domin, /etc/domin.env and /etc/domin (TLS) (reinstall: install.sh)"
 fi
