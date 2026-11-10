@@ -494,6 +494,27 @@ def test_analyst_makes_a_profile_and_scans_with_it(settings, nmap):
         assert r.status_code == 303 and "web only" not in h.get("/admin/security/profiles").text
 
 
+def test_edit_loads_a_profile_into_the_form_and_saving_changes_it(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443", "intensity": "5",
+                                                 "timing": "4", "timeout": "60", "note": "web only"})
+        page = h.get("/admin/security/profiles").text
+        assert 'href="?edit=web#profile-form"' in page and 'href="?edit=default#profile-form"' in page
+        page = h.get("/admin/security/profiles?edit=web").text
+        assert "Edit profile web" in page and 'value="80,443"' in page and 'value="web only"' in page
+        assert 'name="intensity" type="number" min="0" max="9" value="5"' in page
+        h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443,8443",
+                                                 "intensity": "7", "timing": "3", "timeout": "90", "note": "web"})
+        with db.connect(settings.db_path) as c:
+            p = posture.profile(c, "web")
+        assert p["ports"] == "80,443,8443" and p["intensity"] == 7 and p["timeout"] == 90
+        assert "Edit profile" not in h.get("/admin/security/profiles?edit=nosuch").text
+    with app_client(settings) as h:
+        sign_in(h, "vee")
+        assert "?edit=" not in h.get("/admin/security/profiles").text
+
+
 def test_viewer_cannot_change_profiles_and_anonymous_sees_no_posture(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "vee")

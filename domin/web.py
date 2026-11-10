@@ -1138,7 +1138,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c)
             if not u:
                 return back()
-        return profiles_view(request, u, s)
+            # ?edit=<name>: the form starts with that profile's values; saving under the same name replaces it
+            p = posture.profile(c, request.query_params.get("edit", "")) or {}
+        form = {k: str(p.get(k) if p.get(k) is not None else "") for k in
+                ("name", "ports", "note", "intensity", "timing", "timeout", "route")} if p else {}
+        return profiles_view(request, u, s, form=form)
 
     @app.post(base + "/security/profiles", include_in_schema=False)
     async def profiles_save(request: Request):

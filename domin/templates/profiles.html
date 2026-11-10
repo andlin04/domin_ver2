@@ -4,14 +4,17 @@
 {% block content %}
 <section class="hero"><div><h1>Scan profiles</h1>
   <p class="muted">Named parameter sets for posture scans. Pick one on the <a href="{{ base }}/security#posture">Posture</a>
-    form; each scan keeps the parameters it ran with, and the route it took. Connect scan only (nmap -sT -sV, no OS detection).</p></div></section>
+    form; each scan keeps the parameters it ran with, and the route it took. Connect scan (nmap -sT -sV), or a SYN
+    scan (-sS) on direct routes when Settings · Raw network access is on; no OS detection.</p></div></section>
 
 {% set sub = "profiles" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
 {% if user.role in ('admin', 'analyst') %}
-<section class="card">
-  <h2>Add or change a profile <small>same name replaces it</small></h2>
+<section class="card" id="profile-form">
+  <h2>{% if request.query_params.get('edit') and form.get('name') %}Edit profile {{ form.get('name') }}
+    <small>same name changes it, a new name adds a copy ·<a href="{{ base }}/security/profiles">new profile</a></small>
+    {% else %}Add or change a profile <small>same name replaces it</small>{% endif %}</h2>
   <form method="post" action="{{ base }}/security/profiles">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="grid g3">
@@ -46,11 +49,13 @@
       <td><b>{{ p.name }}</b></td><td class="mono"><div class="lines2" title="{{ p.ports }}">{{ p.ports }}</div></td>
       <td class="num">{{ p.intensity }}</td><td class="num">T{{ p.timing }}</td><td class="num">{{ p.timeout }}</td>
       <td>{{ route_names.get(p.route, 'a deleted route') }}</td><td>{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
-      <td>{% if user.role in ('admin', 'analyst') and p.name != 'default' %}
+      <td><div class="row-actions">{% if user.role in ('admin', 'analyst') %}
+        <a class="btn small" href="?edit={{ p.name|urlencode }}#profile-form">Edit</a>{% endif %}
+        {% if user.role in ('admin', 'analyst') and p.name != 'default' %}
         <form method="post" action="{{ base }}/security/profiles/{{ p.name }}/delete" class="inline"
               data-confirm="Delete scan profile {{ p.name }}? Past scans keep their parameters.">
           <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="btn small" type="submit">Delete</button></form>{% endif %}</td>
+          <button class="btn small" type="submit">Delete</button></form>{% endif %}</div></td>
     </tr>{% endfor %}</tbody>
   </table></div>
 </section>

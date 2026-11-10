@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Edit scan profiles
+
+- Settings > Scan profiles: an Edit button per profile (analyst, admin; also default) fills the form with its
+  values; saving under the same name changes it. Page text names the SYN option. Rollback: revert this commit.
+
 ## 2026-11-09: Tags column in the posture Host names table
 
 - Posture view, Host names: a Tags column with the network tags (Settings) and the host name's own tags; analysts
