@@ -2,6 +2,7 @@
    rep.vulns from posture.report. Chips (severity, fix) and the column filters add up with the Filter box (app.js
    applyFilters). Exploit flags, EPSS and the Act/Attend/Track tier come with the exploit data (layout plan step 6). #}
 {% set cves = rep.vulns %}
+{% set nofix = cves|rejectattr('fixable')|list|length %}
 <section class="card cve-overview">
   <div class="card-head"><h2>CVEs found <small><span data-shown="#overview-cves">{{ cves|length }}</span> of
     {{ cves|length }} CVEs, each once, worst first</small></h2>
@@ -10,16 +11,16 @@
   {% if cves %}
   <div class="chip-row" data-chips="#overview-cves" role="group" aria-label="Quick filters">
     {% for s in ('critical', 'high', 'medium', 'low') %}{% if rep.by_sev[s] %}
-    <button type="button" class="chip sev-chip sev-{{ s }}" data-attr="sev" data-val="{{ s }}" aria-pressed="false">{{ s }} <small>{{ rep.by_sev[s] }}</small></button>
+    <button type="button" class="chip sev-chip" data-attr="sev" data-val="{{ s }}" aria-pressed="false">{{ s }} <small>{{ rep.by_sev[s] }}</small></button>
     {% endif %}{% endfor %}
-    <span class="chip-sep" aria-hidden="true"></span>
-    <button type="button" class="chip" data-attr="fix" data-val="yes" aria-pressed="false">Fix published <small>{{ cves|selectattr('fixable')|list|length }}</small></button>
-    <button type="button" class="chip" data-attr="fix" data-val="no" aria-pressed="false">No fix yet <small>{{ cves|rejectattr('fixable')|list|length }}</small></button>
+    {% if nofix and nofix < cves|length %}<span class="chip-sep" aria-hidden="true"></span>
+    <button type="button" class="chip" data-attr="fix" data-val="yes" aria-pressed="false">Fix published <small>{{ cves|length - nofix }}</small></button>
+    <button type="button" class="chip" data-attr="fix" data-val="no" aria-pressed="false">No fix yet <small>{{ nofix }}</small></button>{% endif %}
   </div>
   <div class="table-wrap"><table id="overview-cves" class="sortable" data-colfilters>
     <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
       <th data-sort="num" class="num">CVSS</th><th data-sort="text">Product</th><th data-sort="text">Fixed in</th>
-      <th data-sort="num" class="num">Addresses</th><th data-sort="text">Where</th></tr></thead>
+      <th data-sort="num">Addresses</th></tr></thead>
     <tbody>{% for v in cves %}<tr data-sev="{{ v.severity }}" data-fix="{{ 'yes' if v.fixable else 'no' }}">
       <td class="mono"><a href="{{ 'https://nvd.nist.gov/vuln/detail/' ~ v.cve if v.cve.startswith('CVE-') else 'https://osv.dev/vulnerability/' ~ v.cve }}"
         rel="noopener noreferrer" target="_blank" title="{{ v.summary or '' }}">{{ v.cve }}</a></td>
@@ -27,8 +28,8 @@
       <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
       <td>{{ v.products|join(', ') }}</td>
       <td>{% if v.fixes %}{{ v.fixes|join(', ') }}{% else %}<span class="muted">no fix yet</span>{% endif %}</td>
-      <td class="num" data-key="{{ v.addresses|length }}">{{ v.addresses|length }}</td>
-      <td class="small-print">{% for ip, name in v.addresses[:3] %}{{ name or ip }}{% if not loop.last %}, {% endif %}{% endfor %}{% if v.addresses|length > 3 %} <span class="muted">+{{ v.addresses|length - 3 }}</span>{% endif %}</td>
+      <td class="cve-where" data-key="{{ v.addresses|length }}"><b>{{ v.addresses|length }}</b>
+        <small class="muted">{% for ip, name in v.addresses[:3] %}{{ name or ip }}{% if not loop.last %}, {% endif %}{% endfor %}{% if v.addresses|length > 3 %} +{{ v.addresses|length - 3 }}{% endif %}</small></td>
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<p class="muted">No known CVEs on the scanned services.</p>{% endif %}

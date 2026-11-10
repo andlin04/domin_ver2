@@ -797,7 +797,8 @@ def test_posture_sub_tabs_split_what_where_and_scans(settings, nmap):
     # Overview: one row per CVE, worst first, with severity and fix chips
     cves = over.split('id="overview-cves"')[1].split("</table>")[0]
     assert cves.count('<tr data-sev=') == 1 and 'data-sev="critical"' in cves and "CVE-2024-9999" in cves
-    assert 'data-chips="#overview-cves"' in over and 'data-attr="fix"' in over and 'id="overview-cves"' not in ana
+    assert 'data-chips="#overview-cves"' in over and 'data-val="critical"' in over and 'id="overview-cves"' not in ana
+    assert 'data-attr="fix"' not in over   # every CVE in the same fix state: those chips would filter nothing
     assert over.index('id="overview-cves"') < over.index("posture-changes") < over.index('id="pc-trend"')
     assert 'id="posture-hosts"' in ana and 'id="pc-surface"' in ana and 'id="pc-trend"' not in ana
     assert "data-posture-run" in scans and "Authorized use only" in scans and 'id="posture-progress"' in scans

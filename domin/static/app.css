@@ -321,7 +321,10 @@ dialog.pp p.pp-line { margin: 0 0 .5rem; font-weight: 600; }
 dialog.pp p.small-print { text-align: left; margin: .45rem 0 .6rem; min-height: 1em; }
 dialog.pp p.note { margin: 0 0 .8rem; }
 .chip-row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
-.chip-row .chip { border-color: var(--border); color: var(--muted); text-transform: capitalize; }
+.chip-row .chip { border-color: var(--border); color: var(--muted); }
+.chip-row .sev-chip { text-transform: capitalize; }
+.cve-where small { display: block; max-width: 22rem; }
+#overview-cves td:nth-child(4) { max-width: 26rem; }
 .chip-row .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .chip-row .chip small { opacity: .8; margin-left: .2rem; }
 .chip-sep { width: 1px; height: 1.2rem; background: var(--border); margin: 0 .25rem; }
