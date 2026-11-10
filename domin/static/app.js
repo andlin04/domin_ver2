@@ -343,7 +343,28 @@ $$("[data-domain-search]").forEach((box) => {
       if (mine === seq) count.textContent = "search failed";
     }
   };
-  box.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  // one chip per Filter word, each with × to drop just that word (typed or added by a chart, map or bar click)
+  const chips = document.createElement("div");
+  chips.className = "filter-chips";
+  chips.setAttribute("aria-label", "Active filters");
+  box.closest(".field").after(chips);
+  const words = () => box.value.trim().split(/\s+/).filter(Boolean);
+  const drawChips = () => {
+    const list = words();
+    chips.innerHTML = list.map((w, i) => `<span class="pill chip">${esc(w)}<button type="button" class="tag-x"`
+      + ` data-chip="${i}" title="Remove filter ${esc(w)}" aria-label="Remove filter ${esc(w)}">×</button></span>`).join("")
+      + (list.length > 1 ? '<button type="button" class="btn small" data-chip="all">Clear all</button>' : "");
+  };
+  chips.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-chip]");
+    if (!b) return;
+    const list = words();
+    if (b.dataset.chip !== "all") list.splice(Number(b.dataset.chip), 1);
+    box.value = b.dataset.chip === "all" ? "" : list.join(" ");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  box.addEventListener("input", () => { drawChips(); clearTimeout(timer); timer = setTimeout(search, 250); });
+  drawChips();
   box.addEventListener("keydown", async (ev) => {
     if (ev.key !== "Enter") return;
     ev.preventDefault();

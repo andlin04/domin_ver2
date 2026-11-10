@@ -147,6 +147,8 @@ def test_posture_chart_and_map_clicks_add_to_the_filter():
     assert js.count("...filterClick") == 2            # fix-by-severity and services bars
     assert "if (p) addToFilter(p.country);" in js     # map: added, not replacing
     assert "box.value = p.country" not in js
+    css = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.css").read_text(encoding="utf-8")
+    assert 'chips.className = "filter-chips"' in js and 'data-chip="all"' in js and ".filter-chips .chip" in css
 
 
 def test_cut_short_nmap_output_reports_nmaps_error(monkeypatch):

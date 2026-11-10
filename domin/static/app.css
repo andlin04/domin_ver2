@@ -370,6 +370,11 @@ form.tag .pill { text-transform: none; text-decoration: none; }
 .tag-x:hover { color: var(--down); }
 .tag-in { width: 5.5rem; font-size: .75rem; padding: .1rem .3rem; }
 .tag-groups .pill { text-transform: none; text-decoration: none; margin-right: .25rem; }
+/* posture Filter: one chip per word, × removes it (app.js); its own row under the pickers, empty = no space */
+.filter-chips { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; justify-content: flex-end; }
+.filter-chips:empty { display: none; }
+.filter-chips .chip { display: inline-flex; align-items: center; text-transform: none; letter-spacing: 0;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .tag-groups .pill.active { background: color-mix(in srgb, var(--up) 20%, transparent); color: var(--up); }
 details.raw { margin: .4rem 0 .8rem; }
 details.raw summary { cursor: pointer; }

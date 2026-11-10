@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Filter chips
+
+- Posture Filter: one chip per filter word under the pickers, × removes that word, "Clear all" from two words up;
+  KPIs, tables and map follow. Rollback: revert this commit.
+
 ## 2026-11-10: Host names sorted by severity
 
 - Posture Host names table: rows start worst severity first (then name; never scanned last); headers Worst ->
