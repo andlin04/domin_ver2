@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture views tuned for triage
+
+- Overview: Changes (new and fixed since the previous scan) above the CVE list; KPIs are CVE counts only.
+- Changes: "CVEs gone" split into "CVEs fixed" (the service's version changed or its port closed) and "CVEs dropped
+  (data)" (same service: CVE data or matching changed, or the port wasn't scanned).
+- Trend charts show addresses scanned as a dashed line, so a rise from new coverage is not read as new risk.
+- Analysis: own KPIs (addresses scanned, high+, open ports, potentially blocked, stale/failed); Exposed services
+  moved here from Overview.
+- Host table: one row per address (host names sharing it listed in the row; ticking or tagging it covers them all);
+  scanned addresses with nothing open and nothing found hidden by default (chip "Open ports or findings"); a clean
+  result shows "—" instead of "none".
+- Rollback: revert this change.
+
 ## 2026-11-10: Posture Overview lists each CVE once
 
 - Overview: "CVEs found" table under the KPIs, one row per CVE across the shown domains/host, worst first (CVE

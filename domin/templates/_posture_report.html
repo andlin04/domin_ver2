@@ -11,7 +11,6 @@
 {% if host_list and tab == 'analysis' %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
 {% with filter="" %}{% include "_posture_kpis.html" %}{% endwith %}
-{% if tab == 'overview' %}{% include "_posture_cves.html" %}{% endif %}
 
 {% set ch = rep.changes %}
 {% if ch and tab == 'overview' %}
@@ -21,7 +20,8 @@
     {{ rep.cve_refreshed or 'not yet (daily)' }}</small></h2>
   <div class="kpis">
     <div class="kpi {{ 'alarm' if ch.kpi['new-cve'] }}"><span>New CVEs</span><b>{{ '+' if ch.kpi['new-cve'] }}{{ ch.kpi['new-cve'] }}</b></div>
-    <div class="kpi"><span>CVEs gone</span><b class="{{ 'up' if ch.kpi['gone-cve'] }}">{{ '−' if ch.kpi['gone-cve'] }}{{ ch.kpi['gone-cve'] }}</b></div>
+    <div class="kpi" title="Gone because the service's version changed or its port closed"><span>CVEs fixed</span><b class="{{ 'up' if ch.kpi['fixed-cve'] }}">{{ '−' if ch.kpi['fixed-cve'] }}{{ ch.kpi['fixed-cve'] }} <i>update or close</i></b></div>
+    <div class="kpi" title="Gone while the service stayed the same: CVE data or matching changed, or the port wasn't scanned"><span>CVEs dropped</span><b>{{ '−' if ch.kpi['gone-cve'] }}{{ ch.kpi['gone-cve'] }} <i>data change</i></b></div>
     <div class="kpi {{ 'warn' if ch.kpi.opened }}"><span>Ports opened</span><b>{{ '+' if ch.kpi.opened }}{{ ch.kpi.opened }}</b></div>
     <div class="kpi"><span>Ports closed</span><b>{{ '−' if ch.kpi.closed }}{{ ch.kpi.closed }}</b></div>
     <div class="kpi"><span>Version changes</span><b>{{ ch.kpi.version }}</b></div>
@@ -35,7 +35,7 @@
       <td>{{ x.at[:16]|replace('T', ' ') }}</td>
       <td>{{ x.host }}{% if x.host != x.ip %} <small class="muted">{{ x.ip }}</small>{% endif %}</td>
       <td>{{ {'opened': 'Port opened', 'closed': 'Port closed', 'version': 'Version changed',
-              'new-cve': 'New CVEs', 'gone-cve': 'CVEs gone'}[x.kind] }}{% if x.count %} ({{ x.count }}{% if x.kind == 'new-cve' %}, worst {{ x.severity }}{% endif %}){% endif %}</td>
+              'new-cve': 'New CVEs', 'fixed-cve': 'CVEs fixed', 'gone-cve': 'CVEs dropped (data)'}[x.kind] }}{% if x.count %} ({{ x.count }}{% if x.kind == 'new-cve' %}, worst {{ x.severity }}{% endif %}){% endif %}</td>
       <td>{{ x.detail }}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
@@ -44,22 +44,25 @@
   {% else %}<p class="muted">Changes show once an address has been scanned twice.</p>{% endif %}
 </section>
 {% endif %}
+{% if tab == 'overview' %}{% include "_posture_cves.html" %}{% endif %}
 
 <section class="grid g2 posture-charts">
   {% if tab == 'overview' %}
-  <div class="card wide"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
-    <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity per day with a finished scan"></canvas></div></div>
+  <div class="card wide"><h2>CVEs over time <small>distinct CVEs per severity on each address's latest scan as of the
+    day · dashed = addresses scanned: a rise along with it is new coverage, not new risk</small></h2>
+    <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity and addresses scanned per day with a finished scan"></canvas></div></div>
   <div class="card"><h2>Fix available? <small>distinct CVEs per severity</small></h2>
     <div class="chart h200"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
-  <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
-    <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
   {% else %}
-  <div class="card{% if rep.charts.footprint is not defined %} wide{% endif %}"><h2>Attack surface over time <small>open ports and addresses scanned, per scan day</small></h2>
+  <div class="card"><h2>Attack surface over time <small>open ports on each address's latest scan as of the day ·
+    dashed = addresses scanned</small></h2>
     <div class="chart h260"><canvas id="pc-surface" role="img" aria-label="Open ports and addresses scanned per day with a finished scan"></canvas></div></div>
-  {% endif %}
-  {% if rep.charts.footprint is defined and tab == 'analysis' %}
+  <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
+    <div class="chart h260"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
+  {% if rep.charts.footprint is defined %}
   <div class="card"><h2>Public footprint over time <small>all inventoried domains: each one's latest scan as of the day, summed</small></h2>
     <div class="chart h260"><canvas id="pc-footprint" role="img" aria-label="Host names, resolving host names and addresses across all domains per scan day"></canvas></div></div>
+  {% endif %}
   {% endif %}
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>

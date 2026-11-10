@@ -90,8 +90,16 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
         csrf = sign_in(h, "ana")
         page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert 'id="posture-hosts"' in page and 'data-picked-open="#scan-picked"' in page and 'name="hosts"' in page
-        assert page.count(">Never<") == 4
+        # one row per address: www and mail share 172.20.4.50, so 3 rows; ticking it picks both names
+        assert page.count(">Never<") == 3
+        assert 'value="mail.corp.example,www.corp.example"' in page and "+ www.corp.example</small>" in page
         assert page.count("· out of scope") == 1   # cdn: 203.0.113.9 is outside the IP allow range
+        # a tag on that row lands on both names
+        h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "mail.corp.example,www.corp.example",
+                                    "tag": "web", "from": "posture"})
+        with db.connect(settings.db_path) as c:
+            assert {e["host"] for e in posture.host_list(c, DOM) if "web" in e["tags"]} == {
+                "mail.corp.example", "www.corp.example"}
         empty = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM, "hosts": "", "picked": "1"},
                        headers={"Accept": "application/json"})
         assert empty.status_code == 422 and "Tick at least one" in empty.json()["error"]
@@ -113,6 +121,8 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     with db.connect(settings.db_path) as c:
         rows = posture.report(posture.current(c, DOM))["rows"]
         merged = {m["host"]: m for m in posture.with_results(posture.host_list(c, DOM), rows)}
+    rows_by = {tuple(e["names"]): e for e in posture.by_address(list(merged.values()))}
+    assert len(rows_by) == 3 and not rows_by[("nas.corp.example",)]["quiet"]   # nas has open ports
     nas = merged["nas.corp.example"]
     assert nas["results"] == 1 and nas["cves"] >= 1 and nas["worst"] and nas["rank"] < 5 and nas["open_ports"] == 3
     assert merged["www.corp.example"]["results"] == 0 and merged["www.corp.example"]["worst"] == ""
@@ -145,19 +155,24 @@ def test_changes_compare_each_scan_with_the_previous_one(settings):
         done("2026-11-03T10:00:00", "1-1024", [], status="failed")   # a failed (timed-out) scan is not compared
         done("2026-11-05T10:00:00", "22,80,443,8080",
              [svc(80, "nginx", "1.26", ["CVE-2"]), svc(443, "nginx", "1.26"), svc(8080, "jetty", "9")])
+        # same services, CVE-2 no longer matched (CVE data change): dropped, not fixed
+        done("2026-11-06T10:00:00", "22,80,443,8080",
+             [svc(80, "nginx", "1.26"), svc(443, "nginx", "1.26"), svc(8080, "jetty", "9")])
         ch = posture.changes(c, DOM, now=posture.datetime(2026, 11, 8))
     kinds = {(x["kind"], x["detail"]) for x in ch["rows"]}
     assert ("opened", "443/tcp nginx 1.26") in kinds and ("closed", "22/tcp OpenSSH 9.2") in kinds
     assert ("version", "80/tcp nginx 1.24 → nginx 1.26") in kinds
-    assert ("new-cve", "CVE-2") in kinds and ("gone-cve", "CVE-1") in kinds
+    # CVE-1 went with the nginx update: fixed; CVE-2 went while nginx 1.26 stayed: dropped
+    assert ("new-cve", "CVE-2") in kinds and ("fixed-cve", "CVE-1") in kinds and ("gone-cve", "CVE-2") in kinds
     assert not any("8080" in d for _, d in kinds)   # the earlier scan did not cover 8080: not "opened"
-    assert ch["kpi"] == {"opened": 1, "closed": 1, "version": 1, "new-cve": 1, "gone-cve": 1}
+    assert ch["kpi"] == {"opened": 1, "closed": 1, "version": 1, "new-cve": 1, "fixed-cve": 1, "gone-cve": 1}
     assert ch["compared"] == 1 and ch["changed"] == 1
     assert posture.port_set("22,80,100-102") == {22, 80, 100, 101, 102}
     with app_client(settings) as h:
         sign_in(h, "ana")
         page = h.get(f"/admin/security?domain={DOM}").text
         assert "Changes" in page and "Port opened" in page and "nginx 1.24 → nginx 1.26" in page
+        assert "CVEs fixed" in page and "CVEs dropped (data)" in page
         assert "−0<" not in page and "+0<" not in page   # a zero count has no sign
 
 
@@ -372,7 +387,8 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     # domain search: any attribute, any case, every word must match; signed-in only
     assert 'data-domain-search="/admin/security/domain-search"' in page and 'class="field pick-filter">Filter' in page
     # the Filter box also narrows the host and CVE rows: each carries its lower-case text
-    host_row = re.search(r'<tr data-text="([^"]*)">\s*<td class="tick"><input type="checkbox" data-pick value="www.lab', page)
+    host_row = re.search(r'<tr data-text="([^"]*)" data-quiet="no">\s*<td class="tick"><input type="checkbox" '
+                         r'data-pick value="mail.lab', page)
     assert host_row and "openssh" in host_row.group(1) and "cve-2024-9999" in host_row.group(1)
     assert "22/tcp" in host_row.group(1) and "172.20.4.50" in host_row.group(1)
     assert re.search(r'<tr data-text="cve-2024-9999 [^"]*172\.20\.4\.50', page)
@@ -682,7 +698,7 @@ def test_report_renders_collapsed_host_headlines_with_nested_cves():
     assert "1 of 2 fixable" in html and "no fix published yet" in html
     assert re.search(r"Fix available</span><b>1 <i>of 3 CVEs", html)
     # trends first, then the charts of the current state, then the findings
-    order = [html.index(x) for x in ('id="pc-trend"', 'id="pc-fix"', 'id="pc-services"', 'id="pc-surface"',
+    order = [html.index(x) for x in ('id="pc-trend"', 'id="pc-fix"', 'id="pc-surface"', 'id="pc-services"',
                                      "Findings by address <small>")]
     assert order == sorted(order) and "<script>" not in html
     assert 'id="pc-hosts"' not in html and 'id="pc-age"' not in html and 'id="posture-domains"' not in html
@@ -799,8 +815,14 @@ def test_posture_sub_tabs_split_what_where_and_scans(settings, nmap):
     assert cves.count('<tr data-sev=') == 1 and 'data-sev="critical"' in cves and "CVE-2024-9999" in cves
     assert 'data-chips="#overview-cves"' in over and 'data-val="critical"' in over and 'id="overview-cves"' not in ana
     assert 'data-attr="fix"' not in over   # every CVE in the same fix state: those chips would filter nothing
-    assert over.index('id="overview-cves"') < over.index("posture-changes") < over.index('id="pc-trend"')
+    # what changed first, then the CVE list, then the trends
+    assert over.index("posture-changes") < over.index('id="overview-cves"') < over.index('id="pc-trend"')
     assert 'id="posture-hosts"' in ana and 'id="pc-surface"' in ana and 'id="pc-trend"' not in ana
+    # services are "where": Analysis; KPIs per tab: CVE counts on Overview, coverage on Analysis
+    assert 'id="pc-services"' in ana and 'id="pc-services"' not in over
+    assert "<span>Critical CVEs</span>" in over and "<span>Addresses scanned</span>" not in over
+    assert "<span>Addresses scanned</span>" in ana and "<span>Critical CVEs</span>" not in ana
+    assert 'data-tab="analysis"' in ana
     assert "data-posture-run" in scans and "Authorized use only" in scans and 'id="posture-progress"' in scans
     assert 'id="scan-confirm"' not in over + ana and 'id="posture-hosts"' not in scans
     assert 'action="/admin/security/scans"' in scans and "data-domain-search" not in scans

@@ -962,9 +962,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(tab=ctx.get("tab", tab), posture_domains=known, posture_domain=dom, posture_hosts=hosts,
                        posture_host=host,
-                       # worst severity first (rank 0 = critical; never scanned last), then by name
-                       host_list=sorted((h for h in posture.with_results(posture.host_list(c, dom), rep["rows"])
-                                         if not host or h["host"] == host), key=lambda h: (h["rank"], h["host"]))
+                       # one row per address (names sharing it merged), worst severity first (rank 0 = critical;
+                       # never scanned last), then by name
+                       host_list=posture.by_address(sorted(
+                           (h for h in posture.with_results(posture.host_list(c, dom), rep["rows"])
+                            if not host or h["host"] == host), key=lambda h: (h["rank"], h["host"])))
                        if dom else [],
                        domain_rows=[] if dom else posture.domain_summary(rep["rows"]),
                        report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes, proxy.tests(c)),
@@ -1017,7 +1019,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             dom = dom if dom in posture.domains(c) else ""
             rows = posture.narrow(c, posture.report(posture.current(c, dom), host)["rows"], dom, q)
             rep = posture.report(rows)
-        return shell(request, "_posture_kpis.html", u, s, rep=rep, filter=q)
+        tab = request.query_params.get("tab", "")
+        return shell(request, "_posture_kpis.html", u, s, rep=rep, filter=q,
+                     tab=tab if tab in ("overview", "analysis") else "overview")
 
     @app.post(base + "/security/report", include_in_schema=False)
     async def security_report(request: Request):
@@ -1135,10 +1139,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.post(base + "/tags", include_in_schema=False)
     async def host_tag(request: Request):
-        """Add or remove one tag on a host name of a domain (analyst or admin), then back to the domain page."""
+        """Add or remove one tag on host names of a domain (analyst or admin; host = one name, or several joined by
+        "," for a posture row of names sharing an address), then back to the domain page."""
         data = await form(request)
         dom = (data.get("domain") or "").strip().lower()
-        host = (data.get("host") or "").strip().lower()
+        names = [h.strip() for h in (data.get("host") or "").lower().split(",") if h.strip()][:50]
         tag = (data.get("tag") or "").strip().lower()
         with conn() as c:
             s, u = current(request, c, data)
@@ -1148,14 +1153,16 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 raise HTTPException(403, "Tagging hosts needs the analyst role.")
             if not tags.valid(tag):
                 raise HTTPException(422, "Tag: 1-30 lower-case letters, digits or -.")
-            if not c.execute(f"""SELECT 1 FROM records r JOIN ({db.LATEST}) s ON s.id = r.scan_id
-                                 JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.host = ?""",
-                             (dom, host)).fetchone():
-                raise HTTPException(404, "No such host in that domain's latest scan")
-            if data.get("action") == "remove":
-                tags.remove(c, host, tag)
-            else:
-                tags.add(c, host, tag, u["name"])
+            for host in names or [""]:
+                if not c.execute(f"""SELECT 1 FROM records r JOIN ({db.LATEST}) s ON s.id = r.scan_id
+                                     JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.host = ?""",
+                                 (dom, host)).fetchone():
+                    raise HTTPException(404, "No such host in that domain's latest scan")
+            for host in names:
+                if data.get("action") == "remove":
+                    tags.remove(c, host, tag)
+                else:
+                    tags.add(c, host, tag, u["name"])
         if data.get("from") == "posture":   # the posture view's Host names table: back to that table
             return back(f"{base}/security/analysis?{urlencode({'domain': dom})}#posture-hosts")
         return back(f"/d/{dom}#records")

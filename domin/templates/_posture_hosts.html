@@ -8,8 +8,13 @@
     <button type="button" role="tab" class="tab" data-tab="cves">CVEs <small>{{ cves|length }}</small></button>
   </div>{% endif %}
   <div data-panel="hosts">
-  <h2>Host names <small>{{ host_list|length }} with an address in the latest inventory scan of {{ posture_domain }}
+  {% set quiet = host_list|selectattr('quiet')|list|length %}
+  <h2>Hosts <small>{{ host_list|length }} address rows ({{ host_list|map(attribute='names')|map('length')|sum }} host names) in the latest inventory scan of {{ posture_domain }}
     · {{ host_list|selectattr('last', 'equalto', '')|list|length }} never scanned · open a name for its findings</small></h2>
+  {% if quiet %}<div class="chip-row" data-chips="#posture-hosts" role="group" aria-label="Quick filters">
+    <button type="button" class="chip" data-attr="quiet" data-val="no" aria-pressed="true"
+      title="Hides {{ quiet }} scanned address(es) with no open port and no finding; press again to show them">Open ports or findings <small>{{ host_list|length - quiet }}</small></button>
+  </div>{% endif %}
   <div class="table-tools">
     {% if user.role in ('admin', 'analyst') %}
     <button class="btn primary" type="button" data-picked-open="#scan-picked" disabled>Scan now</button>{% endif %}
@@ -27,12 +32,13 @@
       <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
       <th data-sort="text">Last scan</th><th data-sort="text">Tags</th></tr></thead>
     {% set tagger = user.role in ('admin', 'analyst') %}
-    <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}">
-      <td class="tick"><input type="checkbox" data-pick value="{{ h.host }}" aria-label="Tick {{ h.host }}"></td>
+    <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}" data-quiet="{{ 'yes' if h.quiet else 'no' }}">
+      <td class="tick"><input type="checkbox" data-pick value="{{ h.pick }}" aria-label="Tick {{ h.host }}"></td>
       <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
-        aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}</td>
+        aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}
+        {% if h.names|length > 1 %}<small class="muted host-aka" title="{{ h.names[1:]|join(', ') }}">+ {{ h.names[1:]|join(', ') }}</small>{% endif %}</td>
       <td class="mono clip" title="{{ h.ips|join(', ') }}">{{ h.ips|join(', ') }}</td>
-      <td data-key="{{ h.rank }}">{% if h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
+      <td data-key="{{ h.rank }}">{% if h.worst == 'none' %}<span class="muted">—</span>{% elif h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
         {% if h.blocked %}<span class="pill blocked" title="{{ h.blocked }} of {{ h.results }} address(es): no scanned port answered">potentially blocked</span>{% endif %}
         {% if h.errors %}<span class="pill fix-no">{{ h.errors }} failed</span>{% endif %}</td>
       <td data-key="{{ h.cves if h.results else -1 }}">{% if h.results %}{{ h.cves }}{% for s, n in h.sev_n.items() %} <span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}{% endif %}</td>
@@ -42,12 +48,12 @@
       <td class="tags">{% for t in h.net_tags %}<span class="pill" title="Network tag (Settings)">{{ t }}</span> {% endfor %}
         {% for t in h.tags %}<form method="post" action="{{ base }}/tags" class="inline tag">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
-          <input type="hidden" name="host" value="{{ h.host }}"><input type="hidden" name="tag" value="{{ t }}">
+          <input type="hidden" name="host" value="{{ h.pick }}"><input type="hidden" name="tag" value="{{ t }}">
           <input type="hidden" name="from" value="posture"><span class="pill">{{ t }}</span>{% if tagger %}<button class="tag-x"
             name="action" value="remove" title="Remove tag {{ t }}" aria-label="Remove tag {{ t }}">×</button>{% endif %}</form>{% endfor %}
         {% if tagger %}<form method="post" action="{{ base }}/tags" class="inline tag">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
-          <input type="hidden" name="host" value="{{ h.host }}"><input type="hidden" name="from" value="posture">
+          <input type="hidden" name="host" value="{{ h.pick }}"><input type="hidden" name="from" value="posture">
           <input name="tag" class="tag-in" placeholder="tag" maxlength="30" aria-label="New tag for {{ h.host }}"></form>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
@@ -78,7 +84,7 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="domain" value="{{ posture_domain }}">
       <input type="hidden" name="hosts" value="" data-picked-names><input type="hidden" name="picked" value="1">
-      <p>Scan <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }} now?</p>
+      <p>Scan <b data-picked-n>0</b> ticked row(s) of {{ posture_domain }} now?</p>
       <label class="field">Profile
         <select name="profile">
           {% for pr in profiles %}<option value="{{ pr.name }}">{{ pr.name }}{% if pr.note %} · {{ pr.note }}{% endif %} · route {{ route_names.get(pr.route, 'a deleted route') }}</option>{% endfor %}
@@ -93,7 +99,7 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="domain" value="{{ posture_domain }}">
       <input type="hidden" name="hosts" value="" data-picked-names>
-      <p>Report on <b data-picked-n>0</b> ticked host name(s) of {{ posture_domain }}: executive summary, risk rating,
+      <p>Report on <b data-picked-n>0</b> ticked row(s) of {{ posture_domain }}: executive summary, risk rating,
         prioritised recommendations, top risks, per-host technical findings, scope and method.</p>
       <label class="field">Format
         <select name="format"><option value="pdf">PDF</option><option value="md">Markdown (.md)</option></select></label>

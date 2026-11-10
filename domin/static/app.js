@@ -122,6 +122,11 @@ $$("[data-chips] [data-attr]").forEach((b) => b.addEventListener("click", () => 
   b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
   applyFilters($(b.closest("[data-chips]").dataset.chips));
 }));
+// a chip pressed in the HTML (a default view, e.g. hosts with something open) filters from the start
+$$("[data-chips]").forEach((row) => {
+  const table = $(row.dataset.chips);
+  if (table && $("[aria-pressed='true']", row)) applyFilters(table);
+});
 $$("table[data-colfilters]").forEach((table) => {
   $$("thead th", table).forEach((th) => {
     if (th.hasAttribute("data-nofilter")) return;
@@ -339,7 +344,7 @@ $$("[data-domain-search]").forEach((box) => {
     if (!q) { now.outerHTML = own; return; }
     const host = $(".posture-pick select[name=host]")?.value || "";
     const url = `${box.dataset.domainSearch.replace(/domain-search$/, "kpis")}?domain=${encodeURIComponent(sel.value)}`
-      + `&host=${encodeURIComponent(host)}&q=${encodeURIComponent(q)}`;
+      + `&host=${encodeURIComponent(host)}&q=${encodeURIComponent(q)}&tab=${encodeURIComponent(now.dataset.tab || "")}`;
     try {
       const r = await fetch(url);
       if (r.ok && mine === kseq) $("[data-kpis]").outerHTML = await r.text();
@@ -916,8 +921,10 @@ function postureCharts() {
   const lines = (id, series, tr = d.trend || []) => {
     const el = canvas(id, tr, "The trend appears once scans have finished on two or more days.");
     if (!el) return;
-    const line = ([key, label, colour]) => ({ label, data: tr.map((r) => r[key]), borderColor: colour, backgroundColor: colour,
-                                             borderWidth: 2, tension: .2, pointRadius: tr.length > 40 ? 0 : 3, pointHoverRadius: 6 });
+    // a 4th item marks a context series (coverage): dashed and thin, so it reads as the baseline, not a risk line
+    const line = ([key, label, colour, ctx]) => ({ label, data: tr.map((r) => r[key]), borderColor: colour, backgroundColor: colour,
+                                                  borderWidth: ctx ? 1.5 : 2, borderDash: ctx ? [5, 4] : [], tension: .2,
+                                                  pointRadius: ctx || tr.length > 40 ? 0 : 3, pointHoverRadius: 6 });
     new Chart(el, {
       type: "line",
       data: { labels: tr.map((r) => r.day), datasets: series.map(line) },
@@ -925,8 +932,11 @@ function postureCharts() {
                  scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: ints } },
     });
   };
-  lines("pc-trend", SEV.slice(0, 4).map((s) => [s, s, sevColour(s)]));
-  lines("pc-surface", [["ports", "Open ports", css("--accent")], ["addresses", "Addresses scanned", css("--sev-unknown")]]);
+  // addresses scanned alongside: a CVE rise that follows it is new coverage, not new risk
+  lines("pc-trend", [...SEV.slice(0, 4).map((s) => [s, s, sevColour(s)]),
+                     ["addresses", "Addresses scanned", css("--sev-unknown"), true]]);
+  lines("pc-surface", [["ports", "Open ports", css("--accent")],
+                       ["addresses", "Addresses scanned", css("--sev-unknown"), true]]);
   if (d.footprint) {
     lines("pc-footprint", [["hosts", "Host names", css("--accent")], ["resolved", "Resolving", css("--sev-medium")],
                            ["ips", "Addresses", css("--sev-unknown")]], d.footprint);

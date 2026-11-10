@@ -410,7 +410,8 @@ def report(rows: list[dict], host: str = "") -> dict:
     by_sev = {s: sum(1 for v in table if v["severity"] == s) for s in SEVERITIES}
     return {
         "rows": rows, "vulns": table, "by_sev": by_sev,
-        "kpi": {"addresses": len(rows), "exposed": sum(1 for r in rows if r["worst"] in ("critical", "high")),
+        "kpi": {"addresses": len(rows), "scanned": sum(1 for r in rows if r["status"] == "done"),
+                "exposed": sum(1 for r in rows if r["worst"] in ("critical", "high")),
                 "cves": len(table), "critical": by_sev["critical"], "high": by_sev["high"],
                 "fixable": sum(1 for v in table if v["fixable"]),
                 "open_ports": sum(r["open_ports"] for r in rows if r["status"] == "done"),
@@ -535,8 +536,14 @@ def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: dat
         for p in sorted(svc.keys() & prev["svc"].keys()):
             if ver(svc[p]) != ver(prev["svc"][p]):
                 rows.append({**base, "kind": "version", "detail": f"{p}/tcp {ver(prev['svc'][p])} → {ver(svc[p])}"})
-        for kind, got in (("new-cve", cves.keys() - prev["cves"].keys()),
-                          ("gone-cve", prev["cves"].keys() - cves.keys())):
+        # a CVE gone because its service changed (version, port closed) is fixed on the host; one gone while the
+        # service stayed the same went with a CVE-data or matching change (or a port this scan didn't cover)
+        moved = {p for p in prev["svc"] if (ver(svc[p]) != ver(prev["svc"][p]) if p in svc else p in both)}
+        gone = prev["cves"].keys() - cves.keys()
+        fixed = {c for c in gone if any(p in moved for p, s in prev["svc"].items()
+                                        if any(f["cve"] == c for f in s.get("findings") or []))}
+        for kind, got in (("new-cve", cves.keys() - prev["cves"].keys()), ("fixed-cve", fixed),
+                          ("gone-cve", gone - fixed)):
             if got:
                 sev = cves if kind == "new-cve" else prev["cves"]
                 worst = sorted(got, key=lambda c: (SEVERITIES.index(sev[c]) if sev[c] in SEVERITIES else 9, c))
@@ -545,7 +552,7 @@ def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: dat
                              "count": len(got), "severity": sev[worst[0]]})
     recent = [x for x in rows if x["at"] >= since]
     kpi = {k: sum(x.get("count", 1) for x in recent if x["kind"] == k)
-           for k in ("opened", "closed", "version", "new-cve", "gone-cve")}
+           for k in ("opened", "closed", "version", "new-cve", "fixed-cve", "gone-cve")}
     return {"kpi": kpi, "rows": rows[::-1][:CHANGE_ROWS], "days": CHANGE_DAYS, "compared": len(twice),
             "changed": len({(x["domain"], x["ip"]) for x in recent})}
 
@@ -667,6 +674,31 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
                     "blocked": sum(1 for r in res if r.get("blocked")), "errors": sum(1 for r in res if r.get("error")),
                     "results": len(res), "text": " ".join(t for t in text if t).lower()})
     return out
+
+
+def by_address(entries: list[dict]) -> list[dict]:
+    """with_results entries merged per address set: host names sharing the same addresses are one machine, so one
+    row (its findings counted once). Each row keeps the first entry's results and adds `names` (all host names),
+    `pick` (the names joined by ",", for Scan now / Report), the union of tags, the newest last scan and `quiet`
+    (scanned, nothing open, nothing found)."""
+    out: dict[tuple, dict] = {}
+    for h in entries:
+        key = tuple(sorted(h["ips"]))
+        e = out.get(key)
+        if not e:
+            out[key] = {**h, "names": [h["host"]], "tags": list(h.get("tags") or [])}
+            continue
+        e["names"].append(h["host"])
+        e["tags"] += [t for t in h.get("tags") or [] if t not in e["tags"]]
+        e["last"] = max(e["last"], h["last"])
+        e["pending"] = e["pending"] or h["pending"]
+        e["skip"] = "" if "" in (e["skip"], h["skip"]) else e["skip"]
+        e["text"] += " " + h["host"]
+    for e in out.values():
+        e["pick"] = ",".join(e["names"])
+        e["quiet"] = bool(e["results"] and not e["cves"] and not e["open_ports"] and not e["blocked"]
+                          and not e["errors"])
+    return list(out.values())
 
 
 def hosts(conn: sqlite3.Connection, domain: str) -> list[str]:
