@@ -8,6 +8,7 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   linked to NVD/OSV, severity, CVSS, product, fixed in, address count, where). Quick chips for severity and fix
   published / no fix yet, a filter per column and a Filter box; the heading counts the rows shown. Exploit flags,
   EPSS and the Act/Attend/Track tier follow with the exploit data. Rollback: revert this commit.
+- Product and address names wrap instead of pushing the table wider than the page. Rollback: revert this change.
 
 ## 2026-11-10: Scans tab shows scan activity live
 

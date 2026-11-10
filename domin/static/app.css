@@ -323,8 +323,8 @@ dialog.pp p.note { margin: 0 0 .8rem; }
 .chip-row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
 .chip-row .chip { border-color: var(--border); color: var(--muted); }
 .chip-row .sev-chip { text-transform: capitalize; }
-.cve-where small { display: block; max-width: 22rem; }
-#overview-cves td:nth-child(4) { max-width: 26rem; }
+.cve-where small { display: block; max-width: 16rem; white-space: normal; }
+#overview-cves td:nth-child(4) { max-width: 18rem; white-space: normal; }
 .chip-row .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .chip-row .chip small { opacity: .8; margin-left: .2rem; }
 .chip-sep { width: 1px; height: 1.2rem; background: var(--border); margin: 0 .25rem; }
