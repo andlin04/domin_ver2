@@ -61,6 +61,31 @@ database and certificate). Options: see the top of [deploy/install.sh](deploy/in
 `/etc/domin.env`; `bash deploy/uninstall.sh --purge` also deletes the data and the `domin` user. Reinstall any time
 with `install.sh`.
 
+## Install on-prem (internal network)
+
+The vulnerability and posture platform for your own networks: no public name, no Let's Encrypt. A vanilla
+Debian 13 or Ubuntu 24.04 host (VM or bare metal, 2 CPU / 2 GB / 16 GB), as root; the installer installs every
+dependency (nginx, Python venv with pinned packages, nmap, tor, amass, ...).
+
+```bash
+bash deploy/package.sh                        # on a build machine: dist/domin-VERSION-COMMIT.tar.gz + .sha256
+# on the target (copy both files there first):
+sha256sum -c domin-*.tar.gz.sha256 && tar -xzf domin-*.tar.gz && cd domin-*/
+bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0.0.0/8 \
+  --internal-zones corp.example --internal-dns 10.0.0.53 --admin-user you
+```
+
+- **Web UI:** `https://<name>/` on 443 (80 redirects), only from `--admin-sources` (default: the private ranges;
+  `any` = no network limit). `--admin-user` prints a one-time link to set the first admin's password (24 h).
+- **TLS:** self-signed (`/etc/domin/tls.crt`, 825 days) until you replace it: sign `/etc/domin/tls.csr` with your CA,
+  write the result to `/etc/domin/tls.crt`, `systemctl reload nginx`. The key never leaves the host.
+- **What scans may reach:** public addresses, plus `--scan-nets` (private networks; this host's own addresses stay
+  refused) and the `--internal-dns` servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
+- **Behind an HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first
+  (with sudo: `sudo -E`); apt, pip and the downloads use it and it is kept for the app.
+- **Update:** unpack the new package, `bash deploy/install.sh` (options are kept in `/etc/domin.env`; database,
+  users and certificate stay). **Remove:** `bash deploy/uninstall.sh` (data kept) or `--purge`.
+
 ## Signed-in area
 
 Everything under `/admin`, HTTPS only. `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or CIDRs;

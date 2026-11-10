@@ -23,14 +23,45 @@
 #                       Pulls); for SSL mode Full (strict). Port 80 keeps serving; close it in the firewall once
 #                       Cloudflare connects on 443.
 #
+# On-prem (internal network, no public name needed), from an unpacked package or a clone:
+#
+#   sudo bash deploy/install.sh --internal [--domain scanner.example.lan] --scan-nets 10.0.0.0/8 --admin-user you
+#
+#   --internal          HTTPS on 443 with this host's own certificate (/etc/domin/tls.crt: self-signed until you
+#                       replace it with one your CA signed from /etc/domin/tls.csr), port 80 redirects to it; no
+#                       Let's Encrypt or Cloudflare. --domain defaults to `hostname -f`.
+#   --admin-sources C   networks that may open the site at all (comma-separated CIDRs; default the private ranges;
+#                       "any" = no limit)
+#   --scan-nets CIDRS   private networks the scans may reach (the scan sandbox refuses every non-public address
+#                       otherwise); this host's own addresses stay refused
+#   --internal-zones Z  DNS zones scanned as internal (comma-separated, e.g. corp.example,home.arpa)
+#   --internal-dns IPS  DNS servers for those zones
+#   --raw / --no-raw    give the scan worker raw sockets for nmap SYN scans (CAP_NET_RAW/CAP_NET_ADMIN) or take them
+#                       away; default off, kept on later runs
+#   --admin-user NAME   create the first admin account and print its one-time set-password link (24 h)
+#
+# Every option above is kept in /etc/domin.env: later runs need no options (`bash deploy/install.sh`).
+# Behind an HTTP proxy: export https_proxy/http_proxy (and no_proxy) first; apt, pip and the downloads use them and
+# they are written to /etc/domin.env for the app.
+#
 # Re-running updates the code and keeps the database, /etc/domin.env and the TLS certificate.
 # AUTO_UPDATES=off: no automatic security updates (default: unattended-upgrades, unless apt has its own setup).
+# Supported: Debian 13, Ubuntu 24.04 or newer (Python 3.12+).
 set -euo pipefail
 
 DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN= SSH_FROM= ADMIN_IP= DENY=
+INTERNAL= SOURCES= SCAN_NETS= ZONES= ZONE_DNS= RAW= ADMIN_USER=
 CIDRS='^[0-9A-Fa-f:.,/]*$'
 while [ $# -gt 0 ]; do
   case "$1" in
+    --internal) INTERNAL=1 ;;
+    --admin-sources) SOURCES=$2; shift ;;
+    --scan-nets) SCAN_NETS=$2; shift ;;
+    --internal-zones) ZONES=$2; shift ;;
+    --internal-dns) ZONE_DNS=$2; shift ;;
+    --raw) RAW=1 ;;
+    --no-raw) RAW=0 ;;
+    --admin-user) ADMIN_USER=$2; shift ;;
     --ssh-from) SSH_FROM=$2; shift ;;
     --admin-ip) ADMIN_IP=$2; shift ;;
     --deny) DENY=$2; shift ;;
@@ -48,6 +79,23 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
+# Install mode: kept in /etc/domin.env, so a later run without options stays on-prem
+envget() { [ -r /etc/domin.env ] && sed -n "s/^$1=//p" /etc/domin.env | tail -n1 || true; }
+[ -n "$INTERNAL" ] || [ -n "$DOMAIN" ] || [ "$(envget DOMIN_INSTALL_MODE)" != internal ] || INTERNAL=1
+if [ "$INTERNAL" = 1 ]; then
+  [ -z "$EMAIL$ORIGIN" ] && [ "$CLOUDFLARE" = 0 ] || { echo "--internal: no --email, --cloudflare or --origin-cert"; exit 2; }
+  DOMAIN=${DOMAIN:-$(envget DOMIN_HOSTNAME)}
+  DOMAIN=${DOMAIN:-$(hostname -f 2>/dev/null || hostname)}
+  SOURCES=${SOURCES:-$(envget DOMIN_ADMIN_SOURCES)}
+  SOURCES=${SOURCES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10}
+  [ "$SOURCES" = any ] || [[ "$SOURCES" =~ $CIDRS ]] || { echo "bad --admin-sources"; exit 2; }
+else
+  [ -z "$SOURCES$SCAN_NETS$ZONES$ZONE_DNS$RAW$ADMIN_USER" ] || \
+    { echo "--admin-sources, --scan-nets, --internal-*, --raw, --admin-user need --internal"; exit 2; }
+fi
+[[ "$ZONES" =~ ^[A-Za-z0-9.,-]*$ ]] || { echo "bad --internal-zones"; exit 2; }
+[[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]*$ ]] || { echo "bad --admin-user"; exit 2; }
+for v in "$SCAN_NETS" "$ZONE_DNS"; do [[ "$v" =~ $CIDRS ]] || { echo "bad address list: $v"; exit 2; }; done
 [ -n "$DOMAIN" ] || { echo "--domain is required"; exit 2; }
 [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "bad --domain"; exit 2; }
 [[ "$ALIAS" =~ ^[A-Za-z0-9.-]*$ ]] || { echo "bad --alias"; exit 2; }
@@ -60,12 +108,22 @@ fi
 SRC=$(cd "$(dirname "$0")/.." && pwd)
 APP=/opt/domin DATA=/var/lib/domin
 
+# HTTP proxy: from the environment (either case), else the one an earlier run kept in /etc/domin.env
+http_proxy=${http_proxy:-${HTTP_PROXY:-$(envget HTTP_PROXY)}}
+https_proxy=${https_proxy:-${HTTPS_PROXY:-$(envget HTTPS_PROXY)}}
+no_proxy=${no_proxy:-${NO_PROXY:-$(envget NO_PROXY)}}
+[ -z "$http_proxy$https_proxy" ] || no_proxy=${no_proxy:-127.0.0.1,localhost}
+export http_proxy https_proxy no_proxy
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # proxychains4: scan routes; wireguard-tools: the Mullvad tunnel (deploy/mullvad-tunnel.sh); tor: the Tor route
 # (its default config: SOCKS5 on 127.0.0.1:9050; a host with proxy-only egress needs HTTPSProxy in /etc/tor/torrc)
 apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 wireguard-tools tor >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
+# nmap: service fingerprints for the posture scans; openssl: the on-prem TLS certificate
+apt-get install -y -q nmap openssl >/dev/null
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))' || \
+  { echo "domin needs Python 3.12 or newer (Debian 13, Ubuntu 24.04); this host has $(python3 -V)"; exit 1; }
 # Automatic security updates (unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host already
 # has an apt periodic setup of its own (kept as it is).
 if [ "${AUTO_UPDATES:-on}" != off ] && [ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
@@ -105,6 +163,22 @@ setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines 
 if [ -n "$DENY" ]; then setenv DOMIN_DENY_IPS "$DENY"
 else DENY=$(sed -n 's/^DOMIN_DENY_IPS=//p' /etc/domin.env); fi
 [[ "$DENY" =~ $CIDRS ]] || { echo "bad DOMIN_DENY_IPS in /etc/domin.env"; exit 2; }
+# the proxy for the app's own lookups (crt.sh, RDAP, CVE feeds); empty values stay out of the file
+for k in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+  lk=${k,,}
+  [ -z "${!lk:-}" ] || setenv "$k" "${!lk}"
+done
+if [ "$INTERNAL" = 1 ]; then
+  setenv DOMIN_INSTALL_MODE internal
+  setenv DOMIN_HOSTNAME "$DOMAIN"
+  setenv DOMIN_ADMIN_SOURCES "$SOURCES"
+  [ -z "$SCAN_NETS" ] || setenv DOMIN_SCAN_NETS "$SCAN_NETS"
+  [ -z "$ZONES" ] || setenv DOMIN_INTERNAL_ZONES "$ZONES"
+  [ -z "$ZONE_DNS" ] || setenv DOMIN_INTERNAL_DNS "$ZONE_DNS"
+  [ -z "$RAW" ] || setenv DOMIN_RAW_SCANS "$RAW"
+  SCAN_NETS=$(envget DOMIN_SCAN_NETS) ZONE_DNS=$(envget DOMIN_INTERNAL_DNS) RAW=$(envget DOMIN_RAW_SCANS)
+  for v in "$SCAN_NETS" "$ZONE_DNS"; do [[ "$v" =~ $CIDRS ]] || { echo "bad address list in /etc/domin.env"; exit 2; }; done
+fi
 
 if [ -n "$HISTORY" ]; then
   if [ -f "$DATA/domin.db" ] && [ "$REPLACE" = 0 ]; then
@@ -151,6 +225,42 @@ NON_PUBLIC="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16
 # Also this server's own public addresses (a scan must not reach its own SSH or admin page) and --deny.
 OWN=$(ip -o addr show scope global | awk '{sub("/.*", "", $4); print $4}' | tr '\n' ' ')
 DENY_MORE=$(echo $OWN ${DENY//,/ })   # an empty IPAddressDeny= line would clear the list above: only set if not empty
+# Exceptions (drop-ins, rewritten each run): the HTTP proxy for both services; on-prem the worker also gets
+# --scan-nets and the internal DNS servers. IPAddressAllow wins over IPAddressDeny whatever the prefix lengths, so
+# this host's own addresses are cut out of the scan networks rather than relying on the deny list.
+PROXY_IPS=$(for u in "$http_proxy" "$https_proxy"; do
+  [ -z "$u" ] || getent ahosts "$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlsplit(sys.argv[1]).hostname or "")' "$u")" || true
+done | awk '{print $1}' | sort -u | tr '\n' ' ')
+SCAN_ALLOW=
+if [ "$INTERNAL" = 1 ] && [ -n "$SCAN_NETS$ZONE_DNS" ]; then
+  SCAN_ALLOW=$(python3 - "$OWN" ${SCAN_NETS//,/ } ${ZONE_DNS//,/ } <<'PY'
+import ipaddress
+import sys
+
+own = [ipaddress.ip_network(a) for a in sys.argv[1].split()]
+out: set[str] = set()
+for net in sys.argv[2:]:
+    parts = [ipaddress.ip_network(net, strict=False)]
+    for host in own:
+        parts = [q for p in parts
+                 for q in (p.address_exclude(host) if p.version == host.version and host.subnet_of(p) else [p])]
+    out.update(str(p) for p in parts)
+print(" ".join(sorted(out)))
+PY
+)
+fi
+dropin() {  # unit, file, content ("" removes the file)
+  if [ -n "$3" ]; then mkdir -p "/etc/systemd/system/$1.service.d"; printf '%s\n' "$3" > "/etc/systemd/system/$1.service.d/$2"
+  else rm -f "/etc/systemd/system/$1.service.d/$2"; fi
+}
+allow() { [ -z "$(echo $*)" ] || printf '%s\n' "# install.sh: written on each run" '[Service]' "IPAddressAllow=$(echo $*)"; }
+dropin domin 10-install.conf "$(allow $PROXY_IPS)"
+dropin domin-worker 10-install.conf "$(allow $PROXY_IPS $SCAN_ALLOW)"
+# Raw sockets for nmap SYN scans (on-prem --raw); a public install leaves the file as it is
+if [ "$INTERNAL" = 1 ]; then
+  if [ "$RAW" = 1 ]; then dropin domin-worker 30-raw.conf "$(cat "$APP/app/deploy/worker-raw.conf")"
+  else dropin domin-worker 30-raw.conf ""; fi
+fi
 
 unit() {  # name, description, command, memory limit, task limit, extra [Service] line
   cat > "/etc/systemd/system/$1.service" <<EOF
@@ -209,6 +319,55 @@ EOF
 unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log" 2G 200 "IPAddressAllow=localhost"  # nginx connects over loopback
 unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker" 16G 2000
 
+if [ "$INTERNAL" = 1 ]; then
+  # On-prem TLS (as wg-admin): the key never leaves this host and only nginx's master process (root) reads it.
+  # Self-signed (825 days) until /etc/domin/tls.crt is replaced with a certificate your CA signed from tls.csr
+  # (left while the certificate is self-signed or has under 30 days left), then reload nginx.
+  [ -d /etc/domin ] || install -d -m 755 /etc/domin
+  [ -f /etc/domin/tls.key ] || (umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+    -out /etc/domin/tls.key 2>/dev/null)
+  chown root:root /etc/domin/tls.key; chmod 600 /etc/domin/tls.key
+  SAN="DNS:$DOMAIN${ALIAS:+,DNS:$ALIAS}"
+  selfsigned() { [ "$(openssl x509 -noout -issuer -nameopt compat -in "$1" | sed 's/^issuer=//')" = \
+                   "$(openssl x509 -noout -subject -nameopt compat -in "$1" | sed 's/^subject=//')" ]; }
+  expiring() { ! openssl x509 -checkend $((30 * 86400)) -noout -in "$1" >/dev/null 2>&1; }
+  if [ ! -f /etc/domin/tls.crt ] || { selfsigned /etc/domin/tls.crt && expiring /etc/domin/tls.crt; }; then
+    openssl req -x509 -key /etc/domin/tls.key -subj "/CN=$DOMAIN" -days 825 -addext "subjectAltName=$SAN" \
+      -out /etc/domin/tls.crt 2>/dev/null
+  fi
+  if selfsigned /etc/domin/tls.crt || expiring /etc/domin/tls.crt; then
+    openssl req -new -key /etc/domin/tls.key -subj "/CN=$DOMAIN" -addext "subjectAltName=$SAN" \
+      -out /etc/domin/tls.csr 2>/dev/null
+  fi
+  # Who may open the site at all (--admin-sources); "any" = no network limit, the sign-in alone governs /admin
+  { echo "# install.sh --admin-sources (DOMIN_ADMIN_SOURCES in /etc/domin.env)"
+    if [ "$SOURCES" != any ]; then for n in ${SOURCES//,/ }; do echo "allow $n;"; done; echo "deny all;"; fi
+  } > /etc/nginx/domin-sources.conf
+  cat > /etc/nginx/sites-available/domin <<EOF
+limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;
+limit_req_zone \$binary_remote_addr zone=domin_pages:10m rate=10r/s;
+limit_conn_zone \$binary_remote_addr zone=domin_conn:10m;
+server {   # plain HTTP: only a redirect to HTTPS (the sign-in cookies are Secure)
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    include /etc/nginx/domin-sources.conf;
+    location / { return 301 https://$DOMAIN\$request_uri; }
+}
+server {   # any name or address on this host: on-prem users often type the IP
+    listen 443 ssl http2 default_server;   # 'http2 on' needs nginx 1.25; Ubuntu 24.04 has 1.24
+    listen [::]:443 ssl http2 default_server;
+    server_name $DOMAIN $ALIAS;
+    ssl_certificate /etc/domin/tls.crt;
+    ssl_certificate_key /etc/domin/tls.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    include /etc/nginx/domin-sources.conf;
+    include /etc/nginx/domin-site.conf;
+}
+EOF
+else
+rm -f /etc/nginx/domin-sources.conf
 cat > /etc/nginx/sites-available/domin <<EOF
 limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;
 limit_req_zone \$binary_remote_addr zone=domin_pages:10m rate=10r/s;
@@ -251,6 +410,7 @@ server {   # Cloudflare -> origin, SSL mode Full (strict); only Cloudflare's cli
 }
 EOF
 fi
+fi   # public mode
 cat > /etc/nginx/domin-site.conf <<'EOF'
 server_tokens off;
 client_max_body_size 4k;   # the only request body is a domain name in JSON
@@ -331,7 +491,22 @@ if [ "$FIREWALL" = 1 ]; then
 fi
 
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
+CLI="cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin"
+if [ "$INTERNAL" = 1 ]; then
+  echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
+    "HTTPS $(curl -sk -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/")," \
+    "TLS $(selfsigned /etc/domin/tls.crt && echo "self-signed (CA request: /etc/domin/tls.csr)" || echo "CA-signed")"
+  if [ -n "$ADMIN_USER" ]; then
+    if ( eval "$CLI user-list" ) | cut -f1 | grep -qx "$ADMIN_USER"; then
+      echo "admin user $ADMIN_USER exists (new password: $CLI user-passwd $ADMIN_USER)"
+    else
+      ( eval "$CLI user-add $ADMIN_USER --role admin" ) | sed "s|at: /admin|at: https://$DOMAIN/admin|"
+    fi
+  fi
+  echo "site: https://$DOMAIN/ (sign-in /admin) for $SOURCES; users: $CLI user-add NAME --role admin|analyst|viewer"
+else
 echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
   "HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/)"
 echo "admin page: https://$DOMAIN/admin for DOMIN_ADMIN_IPS in /etc/domin.env (HTTPS only; set its password:" \
-  "cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin admin-password)"
+  "$CLI admin-password)"
+fi

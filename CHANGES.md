@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: On-prem install package
+
+- `deploy/install.sh --internal`: installs on a vanilla Debian 13 / Ubuntu 24.04 host with every dependency, HTTPS
+  with its own certificate (self-signed + CSR), web UI only from `--admin-sources`, scan networks (`--scan-nets`,
+  own addresses refused), internal zones and DNS, optional raw scans, first admin (`--admin-user`), HTTP proxy
+  support; options kept in `/etc/domin.env`. nmap is installed in both modes. Python 3.12+ is checked.
+- `deploy/package.sh` builds the tarball + sha256; `uninstall.sh` also removes the public-sync units and, with
+  `--purge`, `/etc/domin`.
+- Public mode writes the same units and nginx files as before. Rollback: revert this change and re-run install.sh.
+
 ## 2026-11-10: CVEs over time as stacked bars
 
 - One bar per day, stacked by severity (critical on top); addresses scanned stays a dashed line. Rollback: revert

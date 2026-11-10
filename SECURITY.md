@@ -52,3 +52,13 @@ a public issue for it.
 - `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list.
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.
+
+## On-prem install (`--internal`)
+- HTTPS only (port 80 just redirects); TLS 1.2/1.3, EC P-256 key in `/etc/domin/tls.key` (root, 600), read only by
+  nginx's master process, never by the app. Self-signed until you install a CA-signed certificate from the CSR.
+- nginx answers only `--admin-sources` (default the private ranges); the sign-in, roles and optional two-factor
+  govern `/admin` on top.
+- The scan sandbox still refuses every non-public address except `--scan-nets` and `--internal-dns`, written as a
+  systemd drop-in; this host's own addresses are cut out of those networks (systemd lets an allow entry win over
+  any deny entry). The web service gets no internal networks, only the HTTP proxy, if one is set.
+- `--raw` gives the scan worker CAP_NET_RAW/CAP_NET_ADMIN for nmap SYN scans; off by default, `--no-raw` removes it.
