@@ -88,6 +88,12 @@
     <div class="chart h200"><canvas id="churn"></canvas></div>
   </div>
   {% endif %}
+  <div class="card wide">
+    <h2>Where the addresses are <small>distinct addresses per country · darker = more · wheel or pinch to zoom, drag
+      to move · click a country to filter the records</small></h2>
+    <div class="map-wrap"><canvas id="inv-map" role="img"
+      aria-label="World map with this scan's addresses per country"></canvas><div class="map-tip" hidden></div></div>
+  </div>
   <div class="card">
     <h2>Countries <small>distinct addresses</small></h2>
     <div class="chart h260"><canvas id="countries"></canvas></div>

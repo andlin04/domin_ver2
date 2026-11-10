@@ -409,6 +409,19 @@ def drill_columns(conn: sqlite3.Connection, history: bool = False) -> dict:
     return {"rows": len(columns[0]), "columns": out, "eu": EU_NAMES}
 
 
+def country_map(rows: list[dict], hosts: int = 12) -> list[dict]:
+    """For the world map: every country with distinct addresses, and up to `hosts` of its host names (`more` = the
+    rest). Rows without an address or a country are left out."""
+    groups: dict[str, tuple[set[str], set[str]]] = {}
+    for r in rows:
+        if r["ip"] and r["country"]:
+            ips, names = groups.setdefault(r["country"], (set(), set()))
+            ips.add(r["ip"])
+            names.add(r["host"])
+    return [{"label": k, "ips": len(ips), "hosts": sorted(names)[:hosts], "more": max(0, len(names) - hosts)}
+            for k, (ips, names) in sorted(groups.items(), key=lambda kv: (-len(kv[1][0]), kv[0]))]
+
+
 def breakdown(rows: list[dict], field: str, limit: int = 10) -> list[dict]:
     """Distinct addresses per value of field; the tail is folded into 'Other'."""
     groups: dict[str, set[str]] = {}

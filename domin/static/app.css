@@ -350,7 +350,6 @@ dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inheri
 /* chart severity scale, checked for colour-vision separation on both surfaces; legends and axis labels name each one */
 :root { --sev-critical: #a83a9e; --sev-high: #e04a2f; --sev-medium: #c99a00; --sev-low: #3987e5; --sev-unknown: #7d8590; }
 .chart-empty { margin: 0; padding: 2rem .5rem; text-align: center; }
-.posture-map { margin-bottom: 1rem; }
 .map-wrap { position: relative; overflow: hidden; border-radius: 6px; }
 .map-wrap canvas { display: block; cursor: grab; touch-action: none; }
 .map-tip {

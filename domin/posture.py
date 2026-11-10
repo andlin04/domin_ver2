@@ -453,29 +453,6 @@ def domain_summary(rows: list[dict]) -> list[dict]:
                                                -d["sev_n"].get("high", 0), -d["cves"], d["domain"]))
 
 
-def country_summary(rows: list[dict]) -> list[dict]:
-    """The posture map: report()'s rows per country ("" = no location, e.g. private addresses), each with addresses,
-    exposed (high+), worst severity, distinct CVEs per severity, open ports and up to 5 host names; most addresses
-    first."""
-    rank = {s: i for i, s in enumerate((*SEVERITIES, "none", ""))}
-    out: dict[str, dict] = {}
-    for r in rows:
-        c = out.setdefault(r.get("country") or "", {"country": r.get("country") or "", "addresses": 0, "exposed": 0,
-                                                    "open_ports": 0, "worst": "", "cve": {}, "hosts": []})
-        c["addresses"] += 1
-        c["exposed"] += r["worst"] in ("critical", "high")
-        c["open_ports"] += r["open_ports"] if r["status"] == "done" else 0
-        c["cve"].update({v["cve"]: v["severity"] for v in r["vulns"]})
-        if rank[r["worst"]] < rank[c["worst"]]:
-            c["worst"] = r["worst"]
-        if len(c["hosts"]) < 5:
-            c["hosts"] += [h for h in (r.get("hosts") or "").split(",")[:1] if h]
-    for c in out.values():
-        sevs = list(c.pop("cve").values())
-        c["sev_n"] = {s: n for s in SEVERITIES if (n := sevs.count(s))}
-    return sorted(out.values(), key=lambda c: (-c["addresses"], c["country"]))
-
-
 TREND_DAYS = 90
 
 

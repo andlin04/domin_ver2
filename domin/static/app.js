@@ -859,17 +859,18 @@ function postureCharts() {
   }
 }
 
-// posture map, country level and offline (static/world.json: Natural Earth 110m, public domain): one bubble per
-// country with scanned addresses (size = addresses, colour = worst severity, C/H counts beside it). It opens fitted to
-// those countries; the wheel zooms at the pointer, drag moves, hover shows a summary, a click adds the country to the
-// page's Filter box (addToFilter). Colours are read at draw time, so a theme change applies on the next draw.
-async function postureMap() {
-  const cv = document.getElementById("pc-map");
-  const data = document.getElementById("posture-data");
-  if (!cv || !data) return;
+// inventory map (overview and domain pages), country level and offline (static/world.json: Natural Earth 110m, public
+// domain): each country with addresses is filled on a sequential scale (log of its address count, from a pale to the
+// full accent colour) with the count on it; a legend shows the range. It opens fitted to those countries; the wheel
+// zooms at the pointer, drag moves, hover shows a summary. A click filters the domain page's records table, or opens
+// All records for that country on the overview. Colours are read at draw time, so a theme change applies on the
+// next draw.
+async function inventoryMap() {
+  const cv = document.getElementById("inv-map");
+  if (!cv) return;
   const wrap = cv.parentElement;
   const tip = $(".map-tip", wrap);
-  const hits = (JSON.parse(data.textContent).countries || []).filter((c) => c.country);
+  const hits = (pageData().map || []).filter((c) => c.label && c.ips).map((c) => ({ ...c, country: c.label }));
   let world;
   try {
     world = await (await fetch(new URL("world.json", $('link[rel="stylesheet"][href*="app.css"]').href))).json();
@@ -903,8 +904,18 @@ async function postureMap() {
     k = Math.min(W / (x1 - x0), H / (y1 - y0));
     tx = W / 2 - cx * k; ty = H / 2 - cy * k;
   };
-  const radius = (p) => Math.min(42, 6 + 4 * Math.sqrt(p.addresses));
-  const colour = (p) => (["critical", "high", "medium", "low"].includes(p.worst) ? css(`--sev-${p.worst}`) : css("--accent"));
+  const max = Math.max(1, ...pins.map((p) => p.ips));
+  const share = (n) => Math.log1p(n) / Math.log1p(max);   // log scale: one big country doesn't wash out the rest
+  const rgb = (c) => {   // any CSS colour as [r, g, b], resolved by the canvas itself
+    ctx.fillStyle = "#000"; ctx.fillStyle = c;
+    const h = ctx.fillStyle;
+    return h.startsWith("#") ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : (h.match(/[\d.]+/g) || [0, 0, 0]).slice(0, 3).map(Number);
+  };
+  const shade = (t) => {   // t 0..1 -> 32% .. 100% of the accent over the empty-land colour
+    const a = rgb(css("--accent")), b = rgb(css("--surface-2")), f = .32 + .68 * t;
+    return `rgb(${a.map((v, i) => Math.round(b[i] + (v - b[i]) * f)).join(",")})`;
+  };
+  const radius = () => 10;   // hit area around a country's label, for small countries
   const path = (w) => {
     const p = new Path2D();
     w.m.forEach((ring) => { p.moveTo(ring[0] * k + tx, ring[1] * k + ty); for (let i = 2; i < ring.length; i += 2) p.lineTo(ring[i] * k + tx, ring[i + 1] * k + ty); p.closePath(); });
@@ -913,26 +924,35 @@ async function postureMap() {
   const draw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    const lit = new Set(pins.map((p) => p.w));
+    const fills = new Map(pins.map((p) => [p.w, shade(share(p.ips))]));
+    const empty = css("--surface-2"), edge = css("--border");
     ctx.lineWidth = .7;
     world.forEach((w) => {
       w.path = path(w);
-      ctx.fillStyle = css(lit.has(w) ? "--border" : "--surface-2");
-      ctx.strokeStyle = css("--border");
+      ctx.fillStyle = fills.get(w) || empty;
+      ctx.strokeStyle = edge;
       ctx.fill(w.path); ctx.stroke(w.path);
     });
     ctx.font = `600 11px ${css("--font") || "sans-serif"}`;
-    ctx.textBaseline = "middle";
-    pins.forEach((p) => {
-      const x = p.w.c[0] * k + tx, y = p.w.c[1] * k + ty, r = radius(p);
-      ctx.globalAlpha = .55; ctx.fillStyle = colour(p);
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = colour(p); ctx.stroke();
-      const counts = [["C", "critical"], ["H", "high"]].filter(([, s]) => p.sev_n[s]).map(([l, s]) => `${l}${p.sev_n[s]}`).join(" ");
-      ctx.fillStyle = css("--text");
-      ctx.fillText(`${p.addresses}${counts ? " · " + counts : ""}`, x + r + 4, y);
+    ctx.textBaseline = "middle"; ctx.textAlign = "center";
+    pins.forEach((p) => {   // the count on the country; a small country gets a dot so it can still be found
+      const x = p.w.c[0] * k + tx, y = p.w.c[1] * k + ty;
+      const small = (p.w.box[2] - p.w.box[0]) * k < 26;
+      if (small) { ctx.fillStyle = fills.get(p.w); ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = edge; ctx.stroke(); }
+      ctx.lineWidth = 3; ctx.strokeStyle = css("--surface"); ctx.fillStyle = css("--text");
+      const ty2 = small ? y - 11 : y;
+      ctx.strokeText(String(p.ips), x, ty2); ctx.fillText(String(p.ips), x, ty2);
     });
-    if (lost) { ctx.fillStyle = css("--muted"); ctx.fillText(`${lost} country name(s) not on the map`, 8, H - 10); }
+    ctx.lineWidth = .7;
+    // legend: the scale's two ends
+    const lw = 120, lx = 10, ly = H - 22;
+    const grad = ctx.createLinearGradient(lx, 0, lx + lw, 0);
+    [0, .5, 1].forEach((t) => grad.addColorStop(t, shade(t)));
+    ctx.fillStyle = grad; ctx.fillRect(lx, ly, lw, 8); ctx.strokeStyle = edge; ctx.strokeRect(lx, ly, lw, 8);
+    ctx.fillStyle = css("--muted"); ctx.textAlign = "left";
+    ctx.fillText("1", lx, ly - 7); ctx.textAlign = "right"; ctx.fillText(`${max} addresses`, lx + lw, ly - 7);
+    ctx.textAlign = "left";
+    if (lost) ctx.fillText(`${lost} country name(s) not on the map`, lx + lw + 14, ly + 4);
   };
   const size = () => {
     W = wrap.clientWidth; H = Math.max(260, Math.min(460, Math.round(W * .5)));
@@ -963,16 +983,23 @@ async function postureMap() {
     cv.style.cursor = p ? "pointer" : "grab";
     tip.hidden = !p;
     if (!p) return;
-    const sev = ["critical", "high", "medium", "low"].filter((s) => p.sev_n[s]).map((s) => `${p.sev_n[s]} ${s}`).join(", ");
-    tip.innerHTML = `<b>${esc(p.country)}</b><br>${p.addresses} address(es), ${p.exposed} with high+<br>`
-      + `${esc(sev || "no CVEs")} · ${p.open_ports} open port(s)<br><span class="muted">${esc(p.hosts.join(", "))}</span>`;
+    const names = p.hosts ? `<br><span class="muted">${esc(p.hosts.join(", "))}${p.more ? ` +${p.more} more` : ""}</span>` : "";
+    tip.innerHTML = `<b>${esc(p.country)}</b><br>${p.ips} address(es)${p.domains ? `, ${p.domains} domain(s)` : ""}${names}`;
     tip.style.left = `${Math.min(x + 14, W - 240)}px`; tip.style.top = `${y + 14}px`;
   });
   cv.addEventListener("pointerup", (ev) => {
     const was = drag; drag = null;
     if (!was || was.moved) return;
     const p = pick(at(ev));
-    if (p) addToFilter(p.country);
+    if (!p) return;
+    const box = $('[data-filter="#records"]');
+    if (box) {   // domain page: the records table's own Filter box
+      box.value = p.country;
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      box.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      location.href = `/all?f_country=${encodeURIComponent(p.country)}`;
+    }
   });
   cv.addEventListener("pointerleave", () => { tip.hidden = true; });
   cv.addEventListener("dblclick", () => { fit(); draw(); });
@@ -980,7 +1007,7 @@ async function postureMap() {
 
 const page = document.body.dataset.page;
 if (page === "tools") toolsPage();
-postureMap();
+inventoryMap();
 if (chartDefaults()) {
   postureCharts();
   if (page === "overview") overviewCharts();

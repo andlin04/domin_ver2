@@ -210,7 +210,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         with conn() as c:
             return {"totals": db.totals(c), "per_day": db.scans_per_day(c),
                     "countries": db.top_latest(c, "country"), "netnames": db.top_latest(c, "netname"),
-                    "asns": db.top_latest(c, "asn"),
+                    "asns": db.top_latest(c, "asn"), "map": db.top_latest(c, "country", 400),
                     "eu": db.eu_per_day(c)}
 
     def data_version(c) -> str:
@@ -253,7 +253,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         change = db.diff(prev_rows, rows) if previous else None
         charts = {"history": done, "churn": churn, "current": current["id"],
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
-                  "asns": db.breakdown(rows, "asn", 10)}
+                  "asns": db.breakdown(rows, "asn", 10), "map": db.country_map(rows)}
         user, csrf = viewer(request)
         posture_rows, posture_trend, host_tags, suggested, tag_counts, net_tags = [], [], {}, {}, {}, {}
         tag = request.query_params.get("tag", "")
@@ -931,7 +931,6 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host)
-            rep["charts"]["countries"] = posture.country_summary(rep["rows"])
             if not dom:   # all domains: the public footprint over time (inventory scans)
                 since = (datetime.now() - timedelta(days=posture.TREND_DAYS)).strftime("%Y-%m-%d")
                 rep["charts"]["footprint"] = db.footprint_per_day(c, since)

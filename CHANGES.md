@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: World map moved to Inventory
+
+- The country map left Posture and is on the Inventory overview (latest scan per domain; a click opens All records
+  for the country) and on each domain page (a click filters the Records table). Countries are shaded by address
+  count (log scale, legend), no severity colours. Rollback: revert this commit.
+
 ## 2026-11-10: Posture scans no longer hold the database write lock
 
 - A posture scan committed its first writes (raw-packet flag) only after nmap's first port chunk, holding the write

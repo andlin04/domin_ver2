@@ -141,12 +141,13 @@ def test_controls_card_rules_leave_the_scan_dialog_spacing_alone():
     assert ".card.controls .field { margin: 0; }" not in css
 
 
-def test_posture_chart_and_map_clicks_add_to_the_filter():
+def test_posture_chart_clicks_add_to_the_filter_and_the_map_is_on_inventory_pages():
     import pathlib
     js = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.js").read_text(encoding="utf-8")
     assert js.count("...filterClick") == 2            # fix-by-severity and services bars
-    assert "if (p) addToFilter(p.country);" in js     # map: added, not replacing
-    assert "box.value = p.country" not in js
+    assert "postureMap" not in js and "inventoryMap();" in js and 'getElementById("inv-map")' in js
+    assert "--sev-" not in js.split("async function inventoryMap")[1].split("\nfunction ")[0]   # volume scale only
+    assert "/all?f_country=" in js and 'data-filter="#records"' in js
     css = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.css").read_text(encoding="utf-8")
     assert 'chips.className = "filter-chips"' in js and 'data-chip="all"' in js and ".filter-chips .chip" in css
 
