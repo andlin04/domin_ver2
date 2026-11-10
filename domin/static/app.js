@@ -898,10 +898,9 @@ async function inventoryMap() {
   const fit = () => {
     const boxes = pins.length ? pins.map((p) => p.w.box) : [[-170, merc(75), 180, merc(-55)]];
     let [x0, y0, x1, y1] = boxes.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
-    const span = Math.max(x1 - x0, y1 - y0, 25);   // one small country still shows its neighbours
+    const sx = Math.max(x1 - x0, 25), sy = Math.max(y1 - y0, 25);   // one small country still shows its neighbours
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    [x0, x1, y0, y1] = [cx - span * .65, cx + span * .65, cy - span * .65, cy + span * .65];
-    k = Math.min(W / (x1 - x0), H / (y1 - y0));
+    k = Math.min(W / (sx * 1.15), H / (sy * 1.15));   // width and height each: a wide card uses its width
     tx = W / 2 - cx * k; ty = H / 2 - cy * k;
   };
   const max = Math.max(1, ...pins.map((p) => p.ips));
