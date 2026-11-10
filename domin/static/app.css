@@ -323,10 +323,14 @@ dialog.pp p.note { margin: 0 0 .8rem; }
 .sb-domain { border-top: 1px solid var(--border); }
 .sb-domain > summary { display: grid; grid-template-columns: minmax(10rem, 1.2fr) minmax(12rem, 1.5fr) minmax(6rem, 1fr) minmax(10rem, 1.5fr);
   gap: .75rem; align-items: center; padding: .6rem .25rem; cursor: pointer; }
+.sb-domain > summary::-webkit-details-marker { display: none; }
+.sb-domain > summary > b::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); }
+.sb-domain[open] > summary > b::before { content: "▾"; }
 .sb-domain .sb-counts { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
 .sb-domain .table-wrap { margin: 0 0 .75rem 1rem; }
 .sb-bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.sb-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s; }
+.sb-bar { display: block; }
+.sb-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--accent); }
 @media (max-width: 720px) { .sb-domain > summary { grid-template-columns: 1fr; gap: .3rem; } }
 dialog.pp .bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width .4s; }

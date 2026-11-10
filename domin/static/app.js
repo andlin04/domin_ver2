@@ -783,7 +783,7 @@ function scanBoard() {
   const box = $("#scan-board");
   if (!box) return;
   const list = $("[data-sb-list]", box), empty = $("[data-sb-empty]", box), stamp = $("[data-sb-updated]", box);
-  const opened = new Set();
+  const opened = new Set(box.dataset.domain ? [box.dataset.domain] : []);   // a picked domain starts open
   let timer = 0;
   const SEV = ["critical", "high", "medium", "low"];
   const pill = (it) => it.status === "done"
@@ -814,13 +814,14 @@ function scanBoard() {
       return `<details class="sb-domain" data-domain="${esc(dom)}"${opened.has(dom) ? " open" : ""}>
         <summary><b>${esc(dom)}</b>
           <span class="sb-counts">${c.running ? `<span class="pill running">${c.running} running</span>` : ""}${c.queued ? `<span class="pill queued">${c.queued} queued</span>` : ""}<span class="muted">${end} of ${items.length} finished${c.failed ? ` · <span class="bad-text">${c.failed} failed</span>` : ""}</span></span>
-          <span class="bar sb-bar" role="progressbar" aria-label="${esc(dom)}: scans finished" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span>
+          <span class="sb-bar" role="progressbar" aria-label="${esc(dom)}: scans finished" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i data-pct="${pct}"></i></span>
           <span class="muted small-print sb-now">${active ? (now.length ? `Scanning ${esc(now.slice(0, 3).join(", "))}${now.length > 3 ? ` +${now.length - 3}` : ""}` : "waiting for a free slot") : `<a href="${esc(box.dataset.base)}/security/analysis?domain=${encodeURIComponent(dom)}">results</a>`}</span>
         </summary>
         <div class="table-wrap"><table><thead><tr><th>Address</th><th>Host name</th><th>Status</th><th>Progress / result</th><th>Finished</th></tr></thead>
           <tbody>${rows.map((it) => `<tr><td class="mono">${esc(it.ip)}</td><td>${esc(it.host)}</td><td>${pill(it)}</td><td>${part(it)}</td><td>${esc((it.finished || "").slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
       </details>`;
     }).join("");
+    $$(".sb-bar i", list).forEach((i) => { i.style.width = `${i.dataset.pct}%`; });   // CSP: no inline style attributes
     $$("details.sb-domain", list).forEach((el) => el.addEventListener("toggle", () => {
       if (el.open) opened.add(el.dataset.domain); else opened.delete(el.dataset.domain);
     }));
