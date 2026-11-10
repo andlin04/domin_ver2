@@ -116,6 +116,10 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     nas = merged["nas.corp.example"]
     assert nas["results"] == 1 and nas["cves"] >= 1 and nas["worst"] and nas["rank"] < 5 and nas["open_ports"] == 3
     assert merged["www.corp.example"]["results"] == 0 and merged["www.corp.example"]["worst"] == ""
+    assert nas["last"] and merged["www.corp.example"]["last"] == ""
+    # a name sharing an address scanned under another name: its results carry that scan's date, not "Never"
+    twin = {**before["www.corp.example"], "host": "twin.corp.example", "ips": nas["ips"], "last": ""}
+    assert posture.with_results([twin], rows)[0]["last"] == nas["last"]
 
 
 def test_enqueue_skips_addresses_already_pending(settings):

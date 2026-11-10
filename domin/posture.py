@@ -666,9 +666,13 @@ def with_results(names: list[dict], rows: list[dict]) -> list[dict]:
             for s in r.get("services") or []:
                 text += [str(s.get(k) or "") for k in ("service", "product", "version")]
                 text.append(f"{s.get('port')}/{s.get('proto') or 'tcp'}")
+        # an address shared with another host name was scanned under that name: its result dates this one too
+        seen = max(((r.get("finished") or "")[:16].replace("T", " ") for r in res
+                    if r.get("status") == "done"), default="")
         worsts = [r["worst"] for r in res if r.get("worst") in order]
         worst = min(worsts, key=order.index) if worsts else ""
-        out.append({**h, "anchors": [anchor(r["ip"]) for r in res], "worst": worst,
+        out.append({**h, "last": max(h.get("last") or "", seen), "anchors": [anchor(r["ip"]) for r in res],
+                    "worst": worst,
                     "rank": order.index(worst) if worst else len(order),
                     "sev_n": {s: n for s in SEVERITIES if (n := sum(1 for v in cves.values() if v["severity"] == s))},
                     "cves": len(cves), "fixable": sum(1 for v in cves.values() if v["fixes"]),
