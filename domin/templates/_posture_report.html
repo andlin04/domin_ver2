@@ -11,6 +11,7 @@
 {% if host_list and tab == 'analysis' %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
 {% with filter="" %}{% include "_posture_kpis.html" %}{% endwith %}
+{% if tab == 'overview' %}{% include "_posture_cves.html" %}{% endif %}
 
 {% set ch = rep.changes %}
 {% if ch and tab == 'overview' %}

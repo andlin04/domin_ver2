@@ -320,6 +320,11 @@ dialog.pp h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
 dialog.pp p.pp-line { margin: 0 0 .5rem; font-weight: 600; }
 dialog.pp p.small-print { text-align: left; margin: .45rem 0 .6rem; min-height: 1em; }
 dialog.pp p.note { margin: 0 0 .8rem; }
+.chip-row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
+.chip-row .chip { border-color: var(--border); color: var(--muted); text-transform: capitalize; }
+.chip-row .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.chip-row .chip small { opacity: .8; margin-left: .2rem; }
+.chip-sep { width: 1px; height: 1.2rem; background: var(--border); margin: 0 .25rem; }
 .sb-domain { border-top: 1px solid var(--border); }
 .sb-domain > summary { display: grid; grid-template-columns: minmax(10rem, 1.2fr) minmax(12rem, 1.5fr) minmax(6rem, 1fr) minmax(10rem, 1.5fr);
   gap: .75rem; align-items: center; padding: .6rem .25rem; cursor: pointer; }

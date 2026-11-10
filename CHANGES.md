@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture Overview lists each CVE once
+
+- Overview: "CVEs found" table under the KPIs, one row per CVE across the shown domains/host, worst first (CVE
+  linked to NVD/OSV, severity, CVSS, product, fixed in, address count, where). Quick chips for severity and fix
+  published / no fix yet, a filter per column and a Filter box; the heading counts the rows shown. Exploit flags,
+  EPSS and the Act/Attend/Track tier follow with the exploit data. Rollback: revert this commit.
+
 ## 2026-11-10: Scans tab shows scan activity live
 
 - Scans tab: "Scan activity" lists queued and running posture scans plus those finished in the last 24 hours, one

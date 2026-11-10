@@ -100,13 +100,28 @@ function applyFilters(table) {
   const cell = (tr, i) => (tr.cells[i]?.textContent || "").trim().toLowerCase();
   const has = (v, t, i) => (start[i] ? v.startsWith(t) : v.includes(t));
   const ok = (c, v, i) => c[0] === "!" ? !c.slice(1) || !has(v, c.slice(1), i) : has(v, c, i);   // "!text": without it
+  // chips ([data-chips="#table"] buttons, data-attr/data-val, aria-pressed): any pressed value per attribute
+  const chips = new Map();
+  $$(`[data-chips="#${table.id}"] [aria-pressed="true"]`).forEach((b) => {
+    if (!chips.has(b.dataset.attr)) chips.set(b.dataset.attr, new Set());
+    chips.get(b.dataset.attr).add(b.dataset.val);
+  });
+  let shown = 0;
   for (const tr of table.tBodies[0].rows) {
     if (tr.classList.contains("detail-row")) continue;   // follows its host row
     const text = tr.textContent.toLowerCase();
-    tr.hidden = !words.every((w) => text.includes(w)) || !cols.every((c, i) => !c || ok(c, cell(tr, i), i));
+    tr.hidden = !words.every((w) => text.includes(w)) || !cols.every((c, i) => !c || ok(c, cell(tr, i), i))
+      || ![...chips].every(([a, vals]) => vals.has(tr.dataset[a] || ""));
     if (tr._detail) tr._detail.hidden = tr.hidden;
+    if (!tr.hidden) shown += 1;
   }
+  const count = $(`[data-shown="#${table.id}"]`);
+  if (count) count.textContent = shown;
 }
+$$("[data-chips] [data-attr]").forEach((b) => b.addEventListener("click", () => {
+  b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+  applyFilters($(b.closest("[data-chips]").dataset.chips));
+}));
 $$("table[data-colfilters]").forEach((table) => {
   $$("thead th", table).forEach((th) => {
     if (th.hasAttribute("data-nofilter")) return;
