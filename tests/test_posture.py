@@ -563,6 +563,7 @@ def test_posture_host_names_table_shows_and_edits_tags(settings, nmap):
         csrf = sign_in(h, "ana")
         page = h.get(f"/admin/security?domain={DOM}").text
         assert ">Tags</th>" in page and 'aria-label="New tag for nas.corp.example"' in page
+        assert '"ip">Addr</th>' in page and '"num">Severity</th>' in page and ">Worst</th>" not in page
         r = h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
                                         "from": "posture"}, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].startswith(f"/admin/security?domain={DOM}")

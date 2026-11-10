@@ -23,7 +23,7 @@
       <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem"><col style="width:14rem"></colgroup>
     <thead><tr>
       <th class="tick" data-nofilter><input type="checkbox" data-pick-all aria-label="Tick every visible host name"></th>
-      <th data-sort="text">Host name</th><th data-sort="ip">Addresses</th><th data-sort="num">Worst</th>
+      <th data-sort="text">Host name</th><th data-sort="ip">Addr</th><th data-sort="num">Severity</th>
       <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
       <th data-sort="text">Last scan</th><th data-sort="text">Tags</th></tr></thead>
     {% set tagger = user.role in ('admin', 'analyst') %}

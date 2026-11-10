@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Host names sorted by severity
+
+- Posture Host names table: rows start worst severity first (then name; never scanned last); headers Worst ->
+  Severity, Addresses -> Addr. Rollback: revert this commit.
+
 ## 2026-11-10: Posture chart clicks add to the Filter
 
 - Posture view: a click on a bar (CVEs by severity and fix, open services) or a map country adds that value to
