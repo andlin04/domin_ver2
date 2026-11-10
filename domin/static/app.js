@@ -954,9 +954,24 @@ function postureCharts() {
                  scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: ints } },
     });
   };
-  // addresses scanned alongside: a CVE rise that follows it is new coverage, not new risk
-  lines("pc-trend", [...SEV.slice(0, 4).map((s) => [s, s, sevColour(s)]),
-                     ["addresses", "Addresses scanned", css("--sev-unknown"), true]]);
+  // CVE volume per day: stacked bars per severity (low at the base, critical on top), like the portal's alerts-per-step;
+  // addresses scanned as a dashed line on its own stack: a rise that follows it is new coverage, not new risk
+  const tr = d.trend || [];
+  c = canvas("pc-trend", tr, "The trend appears once scans have finished on two or more days.");
+  if (c) {
+    const bars = SEV.slice(0, 4).reverse().map((s) => ({ label: s, data: tr.map((r) => r[s]), backgroundColor: sevColour(s),
+                                                         stack: "cves", ...gap }));
+    const cov = { type: "line", label: "Addresses scanned", data: tr.map((r) => r.addresses), stack: "coverage",
+                  borderColor: css("--sev-unknown"), backgroundColor: css("--sev-unknown"), borderWidth: 1.5,
+                  borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 6, tension: .2 };
+    new Chart(c, {
+      type: "bar",
+      data: { labels: tr.map((r) => r.day), datasets: [...bars, cov] },
+      options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "top" } },
+                 scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+                           y: { stacked: true, ...ints } } },
+    });
+  }
   lines("pc-surface", [["ports", "Open ports", css("--accent")],
                        ["addresses", "Addresses scanned", css("--sev-unknown"), true]]);
   if (d.footprint) {

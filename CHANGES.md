@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: CVEs over time as stacked bars
+
+- One bar per day, stacked by severity (critical on top); addresses scanned stays a dashed line. Rollback: revert
+  this change.
+
 ## 2026-11-10: Overview charts above the CVE list
 
 - "CVEs over time" and "Fix available?" share one row, same width and height, above the CVE table. Rollback:
