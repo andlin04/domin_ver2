@@ -1,16 +1,19 @@
 {# Posture report: rep = posture.report(...) (+ charts.trend); renew_base = admin base; can_run = analyst or admin; csrf.
    Two depths: show_domain (all domains) = KPIs, change counters, trends, one row per domain (domain_rows);
    a picked domain = KPIs, changes with rows, trends, the host table with a CVEs tab (host_list), address details.
-   Order: alarms (KPIs), what changed, trends, then the list to act on. #}
+   Order: alarms (KPIs), what changed, trends, then the list to act on.
+   tab: overview = the "what" (KPIs, changes, CVE and service charts); analysis = the "where" (surface and
+   footprint trends, the domain or host tables). #}
 {% set k = rep.kpi %}
+{% set tab = tab or 'analysis' %}
 {% if not rep.rows %}
 <p class="muted card">No posture scans yet.</p>
-{% if host_list %}{% include "_posture_hosts.html" %}{% endif %}
+{% if host_list and tab == 'analysis' %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
 {% with filter="" %}{% include "_posture_kpis.html" %}{% endwith %}
 
 {% set ch = rep.changes %}
-{% if ch %}
+{% if ch and tab == 'overview' %}
 <section class="card posture-changes">
   <h2>Changes <small>last {{ ch.days }} days, each scan against the address's previous scan · {{ ch.changed }} of
     {{ ch.compared }} addresses with two or more scans changed · CVE data of the latest scans refreshed
@@ -42,22 +45,26 @@
 {% endif %}
 
 <section class="grid g2 posture-charts">
-  <div class="card"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
+  {% if tab == 'overview' %}
+  <div class="card wide"><h2>CVEs over time <small>distinct CVEs per severity, per scan day</small></h2>
     <div class="chart h260"><canvas id="pc-trend" role="img" aria-label="Distinct CVEs per severity per day with a finished scan"></canvas></div></div>
-  <div class="card"><h2>Attack surface over time <small>open ports and addresses scanned, per scan day</small></h2>
-    <div class="chart h260"><canvas id="pc-surface" role="img" aria-label="Open ports and addresses scanned per day with a finished scan"></canvas></div></div>
   <div class="card"><h2>Fix available? <small>distinct CVEs per severity</small></h2>
     <div class="chart h200"><canvas id="pc-fix" role="img" aria-label="Distinct CVEs per severity, split into fix published and no fix yet"></canvas></div></div>
   <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
     <div class="chart h200"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
-  {% if rep.charts.footprint is defined %}
-  <div class="card wide"><h2>Public footprint over time <small>all inventoried domains: each one's latest scan as of the day, summed</small></h2>
+  {% else %}
+  <div class="card{% if rep.charts.footprint is not defined %} wide{% endif %}"><h2>Attack surface over time <small>open ports and addresses scanned, per scan day</small></h2>
+    <div class="chart h260"><canvas id="pc-surface" role="img" aria-label="Open ports and addresses scanned per day with a finished scan"></canvas></div></div>
+  {% endif %}
+  {% if rep.charts.footprint is defined and tab == 'analysis' %}
+  <div class="card"><h2>Public footprint over time <small>all inventoried domains: each one's latest scan as of the day, summed</small></h2>
     <div class="chart h260"><canvas id="pc-footprint" role="img" aria-label="Host names, resolving host names and addresses across all domains per scan day"></canvas></div></div>
   {% endif %}
 </section>
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
-{% if show_domain %}
+{% if tab != 'analysis' %}{# the domain and host tables are the "where": Analysis only #}
+{% elif show_domain %}
 {# all domains: one row per domain; a name opens its domain view #}
 <section class="card">
   <div class="card-head">
@@ -75,7 +82,7 @@
       <th data-sort="text">Last scan</th></tr></thead>
     <tbody>{% for d in domain_rows %}<tr data-domain="{{ d.domain }}">
       <td class="tick"><input type="checkbox" data-pick value="{{ d.domain }}" aria-label="Tick {{ d.domain }}"></td>
-      <td><a href="{{ renew_base }}/security?domain={{ d.domain|urlencode }}">{{ d.domain }}</a></td>
+      <td><a href="{{ renew_base }}/security/analysis?domain={{ d.domain|urlencode }}">{{ d.domain }}</a></td>
       <td data-key="{{ d.rank }}">{% if d.worst %}<span class="pill sev-{{ d.worst if d.worst in ('critical','high','medium','low') else 'unknown' }}">{{ d.worst }}</span>{% endif %}
         {% if d.blocked %}<span class="pill blocked" title="No scanned port answered on {{ d.blocked }} address(es)">{{ d.blocked }} potentially blocked</span>{% endif %}
         {% if d.failed %}<span class="pill fix-no">{{ d.failed }} failed</span>{% endif %}</td>

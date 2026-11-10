@@ -99,7 +99,7 @@ def test_only_admins_see_and_change_routes(settings):
         assert "Default for posture</span>" in page and SECRET not in page
         edit = h.get("/admin/security/scan-settings?edit=r1").text
         assert "Change route Office" in edit and "saved; blank keeps it" in edit and SECRET not in edit
-        assert "Scans go through Office: socks5 192.0.2.10:1080" in h.get(f"/admin/security?domain={DOM}").text
+        assert "Scans go through Office: socks5 192.0.2.10:1080" in h.get(f"/admin/security/scans?domain={DOM}").text
         r = h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form(id="r1", port="99999")})
         assert r.status_code == 422 and "Port" in r.text and "Change route" in r.text
         r = h.post("/admin/security/scan-settings", data={"csrf": csrf, **shared(posture="r7")})

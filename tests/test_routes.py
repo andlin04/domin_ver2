@@ -581,7 +581,7 @@ def test_delete_is_refused_while_a_route_is_in_use(settings):
                       follow_redirects=False).status_code == 303
         page = h.get("/admin/security/profiles").text
         assert "<td>Default (Tor)</td>" in page and "<td>Direct</td>" in page
-        assert "route Default (Tor)" in h.get(f"/admin/security?domain={DOM}").text
+        assert "route Default (Tor)" in h.get(f"/admin/security/scans?domain={DOM}").text
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")
         assert h.post("/admin/security/scan-settings/routes/r2/delete", data={"csrf": csrf},

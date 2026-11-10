@@ -919,7 +919,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 "cve_db": str(settings.cve_db_file), "cve_ttl": settings.cve_ttl_days,
                 "cve_count": cve_db.size(), "default_ports": fingerprint.DEFAULT_PORTS}
 
-    def security_view(request, u, s, ctx):
+    def security_view(request, u, s, ctx, tab: str = "overview"):
         dom = ctx.pop("posture_domain", None)
         if dom is None:
             dom = request.query_params.get("domain", "")
@@ -939,7 +939,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             rep["cve_refreshed"] = datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M") if at else ""
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
-            ctx.update(posture_domains=known, posture_domain=dom, posture_hosts=hosts, posture_host=host,
+            ctx.update(tab=ctx.get("tab", tab), posture_domains=known, posture_domain=dom, posture_hosts=hosts,
+                       posture_host=host,
                        # worst severity first (rank 0 = critical; never scanned last), then by name
                        host_list=sorted((h for h in posture.with_results(posture.host_list(c, dom), rep["rows"])
                                          if not host or h["host"] == host), key=lambda h: (h["rank"], h["host"]))
@@ -959,7 +960,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
             admin.kv_set(c, f"dismiss:auth-notice:{u['id']}", db.now())
-        return back(f"{base}/security")
+        return back(f"{base}/security/scans")
 
     def lookup_view(request, u, s, ctx):
         with conn() as c:
@@ -1036,6 +1037,16 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return back()
         return security_view(request, u, s, security_ctx())
 
+    # Posture sub-tabs: Overview (the "what", above), Analysis (the "where": domains, hosts), Scans (run + progress)
+    for _tab in ("analysis", "scans"):
+        def security_tab(request: Request, _tab=_tab):
+            with conn() as c:
+                s, u = current(request, c)
+                if not u:
+                    return back()
+            return security_view(request, u, s, security_ctx(), _tab)
+        app.get(base + "/security/" + _tab, response_class=HTMLResponse, include_in_schema=False)(security_tab)
+
     @app.post(base + "/security/posture", include_in_schema=False)
     async def security_posture(request: Request):
         """Stage 2: queue posture scans for a whole domain (its in-scope addresses), one host name or one address
@@ -1055,7 +1066,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             def refuse(status: int, error: str):
                 if as_json:
                     return priv(JSONResponse({"error": error}, status_code=status))
-                return security_view(request, u, s, security_ctx(status, error=error, form=data) | {
+                return security_view(request, u, s, security_ctx(status, error=error, form=data) | {"tab": "scans",
                     "posture_domain": dom})
             if not users.can(u["role"], "analyst"):
                 return refuse(403, "Running a posture scan needs the analyst role.")
@@ -1083,7 +1094,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         notice = "posture-queued" if n else "posture-pending"
         if as_json:
             return priv(JSONResponse({"batch": batch, "queued": n, "domain": dom, "notice": NOTICES[notice]}))
-        return back(f"{base}/security?domain={dom}", notice)
+        return back(f"{base}/security/scans?domain={dom}", notice)
 
     @app.get(base + "/security/posture/status", include_in_schema=False)
     def security_posture_status(request: Request):
@@ -1123,7 +1134,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             else:
                 tags.add(c, host, tag, u["name"])
         if data.get("from") == "posture":   # the posture view's Host names table: back to that table
-            return back(f"{base}/security?{urlencode({'domain': dom})}#posture-hosts")
+            return back(f"{base}/security/analysis?{urlencode({'domain': dom})}#posture-hosts")
         return back(f"/d/{dom}#records")
 
     def profiles_view(request, u, s, status: int = 200, error: str = "", form: dict | None = None):

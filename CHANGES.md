@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture sub-tabs Overview, Analysis, Scans
+
+- Posture has three tabs. Overview (/admin/security): KPIs, Changes, CVEs over time, Fix available?, Exposed
+  services. Analysis (/admin/security/analysis): KPIs, attack surface and footprint trends, the domain table or the
+  host table with findings and the report/scan tick boxes. Scans (/admin/security/scans): the scan form, its route,
+  progress and the authorised-use notice. Domain and host picks carry over between tabs; after a scan the page
+  opens Scans, after a tag change Analysis. Rollback: revert this commit.
+
 ## 2026-11-10: World map moved to Inventory
 
 - The country map left Posture and is on the Inventory overview (latest scan per domain; a click opens All records

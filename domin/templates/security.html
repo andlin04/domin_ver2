@@ -6,8 +6,15 @@
   <p class="muted">What is exposed and vulnerable, worst first.
     {% if posture_domain %}Showing <b>{{ posture_domain }}</b>{% if posture_host %} · host <b>{{ posture_host }}</b>{% endif %}.
     {% else %}Showing all domains.{% endif %}</p></div></section>
+{% set tab_q = ('?domain=' ~ posture_domain|urlencode ~ ('&host=' ~ posture_host|urlencode if posture_host else '')) if posture_domain else '' %}
+{% set tab_url = base ~ '/security' ~ ('' if tab == 'overview' else '/' ~ tab) %}
+<nav class="tabs posture-tabs" aria-label="Posture views">
+  {% for t, label in [('overview', 'Overview'), ('analysis', 'Analysis'), ('scans', 'Scans')] %}
+  <a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
+    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}</a>{% endfor %}
+</nav>
 <section class="card controls">
-  <form method="get" action="{{ base }}/security" class="inline posture-pick">
+  <form method="get" action="{{ tab_url }}" class="inline posture-pick">
     <label class="field">Domain
       <select name="domain" data-autosubmit data-reset="host">
         <option value="">All domains</option>
@@ -23,10 +30,11 @@
     {# Filter (same row as Domain, pushed right; no name, so never submitted): any attribute, any case, every word.
        Narrows the Domain list (server-side: host names, addresses, ASN, provider, country, tags, products, CVE ids)
        and the page's lists: the domain table, or the host and CVE rows. Enter opens the first matching domain. #}
-    <label class="field pick-filter">Filter <small data-domain-count>{{ posture_domains|length }} domains</small>
+    {% if tab != 'scans' %}<label class="field pick-filter">Filter <small data-domain-count>{{ posture_domains|length }} domains</small>
       <input type="search" data-domain-search="{{ base }}/security/domain-search" placeholder="product, host, address, AS, CVE…"
-        size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>
+        size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>{% endif %}
   </form>
+  {% if tab == 'scans' %}
   {% if posture_domain and user.role in ('admin', 'analyst') %}
   <form method="post" action="{{ base }}/security/posture" class="inline posture-run" data-posture-run>
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -55,6 +63,7 @@
   {% elif not posture_domain %}<p class="muted small-print">Pick a domain to scan it or renew its results.</p>
   {% endif %}
   {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
+  {% endif %}
 </section>
 
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
@@ -63,7 +72,7 @@
 {% include "_posture_progress.html" %}
 {% endwith %}
 
-{% if show_notice %}
+{% if show_notice and tab == 'scans' %}
 <section class="card warn-card notice-banner">
   <form method="post" action="{{ base }}/security/dismiss-notice" class="dismiss">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -75,8 +84,10 @@
 </section>
 {% endif %}
 
+{% if tab != 'scans' %}
 {% with rep=report, renew_base=base, can_run=user.role in ('admin', 'analyst'), show_domain=not posture_domain %}
 {% include "_posture_report.html" %}
 {% endwith %}
+{% endif %}
 
 {% endblock %}

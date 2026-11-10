@@ -88,7 +88,7 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     assert all(h["last"] == "" for h in before.values()) and before["www.corp.example"]["ips"] == ["172.20.4.50"]
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert 'id="posture-hosts"' in page and 'data-picked-open="#scan-picked"' in page and 'name="hosts"' in page
         assert page.count(">Never<") == 4
         assert page.count("· out of scope") == 1   # cdn: 203.0.113.9 is outside the IP allow range
@@ -105,7 +105,7 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     assert after["nas.corp.example"]["last"] and after["www.corp.example"]["last"] == ""
     with app_client(settings) as h:
         sign_in(h, "ana")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
     # one table: results sit on the host rows; the address details wait in the hidden pool for the dialog
     assert 'data-host-details="pa-172-20-4-60"' in page and 'id="pa-pool" hidden' in page
     assert "Findings by address <small>" not in page and 'class="host-toggle"' in page
@@ -356,11 +356,11 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
         csrf = sign_in(h, "ana")
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM}, follow_redirects=False)
         assert r.status_code == 303 and "posture-queued" in r.headers["location"]
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert "172.20.4.50" in page and "queued" in page and 'id="pa-203-0-113-9"' not in page
         assert "out of scope" in page   # the host list still names it, marked
         run_queue(settings)
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
     assert "CVE-2024-9999" in page and "Renew" in page and "22/tcp" in page
     # CVEs tab: one row per CVE with the addresses it hits; an address opens its host row
     assert 'data-tab="cves">CVEs <small>1</small>' in page and 'data-panel="cves" hidden' in page
@@ -398,7 +398,7 @@ def test_viewer_cannot_start_posture(settings):
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         assert r.status_code == 403 and "analyst role" in r.text
-        assert "data-scan-open" not in h.get(f"/admin/security?domain={DOM}").text
+        assert "data-scan-open" not in h.get(f"/admin/security/scans?domain={DOM}").text
 
 
 def test_posture_refuses_unknown_domain_and_out_of_scope_host(settings):
@@ -457,10 +457,10 @@ def test_status_needs_sign_in_and_viewer_may_read(settings):
 def test_posture_page_has_progress_dialog_and_no_auto_reload(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/scans?domain={DOM}").text
         assert 'id="posture-progress"' in page and "data-posture-run" in page and "data-pp-reopen hidden" in page
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/scans?domain={DOM}").text
         assert "data-pp-reopen>" in page and "show progress" in page
         dom_page = h.get(f"/d/{DOM}").text
     for html in (page, dom_page):
@@ -508,7 +508,7 @@ def test_analyst_makes_a_profile_and_scans_with_it(settings, nmap):
             rows = posture.current(c, DOM)
         assert rows and all(p["profile"] == "web" and p["ports"] == "80,443" and p["intensity"] == 5 for p in rows)
         assert all("--version-intensity 5" in p["params"] and "-T4" in p["params"] for p in rows)
-        page = h.get(f"/admin/security?domain={DOM}").text   # the domain page shows a summary only
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text   # the domain page shows a summary only
         assert "Raw nmap output" in page and "profile <b>web</b>" in page
         r = h.post("/admin/security/profiles/web/delete", data={"csrf": csrf}, follow_redirects=False)
         assert r.status_code == 303 and "web only" not in h.get("/admin/security/profiles").text
@@ -581,13 +581,13 @@ def test_analyst_tags_hosts_and_groups_by_tag(settings, nmap):
 def test_posture_host_names_table_shows_and_edits_tags(settings, nmap):
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert ">Tags</th>" in page and 'aria-label="New tag for nas.corp.example"' in page
         assert '"ip">Addr</th>' in page and '"num">Severity</th>' in page and ">Worst</th>" not in page
         r = h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
                                         "from": "posture"}, follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].startswith(f"/admin/security?domain={DOM}")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        assert r.status_code == 303 and r.headers["location"].startswith(f"/admin/security/analysis?domain={DOM}")
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert 'aria-label="Remove tag storage"' in page
     with db.connect(settings.db_path) as c:
         nas = next(x for x in posture.host_list(c, DOM) if x["host"] == "nas.corp.example")
@@ -595,7 +595,7 @@ def test_posture_host_names_table_shows_and_edits_tags(settings, nmap):
         assert "storage" in posture.with_results([nas], [])[0]["text"]
     with app_client(settings) as h:
         sign_in(h, "vee")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert ">storage<" in page and "Remove tag" not in page and "New tag for" not in page
 
 
@@ -673,14 +673,16 @@ def test_report_renders_collapsed_host_headlines_with_nested_cves():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(Path(posture.__file__).parent / "templates"),
                              autoescape=True)
     html = env.get_template("_posture_report.html").render(rep=posture.report(report_rows()), can_run=True,
-                                                           renew_base="/admin", csrf="t", show_domain=False)
+                                                           renew_base="/admin", csrf="t", show_domain=False, tab="overview") + env.get_template(
+        "_posture_report.html").render(rep=posture.report(report_rows()), can_run=True, renew_base="/admin",
+                                       csrf="t", show_domain=False, tab="analysis")
     heads = re.findall(r'<details class="svc posture-detail"[^>]*>', html)
     assert len(heads) == 2 and not [d for d in re.findall(r"<details[^>]*>", html) if " open" in d]
     assert html.index('id="pa-172-20-4-50"') < html.index('id="pa-172-20-4-60"')  # worst host first
     assert "1 of 2 fixable" in html and "no fix published yet" in html
     assert re.search(r"Fix available</span><b>1 <i>of 3 CVEs", html)
     # trends first, then the charts of the current state, then the findings
-    order = [html.index(x) for x in ('id="pc-trend"', 'id="pc-surface"', 'id="pc-fix"', 'id="pc-services"',
+    order = [html.index(x) for x in ('id="pc-trend"', 'id="pc-fix"', 'id="pc-services"', 'id="pc-surface"',
                                      "Findings by address <small>")]
     assert order == sorted(order) and "<script>" not in html
     assert 'id="pc-hosts"' not in html and 'id="pc-age"' not in html and 'id="posture-domains"' not in html
@@ -696,7 +698,7 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         csrf = sign_in(h, "ana")
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/scans?domain={DOM}").text + h.get(f"/admin/security?domain={DOM}").text + h.get(f"/admin/security/analysis?domain={DOM}").text
         order = [page.index(x) for x in ("data-scan-open", "Authorized use only", "Critical CVEs", 'id="pc-trend"',
                                          'id="posture-hosts"', 'id="posture-cves"')]   # host table = findings list
         assert order == sorted(order)
@@ -704,7 +706,7 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert "Vulnerabilities <small>" not in page and "Services &amp; scan details" in page
         assert not [d for d in re.findall(r'<details class="svc posture-detail"[^>]*>', page) if " open" in d]
         # viewing one host doesn't narrow the next scan: the form starts at the whole domain
-        one = h.get(f"/admin/security?domain={DOM}&host=nas.corp.example").text
+        one = "".join(h.get(f"/admin/security/{t}?domain={DOM}&host=nas.corp.example").text for t in ("scans", "analysis"))
         form = one.split("data-scan-target>")[1].split("</select>")[0]
         assert "selected" not in form and "<b data-scan-what>the whole domain</b>" in one
         # the button just says Scan; the profile is picked in its confirm dialog, inside the same form
@@ -714,9 +716,9 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         rows = one.split('id="posture-hosts"')[1].split("</table>")[0]
         assert rows.count('<td class="tick">') == 1 and "data-auto-open" in rows and "nas.corp.example" in rows
         # all domains: one row per domain, no per-address lists
-        every = h.get("/admin/security").text
+        every = h.get("/admin/security/analysis").text
         doms = every.split('id="posture-domains"')[1].split("</table>")[0]
-        assert f'href="/admin/security?domain={DOM}">{DOM}</a>' in doms and doms.count("<tr") == 2   # head + 1
+        assert f'href="/admin/security/analysis?domain={DOM}">{DOM}</a>' in doms and doms.count("<tr") == 2   # head + 1
         assert f'<tr data-domain="{DOM}">' in doms
         assert 'id="posture-hosts"' not in every and 'class="svc posture-detail"' not in every
         # the domain page: a summary card, the details stay in Posture
@@ -736,20 +738,37 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
 
+def test_posture_sub_tabs_split_what_where_and_scans(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        run_queue(settings)
+        tabs = {t: h.get(f"/admin/security{'/' + t if t else ''}?domain={DOM}").text for t in ("", "analysis", "scans")}
+    nav = f'href="/admin/security/analysis?domain={DOM}">Analysis</a>'
+    assert all(nav in page for page in tabs.values())
+    over, ana, scans = tabs[""], tabs["analysis"], tabs["scans"]
+    assert 'class="tab active" aria-current="page"\n    href="/admin/security?domain=' in over
+    assert 'id="pc-trend"' in over and "posture-changes" in over and 'id="posture-hosts"' not in over
+    assert 'id="posture-hosts"' in ana and 'id="pc-surface"' in ana and 'id="pc-trend"' not in ana
+    assert "data-posture-run" in scans and "Authorized use only" in scans and 'id="posture-progress"' in scans
+    assert 'id="scan-confirm"' not in over + ana and 'id="posture-hosts"' not in scans
+    assert 'action="/admin/security/scans"' in scans and "data-domain-search" not in scans
+
+
 def test_authorised_use_notice_can_be_dismissed_for_good(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "vee")
-        assert "Authorized use only" in h.get("/admin/security").text
+        assert "Authorized use only" in h.get("/admin/security/scans").text
         assert h.post("/admin/security/dismiss-notice", data={"csrf": "x"}).status_code == 403
         r = h.post("/admin/security/dismiss-notice", data={"csrf": csrf}, follow_redirects=False)
         assert r.status_code == 303
-        assert "Authorized use only" not in h.get("/admin/security").text
+        assert "Authorized use only" not in h.get("/admin/security/scans").text
     with app_client(settings) as h:   # a new session of the same user: still gone; another user still sees it
         sign_in(h, "vee")
-        assert "Authorized use only" not in h.get("/admin/security").text
+        assert "Authorized use only" not in h.get("/admin/security/scans").text
     with app_client(settings) as h:
         sign_in(h, "ana")
-        assert "Authorized use only" in h.get("/admin/security").text
+        assert "Authorized use only" in h.get("/admin/security/scans").text
 
 
 # ---- report charts: data shape, empty cases, trend ----
@@ -817,7 +836,7 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         csrf = sign_in(h, "ana")
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert 'data-picked-open="#report-picked"' in page and 'action="/admin/security/report"' in page
         form = {"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example,www.corp.example,other.example"}
         md = h.post("/admin/security/report", data={**form, "format": "md"})
@@ -837,7 +856,7 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         assert h.post("/admin/security/report", data={**form, "hosts": "other.example"}).status_code == 422
     with app_client(settings) as h:   # viewers may export what they can see
         csrf = sign_in(h, "vee")
-        page = h.get(f"/admin/security?domain={DOM}").text
+        page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert 'data-picked-open="#report-picked"' in page and 'data-picked-open="#scan-picked"' not in page
         assert h.post("/admin/security/report", data={**form, "csrf": csrf, "format": "md"}).status_code == 200
 
@@ -851,7 +870,7 @@ def test_report_on_ticked_domains(settings, nmap):
         for d in (DOM, other):
             h.post("/admin/security/posture", data={"csrf": csrf, "domain": d})
         run_queue(settings)
-        page = h.get("/admin/security").text
+        page = h.get("/admin/security/analysis").text
         assert 'data-picked-open="#report-domains"' in page and 'name="domains"' in page
         assert f'<input type="checkbox" data-pick value="{DOM}"' in page
         md = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other},nope.example",
