@@ -239,10 +239,19 @@ table[data-resizable] td.clip { white-space: nowrap; text-overflow: ellipsis; }
   border-right: 2px solid transparent; }
 .col-resize:hover, .col-resize.dragging { border-right-color: var(--accent); }
 /* posture host table: a host name expands its findings in a row below (chevron as on the other expandables) */
-a.host-toggle::before { content: ""; display: inline-block; width: .55rem; height: .55rem; margin: 0 .5rem .1rem 0;
-  border-right: 2.5px solid var(--accent); border-bottom: 2.5px solid var(--accent); transform: rotate(-45deg);
-  transition: transform .15s; }
-tr.expanded a.host-toggle::before { transform: rotate(45deg); border-color: var(--text); }
+a.host-toggle::before, a.cve-toggle::before { content: ""; display: inline-block; width: .55rem; height: .55rem;
+  margin: 0 .5rem .1rem 0; border-right: 2.5px solid var(--accent); border-bottom: 2.5px solid var(--accent);
+  transform: rotate(-45deg); transition: transform .15s; }
+tr.expanded a.host-toggle::before, tr.expanded a.cve-toggle::before { transform: rotate(45deg); border-color: var(--text); }
+/* posture CVEs tab: a CVE's details under its row */
+.cve-detail { padding: .4rem .6rem .8rem; max-width: 70rem; }
+.cve-detail .cve-summary { margin: 0 0 .8rem; line-height: 1.5; white-space: normal; }
+.cve-facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1.2rem; margin: 0 0 .9rem; }
+.cve-facts dt { color: var(--muted); }
+.cve-facts dd { margin: 0; white-space: normal; }
+.cve-detail h4 { margin: .6rem 0 .3rem; font-size: .9rem; }
+.cve-affected { width: auto; }
+.cve-refs { margin: 0; padding-left: 1.1rem; columns: 2; white-space: normal; }
 tr.expanded > td { background: var(--surface-2); }
 .table-wrap tr.detail-row > td { position: static; white-space: normal; padding: .3rem .6rem .8rem 2.2rem;
   background: var(--surface-2); }

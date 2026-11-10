@@ -69,7 +69,31 @@
         <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
         <th data-sort="num">Addresses</th></tr></thead>
       <tbody>{% for v in cves %}<tr data-text="{{ v.text }}">
-        <td class="mono" title="{{ v.summary or '' }}">{{ v.cve }}</td>
+        <td class="mono"><a href="#" class="cve-toggle" data-cve-more aria-expanded="false"
+          aria-label="{{ v.cve }}: show or hide its details">{{ v.cve }}</a>
+          {# the detail panel: cloned into a row under this one when opened (a template's text is not the row's,
+             so the filters and sorting see only the columns) #}
+          <template class="cve-more"><div class="cve-detail">
+            {% if v.summary %}<p class="cve-summary">{{ v.summary }}</p>{% else %}<p class="muted">No description stored.</p>{% endif %}
+            <dl class="cve-facts">
+              <dt>CVSS</dt><dd>{% if v.score is not none %}<b>{{ '%.1f'|format(v.score) }}</b> {{ v.severity }}{% else %}not scored{% endif %}
+                {% if v.vector %}<span class="mono muted small-print">{{ v.vector }}</span>{% endif %}</dd>
+              {% for label, val in v.av %}<dt>{{ label }}</dt><dd>{{ val }}</dd>{% endfor %}
+              {% if v.published %}<dt>Published</dt><dd>{{ v.published }}</dd>{% endif %}
+              {% if v.cwe %}<dt>Weakness</dt><dd>{% for w in v.cwe %}{% if w.startswith('CWE-') and w[4:].isdigit() %}<a href="https://cwe.mitre.org/data/definitions/{{ w[4:] }}.html" rel="noopener noreferrer" target="_blank">{{ w }}</a>{% else %}{{ w }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
+              <dt>Fixed in</dt><dd>{{ v.fixes|join(', ') if v.fixes else 'no fix published yet' }}</dd>
+              <dt>Public exploit</dt><dd class="muted">not checked yet (exploit data comes with KEV / Exploit-DB / PoC sync)</dd>
+              <dt>Source</dt><dd>{{ v.source or '' }}</dd>
+            </dl>
+            <h4>Affected here <small class="muted">{{ v.affected|length }}</small></h4>
+            <table class="cve-affected"><thead><tr><th>Host name</th><th>Address</th><th>Port</th><th>Product / version</th></tr></thead>
+              <tbody>{% for a in v.affected %}<tr><td>{{ a.name or '' }}</td>
+                <td class="mono"><a href="#pa-{{ a.ip|replace(':', '-')|replace('.', '-') }}" data-open-details>{{ a.ip }}</a></td>
+                <td>{{ a.port }}/{{ a.proto }}</td><td>{{ a.product }}</td></tr>{% endfor %}</tbody></table>
+            <h4>References</h4>
+            <ul class="cve-refs">{% for name, url in v.links %}<li><a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ name }}</a></li>{% endfor %}
+              {% for url in v.refs or [] %}{% if url not in v.links|map(attribute=1) %}<li><a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ url|replace('https://', '')|truncate(70, True, '…') }}</a></li>{% endif %}{% endfor %}</ul>
+          </div></template></td>
         <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
         <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
         <td>{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>

@@ -385,9 +385,13 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     assert "CVE-2024-9999" in page and "Renew" in page and "22/tcp" in page
     # CVEs tab: one row per CVE with the addresses it hits; an address opens its host row
     assert 'data-tab="cves">CVEs <small>1</small>' in page and 'data-panel="cves" hidden' in page
-    table = page.split('id="posture-cves"')[1].split("</table>")[0]
+    table = page.split('id="posture-cves"')[1].split("</table></div>")[0]   # past each row's affected table
     assert "data-colfilters" in table and 'data-filter="#posture-cves"' in page
-    assert '<td class="mono" title=' in table and "CVE-2024-9999" in table
+    # each CVE opens a detail panel: description, CVSS in words, affected address/port/product, references
+    assert 'data-cve-more' in table and "CVE-2024-9999" in table and '<template class="cve-more">' in table
+    more = page.split('<template class="cve-more">')[1].split("</template>")[0]
+    assert "Remote code execution" in more and "<dt>Attack vector</dt><dd>network</dd>" in more
+    assert "Public exploit" in more and "/tcp</td>" in more and "nvd.nist.gov/vuln/detail/CVE-2024-9999" in more
     assert '<a href="#pa-172-20-4-50" data-open-details title="172.20.4.50">' in table
     assert 'id="pa-172-20-4-50"' in page and 'id="cve-findings"' not in page
     # domain search: any attribute, any case, every word must match; signed-in only

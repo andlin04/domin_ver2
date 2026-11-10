@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: CVE details on the Analysis CVEs tab
+
+- A CVE id opens its details under the row: description, CVSS score and vector, attack vector / complexity /
+  privileges / user interaction in words, published date, weakness (CWE link), fixed in, every affected host name /
+  address / port / product (an address opens its host), references. A "Public exploit" line is reserved for the
+  exploit data.
+- Findings now store the CVSS vector, published date, CWE ids and up to 8 https references (NVD and OSV). Stored
+  findings gain them when the daily CVE refresh re-queries their product (cache 7 days).
+- Rollback: revert this change.
+
 ## 2026-11-10: Posture views tuned for triage
 
 - Overview: Changes (new and fixed since the previous scan) above the CVE list; KPIs are CVE counts only.

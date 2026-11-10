@@ -343,6 +343,19 @@ def links(f: dict) -> list[tuple[str, str]]:
     return out
 
 
+CVSS_PARTS = {"AV": ("Attack vector", {"N": "network", "A": "adjacent network", "L": "local", "P": "physical"}),
+              "AC": ("Complexity", {"L": "low", "H": "high"}),
+              "PR": ("Privileges needed", {"N": "none", "L": "low", "H": "high"}),
+              "UI": ("User interaction", {"N": "none", "R": "required", "P": "passive", "A": "active"})}
+
+
+def attack_vector(vector: str) -> list[tuple[str, str]]:
+    """The exploit preconditions of a CVSS vector in words ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/..." -> [("Attack
+    vector", "network"), ...]): what an analyst reads first. Unknown parts are left out."""
+    got = dict(p.split(":", 1) for p in vector.split("/") if ":" in p)
+    return [(label, names[got[k]]) for k, (label, names) in CVSS_PARTS.items() if got.get(k) in names]
+
+
 def by_service(vulns: list[dict]) -> list[dict]:
     """An address's CVEs grouped per service (product + port), worst group first; a CVE that hits two services
     is listed under both."""
@@ -382,6 +395,8 @@ def report(rows: list[dict], host: str = "") -> dict:
                 tgt = (r["ip"], (r.get("hosts") or "").split(",")[0], s["port"])
                 if tgt not in v["targets"]:
                     v["targets"].append(tgt)
+                    v.setdefault("affected", []).append({"ip": r["ip"], "name": tgt[1], "port": s["port"],
+                                                         "proto": s.get("proto") or "tcp", "product": prod})
                 v["products"].add(prod)
                 # fixable only when a fixed version is published for every affected product (portal semantics)
                 v["fixable"] = v.get("fixable", True) and bool(fixes(f))
@@ -402,6 +417,8 @@ def report(rows: list[dict], host: str = "") -> dict:
     table = sorted(vulns.values(), key=lambda v: cve.rank(v["severity"], v["score"]))
     for v in table:
         v["products"] = sorted(v["products"])
+        v["links"] = links(v)
+        v["av"] = attack_vector(v.get("vector") or "")
         v["addresses"] = list(dict.fromkeys((ip, name) for ip, name, _ in v["targets"]))   # each address once
         v["text"] = " ".join([v["cve"], v["severity"], *v["products"], *v["fixes"],
                               *(x for a in v["addresses"] for x in a if x)]).lower()   # for the Filter box

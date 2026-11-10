@@ -221,6 +221,28 @@ document.addEventListener("click", (ev) => {
   const tr = a.closest("tr");
   if (tr._detail) collapseHost(tr); else expandHost(a);
 });
+// CVE rows (posture CVEs tab): the CVE id opens its details (the cell's template) in a row under it; again closes
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("a[data-cve-more]");
+  if (!a) return;
+  ev.preventDefault();
+  const tr = a.closest("tr");
+  if (tr._detail) {
+    tr._detail.remove();
+    tr._detail = null;
+  } else {
+    const row = document.createElement("tr");
+    row.className = "detail-row";
+    const td = document.createElement("td");
+    td.colSpan = tr.cells.length;
+    td.append($("template.cve-more", tr).content.cloneNode(true));
+    row.append(td);
+    tr.after(row);
+    tr._detail = row;
+  }
+  tr.classList.toggle("expanded", !!tr._detail);
+  a.setAttribute("aria-expanded", tr._detail ? "true" : "false");
+});
 // tick tables (posture hosts, posture domains): the header box ticks every visible row; the card's buttons
 // ("Scan now": profile, "Report": format) open their dialog for the ticked rows that are still visible
 $$("table[data-picker]").forEach((table) => {

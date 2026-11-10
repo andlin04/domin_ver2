@@ -13,7 +13,8 @@ PW = "correct horse battery"
 
 NVD_RESP = {"vulnerabilities": [{"cve": {
     "id": "CVE-2024-9999",
-    "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8}}]},
+    "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8,
+                                                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]},
     "descriptions": [{"lang": "en", "value": "Remote code execution"}]}}]}
 
 SCAN_XML = """<?xml version="1.0"?>

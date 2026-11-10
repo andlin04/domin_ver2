@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from domin import cve, db, users
+from domin import cve, db, posture, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
@@ -23,7 +23,11 @@ OSV_RESP = {"vulns": [{
 
 NVD_RESP = {"vulnerabilities": [{"cve": {
     "id": "CVE-2024-9999",
-    "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8}}]},
+    "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8,
+                                                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]},
+    "published": "2024-05-01T12:00:00.000",
+    "weaknesses": [{"description": [{"lang": "en", "value": "CWE-787"}, {"lang": "en", "value": "NVD-CWE-Other"}]}],
+    "references": [{"url": "https://example.com/advisory"}, {"url": "http://example.com/plain"}],
     "descriptions": [{"lang": "en", "value": "Remote code execution"}]}}]}
 
 
@@ -66,6 +70,12 @@ def test_nvd_cves_parses_score_and_desc():
         found = cve.nvd_cves(c, "a", "proxmox", "virtual_environment", "8.1.4")
     assert len(found) == 1 and found[0]["cve"] == "CVE-2024-9999"
     assert found[0]["severity"] == "critical" and found[0]["source"] == "NVD"
+    # the detail a CVE row opens: vector, date, weakness, https references only
+    assert found[0]["vector"].startswith("CVSS:3.1/AV:N") and found[0]["published"] == "2024-05-01"
+    assert found[0]["cwe"] == ["CWE-787"] and found[0]["refs"] == ["https://example.com/advisory"]
+    assert posture.attack_vector(found[0]["vector"]) == [("Attack vector", "network"), ("Complexity", "low"),
+                                                         ("Privileges needed", "none"), ("User interaction", "none")]
+    assert posture.attack_vector("") == []
 
 
 def test_nvd_fixed_version_comes_from_the_products_vulnerable_range():
