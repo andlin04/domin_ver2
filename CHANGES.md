@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Sign-in can be turned off on development servers
+
+- With `DOMIN_ALLOW_NO_LOGIN=1` in `/etc/domin.env`, Settings shows "Turn sign-in off": every visitor that reaches
+  /admin (DOMIN_ADMIN_IPS still applies) then acts as the admin who turned it off; the header shows "sign-in off".
+  Without the variable the switch is hidden, the endpoint refuses and a stored switch does nothing. Never set it on
+  a public server. Rollback: untick the box, remove the variable, restart; or revert this commit.
+
 ## 2026-11-10: Posture sub-tabs Overview, Analysis, Scans
 
 - Posture has three tabs. Overview (/admin/security): KPIs, Changes, CVEs over time, Fix available?, Exposed

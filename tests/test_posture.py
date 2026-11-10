@@ -738,6 +738,33 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
 
+def test_sign_in_can_be_turned_off_only_where_the_environment_allows_it(settings):
+    with db.connect(settings.db_path) as c:
+        users.create(c, "adm", "admin", PW)
+    with app_client(settings) as h:   # default: no switch, and the endpoint refuses
+        csrf = sign_in(h, "adm")
+        assert "Turn sign-in off" not in h.get("/admin/settings").text
+        assert h.post("/admin/settings/no-login", data={"csrf": csrf, "off": "1"}).status_code == 403
+    dev = replace(settings, allow_no_login=True)
+    with app_client(dev) as h:
+        assert h.get("/admin/security", follow_redirects=False).status_code == 303   # allowed, but still on
+        csrf = sign_in(h, "adm")
+        assert "Turn sign-in off" in h.get("/admin/settings").text
+        r = h.post("/admin/settings/no-login", data={"csrf": csrf, "off": "1"}, follow_redirects=False)
+        assert r.status_code == 303
+    with app_client(dev) as h:   # no cookie: acts as adm, forms work
+        page = h.get("/admin/security/scans").text
+        assert "sign-in off" in page and "My account <small class=\"muted\">adm</small>" in page
+        anon = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
+        assert h.post("/admin/settings/no-login", data={"csrf": anon}, follow_redirects=False).status_code == 303
+    with app_client(dev) as h:   # back on
+        assert h.get("/admin/security", follow_redirects=False).status_code == 303
+    with app_client(settings) as h:   # the flag left in the database does nothing without the environment
+        with db.connect(settings.db_path) as c:
+            admin.set_no_login(c, 1)
+        assert h.get("/admin/security", follow_redirects=False).status_code == 303
+
+
 def test_posture_sub_tabs_split_what_where_and_scans(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "ana")

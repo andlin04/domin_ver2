@@ -143,4 +143,18 @@
     <p><button class="btn primary" type="submit">Sync</button></p>{% endif %}
   </form>
 </section>
+
+{% if allow_no_login %}
+<section class="card warn-card">
+  <h2>Sign-in <small>development and lab only</small></h2>
+  <p class="muted">Off: every visitor that reaches this server acts as the admin who turned it off. Allowed here because
+    DOMIN_ALLOW_NO_LOGIN is set; never set it on a public server.</p>
+  <form method="post" action="{{ base }}/settings/no-login">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick"><input type="checkbox" name="off" value="1" {% if no_login_on %}checked{% endif %}>
+      Turn sign-in off</label>
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

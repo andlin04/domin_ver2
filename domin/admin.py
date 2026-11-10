@@ -184,6 +184,22 @@ def session(conn: sqlite3.Connection, token: str | None) -> dict | None:
     return dict(row) if row else None
 
 
+NO_LOGIN_KEY = "auth:no-login"   # kv: "<admin user id> <csrf>" while sign-in is turned off (dev/lab only)
+
+
+def no_login_session(conn: sqlite3.Connection) -> dict | None:
+    """The stand-in session while sign-in is off: acts as the admin who turned it off. token_hash "" marks it."""
+    user_id, _, csrf = (kv_get(conn, NO_LOGIN_KEY) or "").partition(" ")
+    return {"token_hash": "", "user_id": int(user_id), "csrf": csrf, "expires": ""} if user_id.isdigit() else None
+
+
+def set_no_login(conn: sqlite3.Connection, user_id: int | None, csrf: str = "") -> None:
+    if user_id is None:
+        conn.execute("DELETE FROM kv WHERE key = ?", (NO_LOGIN_KEY,))
+    else:
+        kv_set(conn, NO_LOGIN_KEY, f"{user_id} {csrf or secrets.token_urlsafe(24)}")
+
+
 def end_session(conn: sqlite3.Connection, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (_token_hash(token),))

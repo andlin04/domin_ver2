@@ -65,6 +65,12 @@ def csv_safe(value):
     return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
 
 
+def session_for(c, request: Request, settings: Settings) -> dict | None:
+    """The request's session; with sign-in turned off (DOMIN_ALLOW_NO_LOGIN + Settings) the stand-in one."""
+    s = admin.session(c, request.cookies.get(COOKIE))
+    return s or (admin.no_login_session(c) if settings.allow_no_login else None)
+
+
 def create_app(settings: Settings | None = None, http: httpx.Client | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     db.init(settings.db_path)
@@ -129,10 +135,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     def viewer(request: Request) -> tuple[dict | None, str]:
         """The signed-in user behind a public page request (and the session's CSRF token), or (None, "")."""
-        if COOKIE not in request.cookies:
+        if COOKIE not in request.cookies and not settings.allow_no_login:
             return None, ""
         with conn() as c:
-            sess = admin.session(c, request.cookies.get(COOKIE))
+            sess = session_for(c, request, settings)
             if sess and sess["user_id"]:
                 u = users.get(c, sess["user_id"])
                 if u and not u["disabled"]:
@@ -566,7 +572,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     def current(request: Request, c, data: dict[str, str] | None = None) -> tuple[dict | None, dict | None]:
         """(session, user) for a valid, enabled session, else (None, None); checks CSRF when data is given."""
-        s = admin.session(c, request.cookies.get(COOKIE))
+        s = session_for(c, request, settings)
         if not s:
             return None, None
         if data is not None and not hmac.compare_digest(data.get("csrf", ""), s["csrf"]):
@@ -587,7 +593,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     def shell(request: Request, name: str, u: dict, s: dict, status: int = 200, **ctx) -> HTMLResponse:
         notice = NOTICES.get(request.query_params.get("ok", ""), "")
-        return priv(page(request, name, status, base=base, user=u, csrf=s["csrf"], notice=notice, **ctx))
+        return priv(page(request, name, status, base=base, user=u, csrf=s["csrf"], notice=notice,
+                         no_login=s.get("token_hash") == "", **ctx))
 
     def set_session(resp, c, user_id: int):
         resp.set_cookie(COOKIE, admin.new_session(c, user_id), max_age=admin.SESSION_HOURS * 3600, path="/",
@@ -872,7 +879,21 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
                      countries=countries, roles=users.ROLES, error=error,
                      internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,
-                     sync=publicsync.status(settings.db_path.parent, c))
+                     sync=publicsync.status(settings.db_path.parent, c),
+                     allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None)
+
+    @app.post(base + "/settings/no-login", include_in_schema=False)
+    async def settings_no_login(request: Request):
+        """Dev/lab only (DOMIN_ALLOW_NO_LOGIN): turn sign-in off (everyone acts as this admin) or back on."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            if not settings.allow_no_login:
+                raise HTTPException(403, "Sign-in can only be turned off with DOMIN_ALLOW_NO_LOGIN=1.")
+            admin.set_no_login(c, u["id"] if data.get("off") == "1" else None, s["csrf"])
+        return back(base + "/settings", "saved")
 
     @app.post(base + "/settings/public-sync", include_in_schema=False)
     async def settings_public_sync(request: Request):

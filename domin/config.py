@@ -35,6 +35,7 @@ class Settings:
     cve_db_path: str = ""         # shared mode: the database file to read; own mode: defaults next to db_path
     cve_ttl_days: int = 7         # own mode: re-query a target whose cached result is older than this
     nvd_api_key: str = ""         # optional, raises the NVD rate limit
+    allow_no_login: bool = False  # dev/lab only: Settings may turn sign-in off (every visitor acts as that admin)
 
     @property
     def cve_db_file(self) -> Path:
@@ -69,4 +70,5 @@ class Settings:
             cve_db_path=env("DOMIN_CVE_DB_PATH", "").strip(),
             cve_ttl_days=int(env("DOMIN_CVE_TTL_DAYS", "7")),
             nvd_api_key=env("DOMIN_NVD_API_KEY", "").strip(),
+            allow_no_login=env("DOMIN_ALLOW_NO_LOGIN", "").strip().lower() in ("1", "true", "yes", "on"),
         )

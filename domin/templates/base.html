@@ -33,6 +33,7 @@
           <a href="/admin/account" {{ here('account') }}>My account <small class="muted">{{ user.name }}</small></a>
         </div>
       </details>
+      {% if no_login %}<a class="pill fix-no" href="/admin/settings" title="Sign-in is turned off (Settings)">sign-in off</a>{% endif %}
       {% elif signed_in_hint %}
       <span class="nav-sep" aria-hidden="true"></span>
       <a href="/admin/account">Account</a>
