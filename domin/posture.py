@@ -211,6 +211,7 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
 
     resume = {"chunks_done": row.get("chunks_done") or 0, "services": json.loads(row.get("services") or "[]"),
               "raw": row.get("raw") or ""}
+    conn.commit()   # the writes above (raw flag, route) must not hold the write lock for the minutes nmap runs
     try:
         with proxy.cve_client(proxy.cve_hop(conn, cfg, r, via, client), client) as lookups:
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],

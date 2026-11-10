@@ -246,6 +246,22 @@ def test_a_requeued_scan_that_made_progress_can_be_requeued_again(settings, monk
         assert c.execute("SELECT status FROM posture_scans WHERE id = ?", (row["id"],)).fetchone()[0] == "done"
 
 
+def test_a_running_scan_holds_no_write_lock_while_nmap_runs(settings, monkeypatch):
+    seen = []
+
+    def fake(ip, ports, *a, **k):   # another writer (the web app starting) during the scan
+        with db.connect(settings.db_path) as other:
+            other.execute("PRAGMA busy_timeout = 0")
+            other.execute("BEGIN IMMEDIATE")
+            seen.append("free")
+        return SCAN_XML
+    monkeypatch.setattr(fingerprint, "run_nmap", fake)
+    with db.connect(settings.db_path) as c:
+        posture.enqueue(c, DOM, posture.targets(c, DOM)[0], "1-5", "ana")
+        posture.run(c, posture.claim(c), cve.Database("own", settings.cve_db_file), None)
+    assert seen == ["free"]
+
+
 def test_refresh_fixes_fills_in_fixed_versions_without_changing_the_cves(settings, tmp_path):
     finding = {"cve": "CVE-2026-0002", "severity": "high", "score": 7.5, "fixed": None, "summary": "x",
                "url": "", "source": "NVD"}

@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture scans no longer hold the database write lock
+
+- A posture scan committed its first writes (raw-packet flag) only after nmap's first port chunk, holding the write
+  lock for minutes: other scan slots and the web app's startup failed with "database is locked" (502). It now
+  commits before nmap starts. Rollback: revert this commit.
+
 ## 2026-11-10: Last scan on shared addresses
 
 - Posture host names: a name whose address was scanned under another name sharing it showed results with "Never";
