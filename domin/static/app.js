@@ -970,10 +970,10 @@ function postureCharts() {
   if (c) {
     new Chart(c, {
       type: "bar",
-      // per service: the open ports with a known CVE (severity colour) stacked before the rest (accent)
+      // per service: the rest (accent) first, the open ports with a known CVE (severity colour) at the bar's end
       data: { labels: svc.map((r) => r.label),
-              datasets: [{ label: "With CVEs", data: svc.map((r) => r.vuln || 0), backgroundColor: css("--sev-high"), ...gap },
-                         { label: "No known CVE", data: svc.map((r) => r.n - (r.vuln || 0)), backgroundColor: css("--accent"), ...gap }] },
+              datasets: [{ label: "No known CVE", data: svc.map((r) => r.n - (r.vuln || 0)), backgroundColor: css("--accent"), ...gap },
+                         { label: "With CVEs", data: svc.map((r) => r.vuln || 0), backgroundColor: css("--sev-high"), ...gap }] },
       options: { indexAxis: "y", plugins: { legend: { position: "top" } }, ...filterClick,
                  scales: { x: { stacked: true, ...ints }, y: { stacked: true, grid: { display: false } } } },
     });

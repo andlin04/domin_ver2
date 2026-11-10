@@ -6,6 +6,7 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - Each service bar is split: open ports with at least one known CVE (high colour) and the rest. Rollback: revert
   this change.
+- The CVE part sits at the right end of each bar. Rollback: revert this change.
 
 ## 2026-11-10: CVE details on the Analysis CVEs tab
 
