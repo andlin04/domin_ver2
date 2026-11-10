@@ -861,6 +861,11 @@ def test_report_chart_data_shape():
     assert ch["fix"] == [{"label": "critical", "fix": 1, "nofix": 0}, {"label": "medium", "fix": 0, "nofix": 1},
                          {"label": "low", "fix": 0, "nofix": 1}]
     assert ch["services"][0]["n"] == 1
+    # each service bar also counts its open ports with a known CVE (the vulnerable part of the bar)
+    rows = report_rows()
+    with_cves = sum(1 for r in rows for s in r["services"] if s.get("findings"))
+    assert with_cves and sum(x["vuln"] for x in ch["services"]) == with_cves
+    assert all(0 <= x["vuln"] <= x["n"] for x in ch["services"])
 
 
 def test_report_charts_are_empty_without_data():

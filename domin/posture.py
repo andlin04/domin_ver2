@@ -381,13 +381,16 @@ def report(rows: list[dict], host: str = "") -> dict:
         rows = [r for r in rows if host in (r.get("hosts") or "").split(",")]
     cutoff = (datetime.now() - timedelta(days=STALE_DAYS)).isoformat(timespec="seconds")
     vulns: dict[str, dict] = {}
-    services: dict[str, int] = {}
+    services: dict[str, int] = {}     # open ports per service
+    vulnerable: dict[str, int] = {}   # of those, ports with at least one CVE
     for r in rows:
         sevs = set()
         own: dict[str, dict] = {}  # this address's CVEs, each once with the product/port pairs it affects
         for s in r["services"]:
             label = s.get("service") or "unknown"
             services[label] = services.get(label, 0) + 1
+            if s.get("findings"):
+                vulnerable[label] = vulnerable.get(label, 0) + 1
             prod = f"{s.get('product') or label} {s.get('version') or ''}".strip()
             for f in s.get("findings") or []:
                 sevs.add(f["severity"])
@@ -440,7 +443,8 @@ def report(rows: list[dict], host: str = "") -> dict:
             "fix": [{"label": s, "fix": sum(1 for v in table if v["severity"] == s and v["fixable"]),
                      "nofix": sum(1 for v in table if v["severity"] == s and not v["fixable"])}
                     for s in SEVERITIES if by_sev[s]],
-            "services": [{"label": k, "n": n} for k, n in sorted(services.items(), key=lambda x: -x[1])[:8]]},
+            "services": [{"label": k, "n": n, "vuln": vulnerable.get(k, 0)}
+                         for k, n in sorted(services.items(), key=lambda x: -x[1])[:8]]},
     }
 
 

@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Exposed services chart shows the vulnerable part
+
+- Each service bar is split: open ports with at least one known CVE (high colour) and the rest. Rollback: revert
+  this change.
+
 ## 2026-11-10: CVE details on the Analysis CVEs tab
 
 - A CVE id opens its details under the row: description, CVSS score and vector, attack vector / complexity /
