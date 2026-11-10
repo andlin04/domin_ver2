@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Scans tab shows scan activity live
+
+- Scans tab: "Scan activity" lists queued and running posture scans plus those finished in the last 24 hours, one
+  collapsed row per domain (running/queued counts, finished of total, progress bar, what is scanning now); open a
+  domain for one row per address (status, part x of y, result, finished). Refreshes every 3 s while anything is
+  active, else every 30 s. Status endpoint: `recent=1`. Rollback: revert this commit.
+
 ## 2026-11-10: Sign-in can be turned off on development servers
 
 - With `DOMIN_ALLOW_NO_LOGIN=1` in `/etc/domin.env`, Settings shows "Turn sign-in off": every visitor that reaches

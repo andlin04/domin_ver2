@@ -738,6 +738,24 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
 
+def test_scans_tab_board_lists_pending_and_recently_finished_scans(settings, nmap):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        assert 'id="scan-board"' in h.get("/admin/security/scans").text
+        assert 'id="scan-board"' not in h.get("/admin/security").text
+        h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
+        st = h.get("/admin/security/posture/status", params={"recent": 1}).json()
+        assert st["total"] == 2 and st["queued"] == 2 and {i["domain"] for i in st["items"]} == {DOM}
+        run_queue(settings)
+        st = h.get("/admin/security/posture/status", params={"recent": 1, "domain": DOM}).json()
+        assert st["done"] == 2 and st["finished"]
+        assert h.get("/admin/security/posture/status", params={"recent": 1, "domain": "other.example"}).json()["total"] == 0
+    with db.connect(settings.db_path) as c:   # older than 24 h: off the board
+        c.execute("UPDATE posture_scans SET finished = '2000-01-01T00:00:00'")
+        c.commit()
+        assert posture.recent_ids(c) == []
+
+
 def test_sign_in_can_be_turned_off_only_where_the_environment_allows_it(settings):
     with db.connect(settings.db_path) as c:
         users.create(c, "adm", "admin", PW)

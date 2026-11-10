@@ -777,6 +777,76 @@ function postureProgress() {
 }
 postureProgress();
 
+// Scans tab: live activity board. One collapsed <details> per domain (counts, bar, what runs now); open it for one
+// row per address. Polls every 3 s while anything is queued or running, else every 30 s; open rows stay open.
+function scanBoard() {
+  const box = $("#scan-board");
+  if (!box) return;
+  const list = $("[data-sb-list]", box), empty = $("[data-sb-empty]", box), stamp = $("[data-sb-updated]", box);
+  const opened = new Set();
+  let timer = 0;
+  const SEV = ["critical", "high", "medium", "low"];
+  const pill = (it) => it.status === "done"
+    ? `<span class="pill sev-${SEV.includes(it.worst) ? it.worst : "unknown"}">${esc(it.worst)}</span>`
+    : `<span class="pill ${esc(it.status)}">${esc(it.status)}</span>`;
+  const part = (it) => {
+    if (it.status === "running") return it.chunks > 1 ? `part ${it.chunks_done} of ${it.chunks} · ${it.open_ports} open so far` : "scanning";
+    if (it.status === "failed") return `<span class="bad-text">${esc(it.error || "failed")}</span>`;
+    if (it.status === "done") return `${it.open_ports} port(s) · ${it.cves} CVE(s)${it.high ? ` · ${it.high} high+` : ""}`;
+    return "waiting";
+  };
+  const rank = { running: 0, queued: 1, failed: 2, done: 2 };
+  function paint(d) {
+    const groups = new Map();
+    d.items.forEach((it) => { if (!groups.has(it.domain)) groups.set(it.domain, []); groups.get(it.domain).push(it); });
+    const doms = [...groups.entries()].map(([dom, items]) => {
+      const n = (s) => items.filter((i) => i.status === s).length;
+      const c = { running: n("running"), queued: n("queued"), done: n("done"), failed: n("failed") };
+      const last = items.reduce((m, i) => (i.finished > m ? i.finished : m), "");
+      return { dom, items, c, last, active: c.running + c.queued };
+    }).sort((a, b) => (b.active > 0) - (a.active > 0) || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0));
+    empty.hidden = doms.length > 0;
+    empty.textContent = "No posture scans running, queued or finished in the last 24 hours.";
+    list.innerHTML = doms.map(({ dom, items, c, active }) => {
+      const end = c.done + c.failed, pct = Math.round(100 * end / items.length);
+      const now = items.filter((i) => i.status === "running").map((i) => i.host || i.ip);
+      const rows = [...items].sort((a, b) => rank[a.status] - rank[b.status] || (a.finished < b.finished ? 1 : -1));
+      return `<details class="sb-domain" data-domain="${esc(dom)}"${opened.has(dom) ? " open" : ""}>
+        <summary><b>${esc(dom)}</b>
+          <span class="sb-counts">${c.running ? `<span class="pill running">${c.running} running</span>` : ""}${c.queued ? `<span class="pill queued">${c.queued} queued</span>` : ""}<span class="muted">${end} of ${items.length} finished${c.failed ? ` · <span class="bad-text">${c.failed} failed</span>` : ""}</span></span>
+          <span class="bar sb-bar" role="progressbar" aria-label="${esc(dom)}: scans finished" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span>
+          <span class="muted small-print sb-now">${active ? (now.length ? `Scanning ${esc(now.slice(0, 3).join(", "))}${now.length > 3 ? ` +${now.length - 3}` : ""}` : "waiting for a free slot") : `<a href="${esc(box.dataset.base)}/security/analysis?domain=${encodeURIComponent(dom)}">results</a>`}</span>
+        </summary>
+        <div class="table-wrap"><table><thead><tr><th>Address</th><th>Host name</th><th>Status</th><th>Progress / result</th><th>Finished</th></tr></thead>
+          <tbody>${rows.map((it) => `<tr><td class="mono">${esc(it.ip)}</td><td>${esc(it.host)}</td><td>${pill(it)}</td><td>${part(it)}</td><td>${esc((it.finished || "").slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
+      </details>`;
+    }).join("");
+    $$("details.sb-domain", list).forEach((el) => el.addEventListener("toggle", () => {
+      if (el.open) opened.add(el.dataset.domain); else opened.delete(el.dataset.domain);
+    }));
+    return doms.some((g) => g.active);
+  }
+  async function poll() {
+    clearTimeout(timer);
+    let active = false;
+    try {
+      const r = await fetch(`${box.dataset.status}?recent=1&domain=${encodeURIComponent(box.dataset.domain || "")}`,
+                            { headers: { Accept: "application/json" } });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      active = paint(d);
+      stamp.textContent = `updated ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      stamp.textContent = `lost contact with the server (${e.message}), retrying…`;
+      active = true;
+    }
+    timer = setTimeout(poll, active ? 3000 : 30000);
+  }
+  $$("form[data-posture-run]").forEach((f) => f.addEventListener("submit", () => setTimeout(poll, 1500)));
+  poll();
+}
+scanBoard();
+
 // posture report charts (data: #posture-data, posture.report + trend). Severity colours come from the --sev-* vars,
 // read at render time like every chart colour; an empty series shows a sentence instead of an empty canvas.
 // posture: a clicked chart value or map country is added to the page's Filter box (every word must match), so it

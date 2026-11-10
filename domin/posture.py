@@ -132,6 +132,15 @@ def pending_ids(conn: sqlite3.Connection, domain: str = "") -> list[int]:
                                        "ORDER BY id", args)]
 
 
+def recent_ids(conn: sqlite3.Connection, domain: str = "", hours: int = 24, limit: int = 5000) -> list[int]:
+    """Ids for the Scans tab's activity board: queued and running rows plus those finished in the last `hours`."""
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    return [r[0] for r in conn.execute(
+        f"""SELECT id FROM posture_scans WHERE (status IN ('queued', 'running') OR finished >= ?) {where}
+            ORDER BY id DESC LIMIT ?""", (since, *args, limit))][::-1]
+
+
 def _worst(services: list[dict]) -> str:
     sevs = {f["severity"] for s in services for f in s.get("findings") or []}
     return next((x for x in SEVERITIES if x in sevs), "none")

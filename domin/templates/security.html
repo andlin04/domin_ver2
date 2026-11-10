@@ -72,6 +72,17 @@
 {% include "_posture_progress.html" %}
 {% endwith %}
 
+{% if tab == 'scans' %}
+{# filled and refreshed by app.js (scanBoard): one collapsed row per domain, its hosts inside #}
+<section class="card scan-board" id="scan-board" data-status="{{ base }}/security/posture/status"
+  data-domain="{{ posture_domain }}" data-base="{{ base }}">
+  <div class="card-head"><h2>Scan activity <small>running and queued, plus finished in the last 24 hours{% if posture_domain %} · {{ posture_domain }}{% endif %}</small></h2>
+    <span class="muted small-print" data-sb-updated></span></div>
+  <p class="muted" data-sb-empty>Loading…</p>
+  <div data-sb-list></div>
+</section>
+{% endif %}
+
 {% if show_notice and tab == 'scans' %}
 <section class="card warn-card notice-banner">
   <form method="post" action="{{ base }}/security/dismiss-notice" class="dismiss">

@@ -1129,6 +1129,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             ids = {int(x) for x in q.get("ids", "").split(",")[:5000] if x.strip().isdigit()}
             if q.get("pending"):
                 ids.update(posture.pending_ids(c, (q.get("domain") or "").strip().lower()))
+            if q.get("recent"):   # the Scans tab's activity board: pending plus finished in the last 24 h
+                ids.update(posture.recent_ids(c, (q.get("domain") or "").strip().lower()))
             return priv(JSONResponse(posture.progress(c, sorted(ids))))
 
     @app.post(base + "/tags", include_in_schema=False)
