@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import random
 import re
 import shutil
@@ -567,13 +568,35 @@ def probe(host: str, port: int, timeout: float = 1.0, fresh: bool = False) -> tu
     return ok, msg
 
 
+TOR_REQUEST, TOR_STATE = "tor.request", "tor.state"   # domin-tor.path watches the request; tor-switch.sh writes state
+
+
+def tor_service(state_dir: Path) -> dict:
+    """The local tor service as the root switch script last left it: on / off / "" (no switch on this host), and
+    pending while a request waits. The web app never starts or stops tor itself."""
+    d = Path(state_dir)
+    try:
+        st = (d / TOR_STATE).read_text(encoding="utf-8").split()[:1]
+    except OSError:
+        st = []
+    return {"state": st[0] if st and st[0] in ("on", "off") else "", "pending": (d / TOR_REQUEST).exists()}
+
+
+def request_tor(state_dir: Path, on: bool) -> None:
+    """Ask the root path unit (domin-tor.path) to turn the tor service on or off: the file holds only that word."""
+    path = Path(state_dir) / TOR_REQUEST
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("on\n" if on else "off\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def host_check(conn: sqlite3.Connection, state_dir: Path) -> dict:
     """What this host can do: proxychains4 and wireguard-tools installed (a PATH look-up, nothing is run), the tor
     client's SOCKS5 answering, the Mullvad tunnel (the root script's status file, and the in-tunnel SOCKS5 answering)
     and the relay list's age. The web app never runs wg: the tunnel facts come from the status file."""
     cfg = get(conn)
     tor = next((r for r in cfg["routes"] if r["kind"] == "tor"), ROUTE_DEFAULT)
-    tor_ok, tor_msg = probe(tor["tor_host"], tor["tor_port"])
+    tor_ok, tor_msg = probe(tor["tor_host"], tor["tor_port"], fresh=True)   # shows a switch at once
     status = mullvad.apply_status(state_dir)
     facts = status.get("tunnel") or {}
     wanted = bool(facts.get("up") or any(r["kind"] == "mullvad" for r in cfg["routes"])
@@ -582,7 +605,8 @@ def host_check(conn: sqlite3.Connection, state_dir: Path) -> dict:
     relays, fetched = mullvad.load(conn)
     a = mullvad.age(fetched)
     return {"proxychains": bool(shutil.which("proxychains4")),
-            "tor": {"addr": f"{_addr(tor['tor_host'])}:{tor['tor_port']}", "ok": tor_ok, "message": tor_msg},
+            "tor": {"addr": f"{_addr(tor['tor_host'])}:{tor['tor_port']}", "ok": tor_ok, "message": tor_msg,
+                    **tor_service(state_dir)},
             "wg": bool(shutil.which("wg") or facts.get("wg")),
             "tunnel": mullvad.tunnel_summary(status, socks_ok),
             "relays": {"count": len(relays), "age": f"{int(a.total_seconds() // 3600)} h" if a is not None else "",

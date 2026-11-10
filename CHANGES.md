@@ -2,6 +2,19 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Tor off by default, switch in Settings; root helpers write safely
+
+- Tor is installed but off on new installs; Settings > Routes has Turn Tor on/off (admins), applied by a root path
+  unit (`domin-tor.path` → `deploy/tor-switch.sh`); the choice is kept in `/var/lib/domin/tor.state` across
+  updates. An existing install with tor running keeps it on.
+- Security: `mullvad-tunnel.sh` and `public-sync.sh` (root) wrote fixed temporary names in the app user's directory
+  (`*.status.tmp`, `.public-import.db`), which a compromised app could have pointed elsewhere with a symlink; they now
+  use `mktemp` files, and the Mullvad status is read only if it isn't a symlink.
+- Existing hosts: `update.sh` copies the code only; install the two units once with install.sh, or
+  `install -m 644 deploy/domin-tor.* /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now
+  domin-tor.path && bash deploy/tor-switch.sh on|off`.
+- Rollback: revert this change, re-run install.sh; `systemctl disable --now domin-tor.path`, remove the two units.
+
 ## 2026-11-11: On-prem install fixes from clean-VM tests
 
 - Tested from scratch on Debian 13 and Ubuntu 24.04: install, re-run, uninstall + reinstall (data and users kept),

@@ -543,6 +543,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "tunnel-requested": "Saved. The tunnel settings were handed to the host; its result shows below.",
+           "tor-requested": "Handed to the host: the Tor service switches within a few seconds (reload this page).",
            "relays": "Mullvad relay list refreshed.", "route-saved": "Route saved.", "route-deleted": "Route removed.",
            "default-saved": "Preferred route saved: the default for posture scans.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
@@ -1357,6 +1358,20 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
         mullvad.request_apply(state_dir)
         return back(route_page, "tunnel-requested")
+
+    @app.post(route_page + "/tor", include_in_schema=False)
+    async def scan_settings_tor(request: Request):
+        """Turn the local tor service on or off: a request file for the root unit domin-tor.path (admin only)."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            want = data.get("tor", "")
+            if want not in ("on", "off"):
+                return scan_settings_view(request, c, u, s, 422, "Tor service: on or off.")
+        proxy.request_tor(state_dir, want == "on")
+        return back(route_page, "tor-requested")
 
     @app.post(route_page + "/relays", include_in_schema=False)
     async def scan_settings_relays(request: Request):

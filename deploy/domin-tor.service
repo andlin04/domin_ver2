@@ -1,0 +1,8 @@
+# domin: turn the tor service on or off as asked on the Routes page (started by domin-tor.path).
+# tor-switch.sh removes the request file first and writes /var/lib/domin/tor.state for the page and for install.sh.
+[Unit]
+Description=domin: turn the Tor service on or off
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/domin/app/deploy/tor-switch.sh apply

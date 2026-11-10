@@ -18,12 +18,14 @@ STATUS=$DATA/public-sync.status
 MAX_BYTES=$((8 * 1024 * 1024 * 1024))   # a decompressed copy larger than this is refused
 
 status_file() {  # ok(true|false) message
+  # $DATA belongs to the app user: root writes only through a fresh mktemp file (never a fixed name it could plant)
+  local tmp; tmp=$(mktemp "$DATA/.public-sync.status.XXXXXX") || return 1
   python3 -c 'import json, sys, os, datetime
 copy = sys.argv[3]
 when = datetime.datetime.fromtimestamp(os.path.getmtime(copy)).strftime("%Y-%m-%d %H:%M") if os.path.exists(copy) else ""
 print(json.dumps({"at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), "ok": sys.argv[1] == "true",
-                  "message": sys.argv[2][:300], "copy": when}))' "$1" "$2" "$COPY" > "$STATUS.tmp" &&
-    chown domin:domin "$STATUS.tmp" && chmod 640 "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+                  "message": sys.argv[2][:300], "copy": when}))' "$1" "$2" "$COPY" > "$tmp" &&
+    chown domin:domin "$tmp" && chmod 640 "$tmp" && mv -f "$tmp" "$STATUS"
 }
 
 case "${1:-}" in
@@ -40,8 +42,7 @@ case "${1:-}" in
   import)
     rm -f "$DATA/public-sync.request"
     [ -s "$COPY" ] || { status_file false "No copy of the public database has reached this host yet."; exit 0; }
-    work=$DATA/.public-import.db
-    rm -f "$work" "$work-wal" "$work-shm"
+    work=$(mktemp "$DATA/.public-import.XXXXXX") || { status_file false "No room for the import."; exit 1; }
     if ! zstd -q -d -c "$COPY" | head -c "$MAX_BYTES" > "$work"; then
       rm -f "$work"; status_file false "The copy could not be unpacked."; exit 1
     fi

@@ -118,6 +118,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # proxychains4: scan routes; wireguard-tools: the Mullvad tunnel (deploy/mullvad-tunnel.sh); tor: the Tor route
 # (its default config: SOCKS5 on 127.0.0.1:9050; a host with proxy-only egress needs HTTPSProxy in /etc/tor/torrc)
+# Tor is installed but off until an admin turns it on (Settings > Routes; tor-switch.sh keeps the choice). An
+# install from before that switch with tor running keeps it on.
+TOR_START=keep
+[ -e /var/lib/domin/tor.state ] || {
+  if [ -d /var/lib/domin ] && systemctl is-active -q tor 2>/dev/null; then TOR_START=on; else TOR_START=off; fi; }
 apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 wireguard-tools tor >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
 # nmap: service fingerprints for the posture scans; openssl: the on-prem TLS certificate
@@ -459,12 +464,16 @@ nginx -t -q
 
 # Mullvad tunnel settings saved on the Routes page (Settings): a root path unit runs mullvad-tunnel.sh apply
 install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
+# Tor on/off from the Routes page: a root path unit runs tor-switch.sh apply
+install -m 644 "$APP/app/deploy/domin-tor.path" "$APP/app/deploy/domin-tor.service" /etc/systemd/system/
 # Settings > Public database > Sync: a root path unit runs public-sync.sh import (a staging copy of the public data)
 install -m 644 "$APP/app/deploy/domin-public-sync.path" "$APP/app/deploy/domin-public-sync.service" \
   /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable -q --now domin-mullvad.path
+bash "$APP/app/deploy/tor-switch.sh" "$TOR_START" >/dev/null
+systemctl enable -q --now domin-tor.path
 systemctl enable -q --now domin-public-sync.path
 systemctl enable -q domin
 systemctl restart domin

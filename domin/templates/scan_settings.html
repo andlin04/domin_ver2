@@ -24,7 +24,12 @@
       <td>{% if cap.proxychains %}posture scans can go through any route{% else %}posture scans can't use any route: apt install proxychains4{% endif %}</td></tr>
     <tr><td>Tor</td>
       <td>{% if cap.tor.ok %}<span class="pill ok">✓ answers</span>{% else %}<span class="pill bad">✗ not reachable</span>{% endif %}</td>
-      <td>{% if cap.tor.ok %}the tor client's SOCKS5 at <span class="mono">{{ cap.tor.addr }}</span> answers{% else %}{{ cap.tor.message }}: is tor installed and running? (apt install tor){% endif %}</td></tr>
+      <td>{% if cap.tor.ok %}the tor client's SOCKS5 at <span class="mono">{{ cap.tor.addr }}</span> answers{% elif cap.tor.state == 'off' %}the Tor service is off (installed, not started){% else %}{{ cap.tor.message }}: is tor installed and running? (apt install tor){% endif %}
+        {% if cap.tor.pending %}<span class="pill warn">switching</span>
+        {% elif cap.tor.state %}<form method="post" action="{{ base }}/security/scan-settings/tor" class="inline" id="tor-form">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="tor" value="{{ 'off' if cap.tor.state == 'on' else 'on' }}">
+          <button class="btn small" type="submit">{{ 'Turn Tor off' if cap.tor.state == 'on' else 'Turn Tor on' }}</button></form>{% endif %}</td></tr>
     <tr><td>wireguard-tools</td>
       <td>{% if cap.wg %}<span class="pill ok">✓ installed</span>{% else %}<span class="pill bad">✗ missing</span>{% endif %}</td>
       <td>{% if cap.wg %}the Mullvad tunnel can be set up{% else %}the Mullvad tunnel needs it: apt install wireguard-tools{% endif %}</td></tr>

@@ -1,0 +1,11 @@
+# domin: the Routes page (Settings) drops /var/lib/domin/tor.request ("on" or "off"); domin-tor.service (root)
+# then turns the tor service on or off. The web app itself never starts or stops tor.
+[Unit]
+Description=domin: watch for Tor on/off requests from the Routes page (Settings)
+
+[Path]
+PathExists=/var/lib/domin/tor.request
+Unit=domin-tor.service
+
+[Install]
+WantedBy=multi-user.target

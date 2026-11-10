@@ -62,3 +62,10 @@ a public issue for it.
   systemd drop-in; this host's own addresses are cut out of those networks (systemd lets an allow entry win over
   any deny entry). The web service gets no internal networks, only the HTTP proxy, if one is set.
 - `--raw` gives the scan worker CAP_NET_RAW/CAP_NET_ADMIN for nmap SYN scans; off by default, `--no-raw` removes it.
+
+## Root helpers
+- The app never runs privileged commands. Settings actions that need root (Tor on/off, the Mullvad tunnel, the
+  public database import) drop a request file in `/var/lib/domin`; a root path unit runs a fixed script from
+  `/opt/domin`. Tor is installed but off until an admin turns it on.
+- `/var/lib/domin` belongs to the app user, so those scripts read only one validated word or no-secret JSON from it,
+  skip symlinks, and write only through fresh `mktemp` files renamed into place (never a fixed temporary name).

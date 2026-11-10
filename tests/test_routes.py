@@ -439,17 +439,50 @@ def test_relay_list_refresh_button(settings, monkeypatch):
         assert len(mullvad.load(c)[0]) == 2
 
 
+def test_admin_turns_tor_on_and_off_through_a_request_file(settings):
+    d = settings.db_path.parent
+    req = d / proxy.TOR_REQUEST
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        assert "Turn Tor" not in h.get("/admin/security/scan-settings").text   # no switch on this host yet
+        (d / proxy.TOR_STATE).write_text("off\n")
+        page = h.get("/admin/security/scan-settings").text
+        assert "the Tor service is off" in page and "Turn Tor on" in page
+        r = h.post("/admin/security/scan-settings/tor", data={"csrf": csrf, "tor": "on"}, follow_redirects=False)
+        assert r.status_code == 303 and "tor-requested" in r.headers["location"] and req.read_text() == "on\n"
+        assert "switching" in h.get("/admin/security/scan-settings").text
+        req.unlink()
+        (d / proxy.TOR_STATE).write_text("on\n")
+        assert "Turn Tor off" in h.get("/admin/security/scan-settings").text
+        assert h.post("/admin/security/scan-settings/tor", data={"csrf": csrf, "tor": "x; rm"}).status_code == 422
+        assert not req.exists()
+        assert h.post("/admin/security/scan-settings/tor", data={"tor": "off"}).status_code in (403, 404)   # no CSRF
+        assert not req.exists()
+
+
+def test_install_leaves_tor_off_and_root_scripts_write_only_fresh_temp_files():
+    deploy = Path(__file__).parent.parent / "deploy"
+    install = (deploy / "install.sh").read_text()
+    assert "TOR_START=off" in install and 'tor-switch.sh" "$TOR_START"' in install
+    switch = (deploy / "tor-switch.sh").read_text()
+    assert "mktemp" in switch and '[ ! -L "$1" ]' in switch
+    for name in ("tor-switch.sh", "mullvad-tunnel.sh", "public-sync.sh"):   # $DATA belongs to the app user
+        assert "STATUS.tmp" not in (deploy / name).read_text() and "mktemp" in (deploy / name).read_text()
+    assert ".public-import.db" not in (deploy / "public-sync.sh").read_text()
+
+
 def test_only_admins_reach_the_route_endpoints(settings):
     with db.connect(settings.db_path) as c:
         proxy.save_route(c, route_form())
     for name in ("ana", "vee"):
         with app_client(settings) as h:
             csrf = sign_in(h, name)
-            for path in ("", "/test", "/relays", "/tunnel", "/routes", "/routes/r1/delete"):
+            for path in ("", "/test", "/relays", "/tunnel", "/tor", "/routes", "/routes/r1/delete"):
                 assert h.post(f"/admin/security/scan-settings{path}",
-                              data={"csrf": csrf, **page_form(), **route_form(id="r1", name="Changed")}
+                              data={"csrf": csrf, "tor": "on", **page_form(), **route_form(id="r1", name="Changed")}
                               ).status_code == 404
     assert not (settings.db_path.parent / mullvad.REQUEST_FILE).exists()
+    assert not (settings.db_path.parent / proxy.TOR_REQUEST).exists()
     with db.connect(settings.db_path) as c:
         assert [r["name"] for r in proxy.get(c)["routes"]] == ["Mullvad"]
 

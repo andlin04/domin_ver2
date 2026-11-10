@@ -83,6 +83,7 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   refused) and the `--internal-dns` servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
 - **Behind an HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first
   (with sudo: `sudo -E`); apt, pip and the downloads use it and it is kept for the app.
+- **Tor:** installed but off; an admin turns it on or off under Settings > Routes (the choice survives updates).
 - **Update:** unpack the new package, `bash deploy/install.sh` (options are kept in `/etc/domin.env`; database,
   users and certificate stay). **Remove:** `bash deploy/uninstall.sh` (data kept) or `--purge`.
 

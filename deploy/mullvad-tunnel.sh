@@ -74,11 +74,15 @@ status_file() {  # ok(true|false) code message: the page's "last apply" line and
   # No arguments: keep the last apply's result, refresh the tunnel facts only (the status command).
   [ -d "$DATA" ] || return 0
   tunnel_facts
-  python3 - "$STATUS" "${1:-}" "${2:-}" "${3:-}" "$T_UP" "$T_HS" "$T_RELAY" "$T_WG" > "$STATUS.tmp" <<'EOF'
-import datetime, json, sys
+  # $DATA belongs to the app user: write through a fresh mktemp file, read the old status only if it is no symlink
+  local tmp; tmp=$(mktemp "$DATA/.mullvad.status.XXXXXX") || return 0
+  python3 - "$STATUS" "${1:-}" "${2:-}" "${3:-}" "$T_UP" "$T_HS" "$T_RELAY" "$T_WG" > "$tmp" <<'EOF'
+import datetime, json, os, sys
 path, ok, code, msg, up, hs, relay, wg = sys.argv[1:]
 now = datetime.datetime.now().isoformat(timespec="seconds")
 try:
+    if os.path.islink(path):
+        raise OSError("symlink")
     with open(path) as f:
         out = json.load(f)
 except (OSError, ValueError):
@@ -90,9 +94,9 @@ out["tunnel"] = {"up": up == "true", "handshake": int(hs) if hs.isdigit() else 0
                  "checked": now}
 print(json.dumps(out))
 EOF
-  chmod 644 "$STATUS.tmp"
-  chown domin:domin "$STATUS.tmp" 2>/dev/null || true
-  mv -f "$STATUS.tmp" "$STATUS"
+  chmod 644 "$tmp"
+  chown domin:domin "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$STATUS"
 }
 fail() {  # code message: the page maps the code to plain words and the next step (mullvad.EXPLAIN)
   trap - ERR
