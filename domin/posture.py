@@ -538,7 +538,9 @@ def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: dat
                 rows.append({**base, "kind": "version", "detail": f"{p}/tcp {ver(prev['svc'][p])} → {ver(svc[p])}"})
         # a CVE gone because its service changed (version, port closed) is fixed on the host; one gone while the
         # service stayed the same went with a CVE-data or matching change (or a port this scan didn't cover)
-        moved = {p for p in prev["svc"] if (ver(svc[p]) != ver(prev["svc"][p]) if p in svc else p in both)}
+        # a service whose version this scan didn't detect ("dnsmasq 2.80" -> "domain") is not an update
+        moved = {p for p in prev["svc"] if (bool(svc[p].get("version")) and ver(svc[p]) != ver(prev["svc"][p])
+                                            if p in svc else p in both)}
         gone = prev["cves"].keys() - cves.keys()
         fixed = {c for c in gone if any(p in moved for p, s in prev["svc"].items()
                                         if any(f["cve"] == c for f in s.get("findings") or []))}

@@ -174,6 +174,12 @@ def test_changes_compare_each_scan_with_the_previous_one(settings):
         assert "Changes" in page and "Port opened" in page and "nginx 1.24 → nginx 1.26" in page
         assert "CVEs fixed" in page and "CVEs dropped (data)" in page
         assert "−0<" not in page and "+0<" not in page   # a zero count has no sign
+    with db.connect(settings.db_path) as c:   # a version the next scan didn't detect is no update: dropped
+        c.execute("DELETE FROM posture_scans")
+        done("2026-11-01T10:00:00", "53", [svc(53, "dnsmasq", "2.80", ["CVE-3"])])
+        done("2026-11-02T10:00:00", "53", [svc(53, "", "")])
+        lost = posture.changes(c, DOM, now=posture.datetime(2026, 11, 8))["kpi"]
+    assert lost["fixed-cve"] == 0 and lost["gone-cve"] == 1
 
 
 def test_posture_slots_above_the_setting_take_no_scans(settings, nmap):

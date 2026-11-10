@@ -6,7 +6,8 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - Overview: Changes (new and fixed since the previous scan) above the CVE list; KPIs are CVE counts only.
 - Changes: "CVEs gone" split into "CVEs fixed" (the service's version changed or its port closed) and "CVEs dropped
-  (data)" (same service: CVE data or matching changed, or the port wasn't scanned).
+  (data)" (same service: CVE data or matching changed, the port wasn't scanned, or the scan didn't detect the
+  version).
 - Trend charts show addresses scanned as a dashed line, so a rise from new coverage is not read as new risk.
 - Analysis: own KPIs (addresses scanned, high+, open ports, potentially blocked, stale/failed); Exposed services
   moved here from Overview.
