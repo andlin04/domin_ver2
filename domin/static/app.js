@@ -347,7 +347,7 @@ $$("[data-domain-search]").forEach((box) => {
   const chips = document.createElement("div");
   chips.className = "filter-chips";
   chips.setAttribute("aria-label", "Active filters");
-  box.closest(".field").after(chips);
+  box.after(chips);   // inside the Filter field, right under the box
   const words = () => box.value.trim().split(/\s+/).filter(Boolean);
   const drawChips = () => {
     const list = words();

@@ -370,9 +370,14 @@ form.tag .pill { text-transform: none; text-decoration: none; }
 .tag-x:hover { color: var(--down); }
 .tag-in { width: 5.5rem; font-size: .75rem; padding: .1rem .3rem; }
 .tag-groups .pill { text-transform: none; text-decoration: none; margin-right: .25rem; }
-/* posture Filter: one chip per word, × removes it (app.js); its own row under the pickers, empty = no space */
-.filter-chips { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; justify-content: flex-end; }
+/* posture Filter: one chip per word, × removes it (app.js); under the box, as wide as it, empty = no space */
+.filter-chips { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; width: 0; min-width: 100%; }
 .filter-chips:empty { display: none; }
+/* the pickers line up at the top, so chips under the Filter box grow the card downwards, not the box upwards */
+.card.controls form.posture-pick { align-items: flex-start; }
+.card.controls form.posture-pick > .btn { margin-top: calc(1.5em + .3rem); }   /* level with the select boxes */
+.pick-filter { grid-template-columns: auto 1fr; column-gap: .4rem; align-items: baseline; }
+.pick-filter > input, .pick-filter > .filter-chips { grid-column: 1 / -1; }
 .filter-chips .chip { display: inline-flex; align-items: center; text-transform: none; letter-spacing: 0;
   background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .tag-groups .pill.active { background: color-mix(in srgb, var(--up) 20%, transparent); color: var(--up); }

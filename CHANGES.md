@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Filter chips under the Filter box
+
+- The chips sit inside the Filter field, right under the box and as wide as it; the pickers line up at the top
+  ("Filter" and its count on one line) so the box stays level with Domain and Host. Rollback: revert this commit.
+
 ## 2026-11-10: Filter chips
 
 - Posture Filter: one chip per filter word under the pickers, × removes that word, "Clear all" from two words up;
