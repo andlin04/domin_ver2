@@ -6,7 +6,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 
 - The country map left Posture and is on the Inventory overview (latest scan per domain; a click opens All records
   for the country) and on each domain page (a click filters the Records table). Countries are shaded by address
-  count (log scale, legend), no severity colours. Rollback: revert this commit.
+  count (log scale, legend), no severity colours. Country names spelled "Korea, Republic of" / Türkiye / Viet Nam
+  match the map data; places too small for it (Singapore, Hong Kong, Malta, ...) show as dots. Rollback: revert the
+  map commits.
 
 ## 2026-11-10: Posture scans no longer hold the database write lock
 

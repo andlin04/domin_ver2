@@ -148,6 +148,7 @@ def test_posture_chart_clicks_add_to_the_filter_and_the_map_is_on_inventory_page
     assert "postureMap" not in js and "inventoryMap();" in js and 'getElementById("inv-map")' in js
     assert "--sev-" not in js.split("async function inventoryMap")[1].split("\nfunction ")[0]   # volume scale only
     assert "/all?f_country=" in js and 'data-filter="#records"' in js
+    assert "singapore: [103.8, 1.35]" in js and '"türkiye": "turkey"' in js   # small places and spelling variants
     css = (pathlib.Path(__file__).parents[1] / "domin" / "static" / "app.css").read_text(encoding="utf-8")
     assert 'chips.className = "filter-chips"' in js and 'data-chip="all"' in js and ".filter-chips .chip" in css
 

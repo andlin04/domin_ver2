@@ -890,7 +890,22 @@ async function inventoryMap() {
     w.box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
     w.c = [(w.box[0] + w.box[2]) / 2, (w.box[1] + w.box[3]) / 2];
   });
-  const pins = hits.map((h) => ({ ...h, w: byKey.get(h.country.toLowerCase()) })).filter((p) => p.w);
+  // names the map data spells differently ("Korea, Republic of" = "republic of korea"), and places too small for the
+  // 110m data, drawn as a dot at [lon, lat]
+  const ALIAS = { "türkiye": "turkey", "viet nam": "vietnam", "czechia": "czech republic", "russian federation": "russia" };
+  const DOTS = { singapore: [103.8, 1.35], "hong kong": [114.17, 22.32], macao: [113.55, 22.17], malta: [14.45, 35.9],
+                 bahrain: [50.55, 26.07], andorra: [1.52, 42.5], liechtenstein: [9.55, 47.16], monaco: [7.42, 43.74],
+                 "san marino": [12.46, 43.94], guernsey: [-2.58, 49.45], jersey: [-2.13, 49.21], "isle of man": [-4.5, 54.23],
+                 gibraltar: [-5.35, 36.14], montserrat: [-62.19, 16.74], bermuda: [-64.75, 32.3], "cayman islands": [-81.25, 19.3],
+                 mauritius: [57.55, -20.3], seychelles: [55.45, -4.68], maldives: [73.5, 4.17], barbados: [-59.55, 13.17] };
+  const find = (name) => {
+    const n = name.toLowerCase(), flip = n.includes(", ") ? n.split(", ").reverse().join(" ") : n;
+    const w = byKey.get(n) || byKey.get(flip) || byKey.get(ALIAS[n]);
+    if (w || !DOTS[n]) return w;
+    const [x, y] = [DOTS[n][0], merc(DOTS[n][1])];
+    return { k: [n], m: [], box: [x, y, x, y], c: [x, y] };
+  };
+  const pins = hits.map((h) => ({ ...h, w: find(h.country) })).filter((p) => p.w);
   const lost = hits.length - pins.length;
   let k = 1, tx = 0, ty = 0, W = 0, H = 0;
   const dpr = devicePixelRatio || 1;
@@ -962,7 +977,7 @@ async function inventoryMap() {
   new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   const at = (ev) => { const b = cv.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
   const pick = ([x, y]) => pins.find((p) => Math.hypot(p.w.c[0] * k + tx - x, p.w.c[1] * k + ty - y) <= radius(p))
-    || pins.find((p) => ctx.isPointInPath(p.w.path, x * dpr, y * dpr));
+    || pins.find((p) => p.w.path && ctx.isPointInPath(p.w.path, x * dpr, y * dpr));
   cv.addEventListener("wheel", (ev) => {
     ev.preventDefault();
     const [x, y] = at(ev), f = Math.pow(1.0015, -ev.deltaY);
