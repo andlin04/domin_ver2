@@ -826,8 +826,9 @@ def test_posture_sub_tabs_split_what_where_and_scans(settings, nmap):
     assert cves.count('<tr data-sev=') == 1 and 'data-sev="critical"' in cves and "CVE-2024-9999" in cves
     assert 'data-chips="#overview-cves"' in over and 'data-val="critical"' in over and 'id="overview-cves"' not in ana
     assert 'data-attr="fix"' not in over   # every CVE in the same fix state: those chips would filter nothing
-    # what changed first, then the CVE list, then the trends
-    assert over.index("posture-changes") < over.index('id="overview-cves"') < over.index('id="pc-trend"')
+    # what changed first, then the two charts side by side, then the CVE list
+    assert over.index("posture-changes") < over.index('id="pc-trend"') < over.index('id="overview-cves"')
+    assert '<div class="card wide"><h2>CVEs over time' not in over
     assert 'id="posture-hosts"' in ana and 'id="pc-surface"' in ana and 'id="pc-trend"' not in ana
     # services are "where": Analysis; KPIs per tab: CVE counts on Overview, coverage on Analysis
     assert 'id="pc-services"' in ana and 'id="pc-services"' not in over
