@@ -9,9 +9,9 @@
 {% set tab_q = ('?domain=' ~ posture_domain|urlencode ~ ('&host=' ~ posture_host|urlencode if posture_host else '')) if posture_domain else '' %}
 {% set tab_url = base ~ '/security' ~ ('' if tab == 'overview' else '/' ~ tab) %}
 <nav class="tabs posture-tabs" aria-label="Posture views">
-  {% for t, label in [('overview', 'Overview'), ('analysis', 'Analysis'), ('scans', 'Scans')] %}
+  {% for t, label, sub in [('overview', 'Overview', 'What'), ('analysis', 'Analysis', 'Where'), ('scans', 'Scans', '')] %}
   <a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
-    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}</a>{% endfor %}
+    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}{% if sub %}<small class="tab-sub">{{ sub }}</small>{% endif %}</a>{% endfor %}
 </nav>
 <section class="card controls">
   <form method="get" action="{{ tab_url }}" class="inline posture-pick">

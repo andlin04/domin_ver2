@@ -119,6 +119,7 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 a.tab { text-decoration: none; }
 .tab small { color: var(--muted); font-weight: 400; }
+.tab .tab-sub { display: block; font-size: .72rem; opacity: .7; line-height: 1.1; }
 .active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0 0 1rem; }
 .chip { background: var(--surface-2); border: 1px solid var(--accent); color: var(--text); border-radius: 999px;
   padding: .3rem .75rem; font: inherit; font-size: .9rem; cursor: pointer; }

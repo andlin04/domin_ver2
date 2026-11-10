@@ -2,6 +2,10 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-10: Posture tab subtitles
+
+- The Overview tab carries a dimmed "What" under its name, Analysis a dimmed "Where". Rollback: revert this change.
+
 ## 2026-11-10: Exposed services chart shows the vulnerable part
 
 - Each service bar is split: open ports with at least one known CVE (high colour) and the rest. Rollback: revert

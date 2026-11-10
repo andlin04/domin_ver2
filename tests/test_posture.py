@@ -815,7 +815,8 @@ def test_posture_sub_tabs_split_what_where_and_scans(settings, nmap):
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)
         tabs = {t: h.get(f"/admin/security{'/' + t if t else ''}?domain={DOM}").text for t in ("", "analysis", "scans")}
-    nav = f'href="/admin/security/analysis?domain={DOM}">Analysis</a>'
+    nav = f'href="/admin/security/analysis?domain={DOM}">Analysis<small class="tab-sub">Where</small></a>'
+    assert all('Overview<small class="tab-sub">What</small>' in page for page in tabs.values())
     assert all(nav in page for page in tabs.values())
     over, ana, scans = tabs[""], tabs["analysis"], tabs["scans"]
     assert 'class="tab active" aria-current="page"\n    href="/admin/security?domain=' in over
