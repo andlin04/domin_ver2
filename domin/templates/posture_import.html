@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Import targets · Posture · domin{% endblock %}
+{% block page %}security{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Import targets</h1>
+  <p class="muted">Load domains and host addresses from a CSV file: each imported domain becomes a posture target
+    (Scans: scan it, renew it, or run nmap discovery on it), with the host names and addresses of the file.
+    {{ targets }} domain(s) are posture targets now.</p></div></section>
+{% include "_posture_tabs.html" %}
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% with import_from="posture", import_title="Import targets from CSV" %}{% include "_csv_import.html" %}{% endwith %}
+<p class="muted small-print">A row needs a domain or a host name, and an address to be scanned. The domain inventory
+  scope (Settings) applies; addresses outside the posture scope stay listed but are not scanned.</p>
+{% endblock %}

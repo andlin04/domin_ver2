@@ -9,8 +9,10 @@
   <script src="{{ url_for('static', path='theme.js').path }}"></script>
 </head>
 <body data-page="{% block page %}{% endblock %}"{% if user %} class="backdrop"{% endif %}>
+  {# inventory off (Settings > Components): no inventory links; the brand goes to Posture #}
+  {% set inv_on = comps is not defined or 'inventory' in comps %}
   <header class="topbar"><div class="topbar-in">
-    <a class="brand" href="/">
+    <a class="brand" href="{{ '/' if inv_on else '/admin/security' }}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
       domin
     </a>
@@ -18,7 +20,7 @@
     {% set pg = self.page() %}{% set sec = {'domain': 'overview', 'compare': 'overview'}.get(pg, pg) %}
     {% macro here(name) %}{% if sec == name %}class="active" aria-current="page"{% endif %}{% endmacro %}
     <nav>
-      {% if not user or access.can('inventory') %}
+      {% if inv_on and (not user or access.can('inventory')) %}
       <a href="/" {{ here('overview') }}>Inventory</a>
       <a href="/all" {{ here('all') }}>All records</a>
       <a href="/tools" {{ here('tools') }}>Whois &amp; e-mail</a>
@@ -35,7 +37,7 @@
              else '/admin/security/discovery-profiles' if access.can('discovery') else '/admin/security/lookup' if access.can('posture') else '' %}
           {% if set_home %}<a href="{{ set_home }}" {{ here('settings') }}>Settings</a>{% endif %}
           {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
-          {% if access.manages_any %}<a href="/admin/viewers" {{ here('viewers') }}>Domain viewers</a>{% endif %}
+          {% if inv_on and access.manages_any %}<a href="/admin/viewers" {{ here('viewers') }}>Domain viewers</a>{% endif %}
           <a class="nav-acct" href="/admin/account" {{ here('account') }} title="Signed in as {{ user.name }}"><span>My account</span><small class="muted">{{ user.name }}</small></a>
         </div>
       </details>
@@ -48,7 +50,7 @@
       <a href="/admin" {{ here('login') }}>Sign in</a>
       {% endif %}
     </nav>
-    {% if not user or access.can('inventory') %}
+    {% if inv_on and (not user or access.can('inventory')) %}
     <form class="jump" action="/d/" data-jump role="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
       <input name="q" placeholder="Go to domain…" autocomplete="off" list="domain-list" aria-label="Go to domain">

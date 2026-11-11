@@ -126,54 +126,25 @@
   <p><button class="btn primary" type="submit">Save settings</button></p>
 </form>
 
-<section class="card" id="csv-import">
-  <h2>CSV import</h2>
-  <p class="muted">Loads a CSV file as imported scans: a download of this or another domin (All records, or a search's
-    CSV), or any CSV with a domain or host column and some of the record fields (comma, semicolon or tab separated;
-    UTF-8 or Latin-1). After the upload you pick which column feeds which field; only those are imported. One scan per
-    domain, timed by the newest "last seen" in the file. Existing scans are never changed; a domain that already has
-    a scan at that time is skipped, so the same file twice adds nothing. Out-of-scope domains and bad rows are
-    skipped and counted. Up to {{ csv_max_mb }} MB; an upload not imported within an hour is deleted; the worker runs
-    the import in the background.</p>
-  {% set ci = csv_import %}
-  {% if ci.state %}
-  <dl class="facts">
-    <dt>Last import</dt><dd>{{ ci.file or "?" }} by {{ ci.user or "?" }}, {{ ci.at }}:
-      {% if ci.state == "queued" %}queued{% elif ci.state == "running" %}running{% elif ci.state == "done" %}done
-      {{ ci.finished }}{% else %}failed{% if ci.error %}, {{ ci.error }}{% endif %}{% endif %}</dd>
-    {% if ci.map %}<dt>Mapping</dt><dd class="mono">{{ ci.map }}</dd>{% endif %}
-    {% if ci.rows is defined %}<dt>Rows</dt><dd>{{ ci.rows }} read, {{ ci.bad }} bad{% if ci.errors %}
-      ({{ ci.errors | join("; ") }}){% endif %}</dd>{% endif %}
-    {% if ci.domains %}<dt>Domains</dt><dd>{{ ci.imported }} imported ({{ ci.records }} records),
-      {{ ci.existing }} already there, {{ ci.out_of_scope }} out of scope, of {{ ci.domains }}</dd>{% endif %}
-  </dl>
-  {% endif %}
-  {% if ci.state in ("queued", "running") %}
-  <p class="muted">Import {{ ci.state }}; reload the page for its progress.</p>
-  {% else %}
-  <form method="post" action="{{ base }}/settings/csv-import" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label class="field">CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
-    <p><button class="btn primary" type="submit">Upload and map columns</button></p>
-  </form>
-  {% endif %}
-</section>
+{# the CSV import: here with the inventory; Posture > Import targets has the same card #}
+{% if 'inventory' in comps %}{% include "_csv_import.html" %}{% endif %}
 
 <section class="card" id="signin">
   <h2>Sign-in required for</h2>
   <form method="post" action="{{ base }}/settings/signin">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label class="tick"><input type="checkbox" name="inventory" {% if signin.inventory %}checked{% endif %}>
+    {# only the components that are on (Settings > Components); a hidden one keeps its saved value #}
+    {% if 'inventory' in comps %}<label class="tick"><input type="checkbox" name="inventory" {% if signin.inventory %}checked{% endif %}>
       Inventory <small class="muted">inventory pages, all records, domain pages, search, CSV, drill data, whois and
-      e-mail tools</small></label>
-    <label class="tick"><input type="checkbox" name="posture" {% if signin.posture or not allow_no_login %}checked{% endif %}
+      e-mail tools</small></label>{% endif %}
+    {% if 'posture' in comps %}<label class="tick"><input type="checkbox" name="posture" {% if signin.posture or not allow_no_login %}checked{% endif %}
       {% if not allow_no_login %}disabled{% endif %}>
-      Posture <small class="muted">posture pages, CVEs, scans and schedules</small></label>
-    <p class="muted small-print">Inventory unticked: open to every visitor that reaches this site, as before (a public
+      Posture <small class="muted">posture pages, CVEs, scans and schedules</small></label>{% endif %}
+    <p class="muted small-print">{% if 'inventory' in comps %}Inventory unticked: open to every visitor that reaches this site, as before (a public
       server: the internet). Ticked: a visitor without a session goes to the sign-in page (API, CSV and drill data:
-      401); private API clients (DOMIN_INTERNAL_IPS) keep /api/.
-      {% if allow_no_login %}Posture unticked: while sign-in is turned off (below), every visitor reads and acts on
-      posture as that admin.{% else %}Posture always needs sign-in here (DOMIN_ALLOW_NO_LOGIN is not set).{% endif %}
+      401); private API clients (DOMIN_INTERNAL_IPS) keep /api/.{% endif %}
+      {% if 'posture' in comps %}{% if allow_no_login %}Posture unticked: while sign-in is turned off (below), every visitor reads and acts on
+      posture as that admin.{% else %}Posture always needs sign-in here (DOMIN_ALLOW_NO_LOGIN is not set).{% endif %}{% endif %}
       The admin area (Operations, Settings, Users) always needs sign-in{% if allow_no_login %}, except while it is
       turned off below{% endif %}.</p>
     <p><button class="btn primary" type="submit">Save</button></p>

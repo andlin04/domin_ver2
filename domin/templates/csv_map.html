@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Map CSV columns · domin{% endblock %}
-{% block page %}settings{% endblock %}
+{% block page %}{{ 'security' if origin == 'posture' else 'settings' }}{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Map CSV columns</h1>
   <p class="muted">Pick the column that feeds each domin field; fields left on "don't import" stay empty. A row needs
     a domain or a host (the domain is then derived from the host), and the file at least one data field.</p></div></section>
 
-{% set sub = "general" %}{% include "_settings_nav.html" %}
+{% if origin == 'posture' %}{% set tab = 'import' %}{% include "_posture_tabs.html" %}
+{% else %}{% set sub = "general" %}{% include "_settings_nav.html" %}{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
 <section class="card">
@@ -36,6 +37,7 @@
   <form method="post" action="{{ base }}/settings/csv-import/map">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="t" value="{{ token }}">
+    {% if origin %}<input type="hidden" name="from" value="{{ origin }}">{% endif %}
     <div class="grid g3">
       {% for t in targets %}
       <label class="field">{{ labels[t] }} <small>{{ hints[t] }}</small>

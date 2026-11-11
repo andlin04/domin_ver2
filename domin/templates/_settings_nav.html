@@ -4,4 +4,5 @@
   {% if access.can('discovery') %}<a href="{{ base }}/security/discovery-profiles" class="{{ 'active' if sub == 'discovery' }}">Discovery profiles</a>{% endif %}
   {% if access.can('posture') %}<a href="{{ base }}/security/lookup" class="{{ 'active' if sub == 'lookup' }}">CVE look-up</a>{% endif %}
   {% if user.role == 'admin' %}<a href="{{ base }}/security/scan-settings" class="{{ 'active' if sub == 'scan-settings' }}">Routes</a>{% endif %}
+  {% if user.role == 'admin' %}<a href="{{ base }}/settings/components" class="{{ 'active' if sub == 'components' }}">Components</a>{% endif %}
 </nav>

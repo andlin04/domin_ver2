@@ -8,13 +8,8 @@
     {% else %}Showing all {{ "your granted " if not access.sees_all }}domains.{% endif %}</p></div>
   {# the one way from Posture to the DNS inventory #}
   {% if posture_domain and access.can('inventory') %}<div class="actions"><a class="btn" href="/d/{{ posture_domain }}">View DNS records</a></div>{% endif %}</section>
-{% set tab_q = ('?domain=' ~ posture_domain|urlencode ~ ('&host=' ~ posture_host|urlencode if posture_host else '')) if posture_domain else '' %}
 {% set tab_url = base ~ '/security' ~ ('' if tab == 'overview' else '/' ~ tab) %}
-<nav class="tabs posture-tabs" aria-label="Posture views">
-  {% for t, label, sub in [('overview', 'Overview', 'What'), ('analysis', 'Analysis', 'Where'), ('scans', 'Scans', '')] %}
-  {% if access.can('scans' if t == 'scans' else 'posture') %}<a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
-    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}{% if sub %}<small class="tab-sub">{{ sub }}</small>{% endif %}</a>{% endif %}{% endfor %}
-</nav>
+{% include "_posture_tabs.html" %}
 <section class="card controls">
   <form method="get" action="{{ tab_url }}" class="inline posture-pick">
     <label class="field">Domain

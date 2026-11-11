@@ -40,6 +40,16 @@
 #                       away; default off, kept on later runs
 #   --admin-user NAME   create the first admin account; asks for its password (twice) on the terminal
 #
+# Components (public and on-prem):
+#
+#   --components LIST   inventory,posture (default: both, or what an earlier run kept in DOMIN_COMPONENTS)
+#                       inventory: DNS inventory pages, the public scan API and scheduled refreshes
+#                       posture:   security posture, CVEs, scans and schedules, nmap discovery; brings nmap, Tor,
+#                                  wireguard-tools, the Tor/Mullvad helper units and (--raw) the raw-socket drop-in
+#                       A run that adds a component installs it in place (the database is kept). A run without
+#                       posture takes its system parts away (helper units and scripts, raw sockets; the packages and
+#                       all data stay) and prints what it removed. Settings > Components turns installed ones off.
+#
 # Every option above is kept in /etc/domin.env: later runs need no options (`bash deploy/install.sh`).
 # Behind an HTTP proxy: export https_proxy/http_proxy (and no_proxy) first; apt, pip and the downloads use them and
 # they are written to /etc/domin.env for the app.
@@ -50,10 +60,11 @@
 set -euo pipefail
 
 DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN= SSH_FROM= ADMIN_IP= DENY=
-INTERNAL= SOURCES= SCAN_NETS= ZONES= ZONE_DNS= RAW= ADMIN_USER=
+INTERNAL= SOURCES= SCAN_NETS= ZONES= ZONE_DNS= RAW= ADMIN_USER= COMPONENTS=
 CIDRS='^[0-9A-Fa-f:.,/]*$'
 while [ $# -gt 0 ]; do
   case "$1" in
+    --components) COMPONENTS=$2; shift ;;
     --internal) INTERNAL=1 ;;
     --admin-sources) SOURCES=$2; shift ;;
     --scan-nets) SCAN_NETS=$2; shift ;;
@@ -93,6 +104,17 @@ else
   [ -z "$SOURCES$SCAN_NETS$ZONES$ZONE_DNS$RAW$ADMIN_USER" ] || \
     { echo "--admin-sources, --scan-nets, --internal-*, --raw, --admin-user need --internal"; exit 2; }
 fi
+# Components: --components, else the list an earlier run kept, else both; known names only, in a fixed order
+COMPONENTS=${COMPONENTS:-$(envget DOMIN_COMPONENTS)}
+COMPONENTS=${COMPONENTS:-inventory,posture}
+[[ "$COMPONENTS" =~ ^[a-z,]+$ ]] || { echo "bad --components: inventory, posture or inventory,posture"; exit 2; }
+for c in ${COMPONENTS//,/ }; do
+  case $c in inventory|posture) ;; *) echo "bad --components: unknown '$c' (inventory, posture)"; exit 2 ;; esac
+done
+has() { [[ ",$COMPONENTS," == *",$1,"* ]]; }
+COMPONENTS=$(for c in inventory posture; do if has $c; then printf '%s\n' $c; fi; done | paste -sd, -)
+[ -n "$COMPONENTS" ] || { echo "bad --components: inventory, posture or inventory,posture"; exit 2; }
+has posture || [ "$RAW" != 1 ] || { echo "--raw needs the posture component"; exit 2; }
 [[ "$ZONES" =~ ^[A-Za-z0-9.,-]*$ ]] || { echo "bad --internal-zones"; exit 2; }
 [[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]*$ ]] || { echo "bad --admin-user"; exit 2; }
 for v in "$SCAN_NETS" "$ZONE_DNS"; do [[ "$v" =~ $CIDRS ]] || { echo "bad address list: $v"; exit 2; }; done
@@ -123,10 +145,11 @@ apt-get update -q
 TOR_START=keep
 [ -e /var/lib/domin/tor.state ] || {
   if [ -d /var/lib/domin ] && systemctl is-active -q tor 2>/dev/null; then TOR_START=on; else TOR_START=off; fi; }
-apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 wireguard-tools tor >/dev/null
+apt-get install -y -q python3 python3-venv nginx rsync sqlite3 curl proxychains4 openssl >/dev/null
 [ -z "$EMAIL" ] || apt-get install -y -q certbot python3-certbot-nginx >/dev/null
-# nmap: service fingerprints for the posture scans; openssl: the on-prem TLS certificate
-apt-get install -y -q nmap openssl >/dev/null
+# posture: nmap (service fingerprints, discovery), wireguard-tools and tor (the routes above); openssl: the on-prem
+# TLS certificate
+! has posture || apt-get install -y -q nmap wireguard-tools tor >/dev/null
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))' || \
   { echo "domin needs Python 3.12 or newer (Debian 13, Ubuntu 24.04); this host has $(python3 -V)"; exit 1; }
 # Automatic security updates (unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host already
@@ -143,7 +166,39 @@ fi
 id -u domin >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin domin
 [ -d "$DATA" ] || install -d -o domin -g domin -m 700 "$DATA"
 [ -d "$APP" ] || install -d -m 755 "$APP"
+# Posture left out (--components inventory): its system parts go, with the scripts they ran; the database, the
+# saved routes and the packages stay, so a later run with posture brings it back as it was.
+POSTURE_FILES="tor-switch.sh mullvad-tunnel.sh domin-tor.path domin-tor.service domin-mullvad.path
+  domin-mullvad.service worker-raw.conf"
+if ! has posture; then
+  GONE=
+  for u in domin-tor domin-mullvad; do
+    if [ -e "/etc/systemd/system/$u.path" ] || [ -e "/etc/systemd/system/$u.service" ]; then
+      systemctl disable -q --now "$u.path" "$u.service" 2>/dev/null || true
+      rm -f "/etc/systemd/system/$u.path" "/etc/systemd/system/$u.service"
+      GONE="$GONE, $u units"
+    fi
+  done
+  if [ -f "$APP/app/deploy/mullvad-tunnel.sh" ] && { systemctl is-active -q wg-quick@mullvad 2>/dev/null ||
+       [ -e /etc/systemd/system/domin-worker.service.d/20-routes.conf ]; }; then
+    bash "$APP/app/deploy/mullvad-tunnel.sh" down >/dev/null 2>&1 || true
+    GONE="$GONE, Mullvad tunnel (stopped)"
+  fi
+  if [ -f "$APP/app/deploy/tor-switch.sh" ] && systemctl is-active -q tor 2>/dev/null; then
+    bash "$APP/app/deploy/tor-switch.sh" off >/dev/null || true
+    GONE="$GONE, tor (stopped)"
+  fi
+  if [ -e /etc/systemd/system/domin-worker.service.d/30-raw.conf ]; then
+    rm -f /etc/systemd/system/domin-worker.service.d/30-raw.conf
+    GONE="$GONE, worker raw sockets"
+  fi
+  if [ -n "$GONE" ]; then
+    systemctl daemon-reload
+    echo "posture removed: ${GONE#, }; kept: the database (scans, findings, schedules), nmap, tor, wireguard-tools"
+  fi
+fi
 rsync -a --delete --exclude .git/ --exclude tests/ --exclude '*.db' "$SRC/" "$APP/app/"
+if ! has posture; then for f in $POSTURE_FILES; do rm -f "$APP/app/deploy/$f"; done; fi
 chown -R root:root "$APP/app"
 chmod -R go-w "$APP/app"
 chmod 755 "$APP/app"
@@ -165,6 +220,7 @@ setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines 
 # Admin page at /admin, served and linked only for DOMIN_ADMIN_IPS (comma-separated IPs/CIDRs; edit, then
 # systemctl restart domin); everyone else gets 404. `python -m domin admin-password` sets its password.
 [ -z "$ADMIN_IP" ] || setenv DOMIN_ADMIN_IPS "$ADMIN_IP"
+setenv DOMIN_COMPONENTS "$COMPONENTS"   # what is installed; the app and update.sh read it
 # --deny is kept in the env file (the app ignores it) so a later run without it keeps the list.
 if [ -n "$DENY" ]; then setenv DOMIN_DENY_IPS "$DENY"
 else DENY=$(sed -n 's/^DOMIN_DENY_IPS=//p' /etc/domin.env); fi
@@ -263,7 +319,7 @@ allow() { [ -z "$(echo $*)" ] || printf '%s\n' "# install.sh: written on each ru
 dropin domin 10-install.conf "$(allow $PROXY_IPS)"
 dropin domin-worker 10-install.conf "$(allow $PROXY_IPS $SCAN_ALLOW)"
 # Raw sockets for nmap SYN scans (on-prem --raw); a public install leaves the file as it is
-if [ "$INTERNAL" = 1 ]; then
+if [ "$INTERNAL" = 1 ] && has posture; then
   if [ "$RAW" = 1 ]; then dropin domin-worker 30-raw.conf "$(cat "$APP/app/deploy/worker-raw.conf")"
   else dropin domin-worker 30-raw.conf ""; fi
 fi
@@ -474,10 +530,12 @@ ln -sf /etc/nginx/sites-available/domin /etc/nginx/sites-enabled/domin
 rm -f /etc/nginx/sites-enabled/default
 nginx -t -q
 
-# Mullvad tunnel settings saved on the Routes page (Settings): a root path unit runs mullvad-tunnel.sh apply
-install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
-# Tor on/off from the Routes page: a root path unit runs tor-switch.sh apply
-install -m 644 "$APP/app/deploy/domin-tor.path" "$APP/app/deploy/domin-tor.service" /etc/systemd/system/
+if has posture; then
+  # Mullvad tunnel settings saved on the Routes page (Settings): a root path unit runs mullvad-tunnel.sh apply
+  install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
+  # Tor on/off from the Routes page: a root path unit runs tor-switch.sh apply
+  install -m 644 "$APP/app/deploy/domin-tor.path" "$APP/app/deploy/domin-tor.service" /etc/systemd/system/
+fi
 # Retired: the public database sync (replaced by Settings > CSV import). A host that had it loses its units, the
 # copy inbox and its state files; nothing else on the host is touched.
 if [ -e /etc/systemd/system/domin-public-sync.path ] || [ -e /etc/systemd/system/domin-public-sync.service ] ||
@@ -494,9 +552,11 @@ if [ -f /etc/domin.env ] && grep -q '^DOMIN_PUBLIC_SYNC=' /etc/domin.env; then
 fi
 
 systemctl daemon-reload
-systemctl enable -q --now domin-mullvad.path
-bash "$APP/app/deploy/tor-switch.sh" "$TOR_START" >/dev/null
-systemctl enable -q --now domin-tor.path
+if has posture; then
+  systemctl enable -q --now domin-mullvad.path
+  bash "$APP/app/deploy/tor-switch.sh" "$TOR_START" >/dev/null
+  systemctl enable -q --now domin-tor.path
+fi
 systemctl enable -q domin
 systemctl restart domin
 if [ "$WORKER" = 1 ]; then systemctl enable -q domin-worker; systemctl restart domin-worker

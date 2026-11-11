@@ -1,0 +1,9 @@
+{# Posture's tabs; tab = the current one. Import targets: admins (the CSV import, as in Settings). #}
+{% set tab_q = ('?domain=' ~ posture_domain|urlencode ~ ('&host=' ~ posture_host|urlencode if posture_host else '')) if posture_domain else '' %}
+<nav class="tabs posture-tabs" aria-label="Posture views">
+  {% for t, label, sub in [('overview', 'Overview', 'What'), ('analysis', 'Analysis', 'Where'), ('scans', 'Scans', '')] %}
+  {% if access.can('scans' if t == 'scans' else 'posture') %}<a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
+    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}{% if sub %}<small class="tab-sub">{{ sub }}</small>{% endif %}</a>{% endif %}{% endfor %}
+  {% if user.role == 'admin' %}<a class="tab{% if tab == 'import' %} active{% endif %}" {% if tab == 'import' %}aria-current="page"{% endif %}
+    href="{{ base }}/security/import">Import targets<small class="tab-sub">CSV</small></a>{% endif %}
+</nav>

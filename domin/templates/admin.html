@@ -9,7 +9,7 @@
   <div class="table-wrap short"><table>
     <thead><tr><th></th><th class="num fit">Hits</th><th class="num fit">Visitors</th></tr></thead>
     <tbody>{% for r in rows %}<tr>
-      <td class="clip">{% if link %}<a href="/d/{{ r.label }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
+      <td class="clip">{% if link and access.can('inventory') %}<a href="/d/{{ r.label }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
       <td class="num">{{ r.hits }}</td><td class="num">{{ r.visitors }}</td></tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<p class="muted">Nothing yet</p>{% endif %}
@@ -71,7 +71,7 @@
   <ul class="jobs">
     {% for j in jobs.open + jobs.done %}
     <li><span class="pill {{ j.status }}">{{ j.status }}</span>
-      <a href="/d/{{ j.domain }}">{{ j.domain }}</a>
+      {% if access.can('inventory') %}<a href="/d/{{ j.domain }}">{{ j.domain }}</a>{% else %}{{ j.domain }}{% endif %}
       <span class="muted">{{ j.created[:16].replace('T', ' ') }}</span>
       {% if j.discovery %}<span class="pill">nmap {{ j.discovery }}</span>{% endif %}
       {% if j.schedule_id %}<span class="pill">schedule #{{ j.schedule_id }}</span>{% endif %}

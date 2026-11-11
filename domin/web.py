@@ -37,6 +37,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import (
     access,
     admin,
+    components,
     csvimport,
     cve,
     db,
@@ -200,13 +201,27 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                     return u, sess["csrf"]
         return None, ""
 
+    def comps_on(request: Request, c=None) -> tuple[str, ...]:
+        """The components turned on (Settings > Components), once per request."""
+        if not hasattr(request.state, "comps"):
+            if c is None:
+                with conn() as c2:
+                    request.state.comps = components.enabled(c2, settings.components)
+            else:
+                request.state.comps = components.enabled(c, settings.components)
+        return request.state.comps
+
+    def limited(request: Request, scope: access.Scope, c=None) -> access.Scope:
+        """A scope without the features of the components that are off."""
+        return replace(scope, off=components.off_features(comps_on(request, c)))
+
     def scope_of(request: Request) -> access.Scope:
         """What this request may see (domin.access): a signed-in power user its grants; admins, sign-in off and
         anonymous visitors of the public inventory everything."""
         if not hasattr(request.state, "scope"):
             user, _ = viewer(request)
             with conn() as c:
-                request.state.scope = access.for_user(c, user) if user else access.FULL
+                request.state.scope = limited(request, access.for_user(c, user) if user else access.FULL, c)
         return request.state.scope
 
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
@@ -219,7 +234,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         grants = getattr(request.state, "scope", None) or (scope_of(request) if user else access.NONE)
         ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, "csrf": csrf,
                "admin_base": ADMIN, "admin_csrf": admin_csrf, "access": grants, "role_labels": users.ROLE_LABELS,
-               **ctx}
+               "comps": comps_on(request), **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
     def domain_or_404(c, name: str, scope: access.Scope) -> dict:
@@ -263,7 +278,13 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         path = request.url.path
         if path.startswith("/static/") or path == "/healthz":
             return None
-        machine = request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv")
+        # a component turned off (Settings > Components): its pages and API answer as unknown paths; the start page
+        # of a posture-only site is Posture
+        if (comp := components.of_path(path)) and comp not in comps_on(request):
+            if path == "/" and request.method in ("GET", "HEAD"):
+                return RedirectResponse(ADMIN + "/security", status_code=303, headers=PRIVATE)
+            return not_found(request)
+        machine =request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv")
         if COOKIE in request.cookies and path not in RENEW_OPEN:   # an admin-set password past its grace sign-ins
             with conn() as c:
                 s = admin.session(c, request.cookies.get(COOKIE))
@@ -295,7 +316,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 return RedirectResponse(f"{ADMIN}?{urlencode({'next': here})}", status_code=303, headers=PRIVATE)
             if not need:
                 return None
-            scope = access.for_user(c, u)
+            scope = limited(request, access.for_user(c, u), c)
         feature, level = need
         if scope.can(feature, level):
             return None
@@ -692,7 +713,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         limit_lookups(request)
         return tools.email_security(d)
 
-    add_admin(app, settings, conn, page, client_ip, client)
+    add_admin(app, settings, conn, page, client_ip, client, comps_on, limited)
     return app
 
 
@@ -770,7 +791,7 @@ def _is_ip(text: str) -> bool:
     return True
 
 
-def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client) -> None:
+def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client, comps_on, limited) -> None:
     """The signed-in area under /admin (behind the optional DOMIN_ADMIN_IPS network allowlist). User accounts with
     roles (admin, power user with per-domain grants: domin.access), optional TOTP second factor, a session cookie and
     a CSRF token per form."""
@@ -796,7 +817,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         u = users.get(c, s["user_id"]) if s["user_id"] else None
         if not u or u["disabled"]:
             return None, None
-        request.state.scope = access.for_user(c, u)   # what this user may see and act on
+        request.state.scope = limited(request, access.for_user(c, u), c)   # what this user may see and act on
         return s, u
 
     def qr_markup(uri: str) -> Markup | str:
@@ -1099,6 +1120,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
             return users_view(request, c, u, s)
 
+    def hidden_features(request, c) -> frozenset[str]:
+        """Feature rights of the components that are off: the rights matrix leaves them out and keeps their values."""
+        return components.off_features(comps_on(request, c))
+
     def user_edit_view(request, c, u, s, target: dict, status: int = 200, error: str = "",
                        rows: list[dict] | None = None):
         """One user's role and per-domain grants; rows: a refused form's grant rows, else the saved grants."""
@@ -1108,7 +1133,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      last_admin=users.is_last_admin(c, target["id"]), grant_rows=rows + [{"domain": "",
                      "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
                      role_2fa=users.required_for(c, target["role"]), error=error,
-                     features=access.FEATURES, admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
+                     features={f: v for f, v in access.FEATURES.items() if f not in hidden_features(request, c)},
+                     admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
                      right_labels=access.RIGHT_LABELS, pw_state=users.pw_state(target), min_pw=users.MIN_PASSWORD,
                      grace=users.GRACE_SIGNINS)
 
@@ -1179,7 +1205,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return back(f"{base}/users/{user_id}", "user-saved")
             if action == "rights":
                 try:
-                    wanted = access.parse_rights(data)
+                    have = access.rights_of(target)
+                    wanted = access.parse_rights(data, {f: have[f] for f in hidden_features(request, c)})
                 except ValueError as exc:
                     return user_edit_view(request, c, u, s, target, 422, str(exc))
                 if changed := access.set_rights(c, user_id, wanted):
@@ -1301,9 +1328,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c, data)
             if redirect:
                 return redirect
-            old = users.signin_required(c)
+            old, on = users.signin_required(c), comps_on(request, c)
             new = {"inventory": data.get("inventory") == "on",
                    "posture": data.get("posture") == "on" or not settings.allow_no_login}
+            new = {k: v if k in on else old[k] for k, v in new.items()}   # a component turned off keeps its value
             users.set_signin_required(c, **new)
             if new != old:
                 access.audit(c, u["name"], "sign-in", "settings",
@@ -1358,7 +1386,16 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         with conn() as c:
             csvimport.sweep(c, settings.db_path.parent)
             token = csvimport.hold(c, path, name, u["id"], s["token_hash"], layout)
-        return back(f"{base}/settings/csv-import/map?t={token}")
+        origin = "&from=posture" if fields.get("from") == "posture" else ""
+        return back(f"{base}/settings/csv-import/map?t={token}{origin}")
+
+    def import_home(request, c, origin: str) -> str:
+        """Where the CSV import goes back to: Posture > Import targets (started there, or the inventory is off), else
+        Settings > CSV import."""
+        on = comps_on(request, c)
+        if "posture" in on and (origin == "posture" or "inventory" not in on):
+            return base + "/security/import"
+        return base + "/settings#csv-import"
 
     def held_upload(c, s, u, token: str) -> dict:
         up = csvimport.held(c, token, u["id"], s["token_hash"], settings.db_path.parent)
@@ -1367,9 +1404,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return up
 
     def csv_map_view(request, c, u, s, token: str, up: dict, mapping: dict, header: bool, error: str = "",
-                     status: int = 200):
+                     status: int = 200, origin: str = ""):
         lay = up["layout"]
+        posture_side = import_home(request, c, origin).startswith(base + "/security/")
         return shell(request, "csv_map.html", u, s, status, token=token, file=up["file"], layout=lay,
+                     origin="posture" if posture_side else "", home=import_home(request, c, origin),
                      columns=lay["columns"], mapping=mapping, header=header, targets=csvimport.TARGETS,
                      labels=csvimport.LABELS, hints=csvimport.HINTS,
                      delimiter=csvimport.DELIMITERS.get(lay["delimiter"], lay["delimiter"]),
@@ -1377,7 +1416,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      error=error)
 
     @app.get(base + "/settings/csv-import/map", response_class=HTMLResponse, include_in_schema=False)
-    def settings_csv_map(request: Request, t: str = ""):
+    def settings_csv_map(request: Request, t: str = "", origin: Annotated[str, Query(alias="from")] = ""):
         """Step 2 of the CSV import: which column feeds which field (pre-filled from the header names)."""
         with conn() as c:
             s, u, redirect = admin_only(request, c)
@@ -1386,7 +1425,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             up = held_upload(c, s, u, t)
             lay = up["layout"]
             mapping = csvimport.auto_map(lay["columns"]) if lay["header"] else dict.fromkeys(csvimport.TARGETS)
-            return csv_map_view(request, c, u, s, t, up, mapping, lay["header"])
+            return csv_map_view(request, c, u, s, t, up, mapping, lay["header"], origin=origin)
 
     @app.post(base + "/settings/csv-import/map", include_in_schema=False)
     async def settings_csv_map_post(request: Request):
@@ -1399,9 +1438,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
             up = held_upload(c, s, u, token)
             data_dir = settings.db_path.parent
+            origin = data.get("from", "")
             if data.get("action") == "cancel":
                 csvimport.drop(c, token, data_dir)
-                return back(base + "/settings#csv-import", "import-cancelled")
+                return back(import_home(request, c, origin), "import-cancelled")
             lay = up["layout"]
             mapping, error = {}, ""
             for t in csvimport.TARGETS:
@@ -1413,12 +1453,13 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             error = error or csvimport.check_mapping(mapping, len(lay["columns"]))
             if error:
                 return csv_map_view(request, c, u, s, token, up, mapping, header,
-                                    error=error[:1].upper() + error[1:] + ".", status=422)
+                                    error=error[:1].upper() + error[1:] + ".", status=422, origin=origin)
             if csvimport.busy(c):
                 raise HTTPException(409, "An import is already queued or running; wait for it to finish.")
             csvimport.queue(c, Path(up["path"]), up["file"], u["name"], mapping, {**lay, "header": header})
             csvimport.drop(c, token, data_dir, keep_file=True)
-        return back(base + "/settings#csv-import", "import-queued")
+            home = import_home(request, c, origin)
+        return back(home, "import-queued")
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):
@@ -1444,6 +1485,41 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
+
+    # --- components (domin.components): which installed parts are on (admin only) ---------------------------------
+
+    def components_view(request, c, u, s, status: int = 200, error: str = ""):
+        on = comps_on(request, c)
+        rows = [{"name": n, "label": components.LABELS[n], "what": components.WHAT[n],
+                 "installed": n in settings.components, "on": n in on,
+                 "command": components.install_command(settings.components, n)} for n in components.COMPONENTS]
+        return shell(request, "components.html", u, s, status, rows=rows, error=error)
+
+    @app.get(base + "/settings/components", response_class=HTMLResponse, include_in_schema=False)
+    def components_page(request: Request):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            return components_view(request, c, u, s)
+
+    @app.post(base + "/settings/components", include_in_schema=False)
+    async def components_save(request: Request):
+        """Turn components on or off: off hides and 404s its pages and API, the worker skips its jobs and its
+        schedules wait; the data stays. At least one stays on; one not installed cannot be turned on."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            try:
+                changed = components.save(c, settings.components,
+                                          {n: data.get(n) == "on" for n in components.COMPONENTS})
+            except ValueError as exc:
+                return components_view(request, c, u, s, 422, str(exc))
+            if changed:
+                access.audit(c, u["name"], "components", "settings", ", ".join(changed))
+        return back(base + "/settings/components", "saved")
 
     # --- security portal: CVE scan tool (view: any signed-in user; run: maintainer rights) ------------------------
 
@@ -1599,6 +1675,17 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             body, kind = reports.markdown(m).encode(), "text/markdown; charset=utf-8"
         return priv(Response(body, media_type=kind, headers={
             "Content-Disposition": f'attachment; filename="{reports.filename(m, ext)}"'}))
+
+    @app.get(base + "/security/import", response_class=HTMLResponse, include_in_schema=False)
+    def posture_import_page(request: Request):
+        """Posture > Import targets: the CSV import (the same upload and mapping dialog as Settings); its domains and
+        host addresses become posture targets as an inventory scan's would (posture.targets reads the latest scan)."""
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            return shell(request, "posture_import.html", u, s, tab="import", csv_import=csvimport.status(c),
+                         csv_max_mb=csvimport.MAX_BYTES // (1024 * 1024), targets=len(posture.domains(c)))
 
     @app.get(base + "/security", response_class=HTMLResponse, include_in_schema=False)
     def security_page(request: Request):

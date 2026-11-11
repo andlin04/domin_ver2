@@ -96,6 +96,14 @@ fi
 # files a release dropped (cp above only adds and replaces)
 rm -f "$APP/domin/publicsync.py" "$APP/deploy/public-sync.sh" "$APP/deploy/domin-public-sync.path" \
   "$APP/deploy/domin-public-sync.service"
+# Components (install.sh --components, DOMIN_COMPONENTS in /etc/domin.env, read as KEY=VALUE, never run): without
+# posture its helper scripts and units stay off the host; install.sh --components adds it
+components=$( [ -r /etc/domin.env ] && sed -n 's/^DOMIN_COMPONENTS=//p' /etc/domin.env | tail -n1 | tr -cd 'a-z,' || true)
+if [ -n "$components" ] && [[ ",$components," != *,posture,* ]]; then
+  for f in tor-switch.sh mullvad-tunnel.sh domin-tor.path domin-tor.service domin-mullvad.path \
+           domin-mullvad.service worker-raw.conf; do rm -f "$APP/deploy/$f"; done
+  echo "components: $components (posture helpers not installed)"
+fi
 # Retired: the public database sync (replaced by Settings > CSV import). A host that had it loses its units, the
 # copy inbox and its state files; nothing else on the host is touched.
 if [ -e /etc/systemd/system/domin-public-sync.path ] || [ -e /etc/systemd/system/domin-public-sync.service ] ||

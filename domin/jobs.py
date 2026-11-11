@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, csvimport, cve, db, posture, proxy, scanner, tools, users
+from . import admin, components, csvimport, cve, db, posture, proxy, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -116,9 +116,22 @@ def visitor_scans(conn: sqlite3.Connection, hours: int = 24) -> int:
                         "AND created >= ?", (since,)).fetchone()[0]
 
 
-def claim(conn: sqlite3.Connection, refresh: bool = False) -> dict | None:
-    row = conn.execute(f"SELECT * FROM jobs WHERE status = 'queued' AND {_queue(refresh)} ORDER BY id LIMIT 1"
-                       ).fetchone()
+# Components (domin.components) a DNS job belongs to: nmap discovery and schedules feed the posture, the rest
+# (visitors, refreshes, retries, admin and CLI scans) the inventory. A component that is off: its jobs wait.
+_OF = {"inventory": "(discovery = '' AND client != 'schedule')",
+       "posture": "(discovery != '' OR client = 'schedule')"}
+
+
+def _on(conn: sqlite3.Connection, settings: Settings) -> tuple[str, ...]:
+    return components.enabled(conn, settings.components)
+
+
+def claim(conn: sqlite3.Connection, refresh: bool = False,
+          on: tuple[str, ...] = components.COMPONENTS) -> dict | None:
+    """The oldest queued job of the queue whose component is on (on: the components turned on)."""
+    mine = " OR ".join(_OF[c] for c in components.COMPONENTS if c in on) or "0"
+    row = conn.execute(f"SELECT * FROM jobs WHERE status = 'queued' AND {_queue(refresh)} AND ({mine}) "
+                       "ORDER BY id LIMIT 1").fetchone()
     if not row:
         return None
     n = conn.execute("UPDATE jobs SET status = 'running', started = ? WHERE id = ? AND status = 'queued'",
@@ -218,7 +231,7 @@ def retry_failed(conn: sqlite3.Connection) -> int:
 def _next(settings: Settings, refresh: bool) -> tuple[Settings, dict | None]:
     with db.connect(settings.db_path) as conn:
         live = admin.effective(settings, conn)   # the admin page's tuning applies without a restart
-        return live, None if live.scans_paused else claim(conn, refresh)
+        return live, None if live.scans_paused else claim(conn, refresh, _on(conn, settings))
 
 
 def _scan_loop(settings: Settings, refresh: bool, idle: float) -> None:
@@ -241,7 +254,8 @@ def _posture_next(settings: Settings, cve_db: cve.Database, client, slot: int = 
     "Posture scans at once" setting). claim() is atomic, so slots never run the same scan."""
     with db.connect(settings.db_path) as conn:
         live = admin.effective(settings, conn)
-        if live.scans_paused or slot >= live.posture_parallel or not (row := posture.claim(conn)):
+        if (live.scans_paused or slot >= live.posture_parallel or "posture" not in _on(conn, settings)
+                or not (row := posture.claim(conn))):
             return False
         posture.run(conn, row, cve_db, client, settings.nvd_api_key)
         return True
@@ -266,6 +280,8 @@ def housekeeping(settings: Settings) -> None:
         admin.prune(conn, live.analytics_days)
         if n := sweep_stuck(conn, live.scan_timeout_hours):
             log.warning("%d stuck jobs failed", n)
+        if "inventory" not in _on(conn, settings):   # inventory off: no retries or refreshes queued
+            return
         if n := retry_failed(conn):
             log.info("retry: %d failed domains queued", n)
         if n := enqueue_due(conn, live.refresh_days):
@@ -282,7 +298,7 @@ def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
     now = time.time() if now is None else now
     with db.connect(settings.db_path) as conn:
         last = json.loads(admin.kv_get(conn, CVE_REFRESH_KEY) or "{}")
-        if now - last.get("at", 0) < CVE_REFRESH_HOURS * 3600:
+        if now - last.get("at", 0) < CVE_REFRESH_HOURS * 3600 or "posture" not in _on(conn, settings):
             return None
         cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, ttl_days=1)
         with tools.http_client() as client:
@@ -296,10 +312,11 @@ SCHEDULE_TICK = 60   # seconds between passes of the schedule runner
 
 
 def schedule_tick(settings: Settings, now: float | None = None) -> list[str]:
-    """One pass of the schedule runner (domin.schedules.tick) on its own connection."""
+    """One pass of the schedule runner (domin.schedules.tick) on its own connection. Posture off: schedules wait
+    (kept; missed slots are not caught up when it is turned on again)."""
     from . import schedules  # schedules imports this module
     with db.connect(settings.db_path) as conn:
-        return schedules.tick(conn, now)
+        return schedules.tick(conn, now) if "posture" in _on(conn, settings) else []
 
 
 def _schedule_loop(settings: Settings) -> None:

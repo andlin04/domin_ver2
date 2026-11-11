@@ -6,6 +6,14 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+COMPONENTS = ("inventory", "posture")   # install.sh --components; the default installs both
+
+
+def parse_components(text: str) -> tuple[str, ...]:
+    """DOMIN_COMPONENTS ("inventory,posture"): the known names in their fixed order; empty or none known = both."""
+    names = {x.strip().lower() for x in (text or "").split(",")}
+    return tuple(c for c in COMPONENTS if c in names) or COMPONENTS
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -39,6 +47,7 @@ class Settings:
     allow_no_login: bool = False  # dev/lab only: Settings may turn sign-in off (every visitor acts as that admin)
     install_mode: str = "public"  # install.sh: "internal" (on-prem, --internal) or "public"
     scan_nets: tuple[str, ...] = ()   # on-prem: private networks the scans may reach (install --scan-nets)
+    components: tuple[str, ...] = COMPONENTS   # installed parts (install.sh --components); Settings turns them on/off
 
     @property
     def internal_mode(self) -> bool:
@@ -98,4 +107,5 @@ class Settings:
             allow_no_login=env("DOMIN_ALLOW_NO_LOGIN", "").strip().lower() in ("1", "true", "yes", "on"),
             install_mode="internal" if env("DOMIN_INSTALL_MODE", "").strip().lower() == "internal" else "public",
             scan_nets=tuple(x.strip() for x in env("DOMIN_SCAN_NETS", "").split(",") if x.strip()),
+            components=parse_components(env("DOMIN_COMPONENTS", "")),
         )

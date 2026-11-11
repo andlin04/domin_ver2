@@ -55,10 +55,14 @@ def rights_of(user: dict) -> dict[str, str]:
     return out
 
 
-def parse_rights(form: dict[str, str]) -> dict[str, str]:
-    """The matrix of the user edit page: r_<feature> = none | read | write."""
+def parse_rights(form: dict[str, str], keep: dict[str, str] | None = None) -> dict[str, str]:
+    """The matrix of the user edit page: r_<feature> = none | read | write. keep: the rights of features the page
+    did not show (a component turned off), stored unchanged."""
     out = {}
     for f, (label, _, write) in FEATURES.items():
+        if keep and f in keep:
+            out[f] = keep[f]
+            continue
         lv = form.get(f"r_{f}") or "none"
         if lv not in RIGHTS or (lv == "write" and not write):
             raise ValueError(f"{label}: pick none, read{' or read-write' if write else ''}.")
@@ -86,9 +90,12 @@ class Scope:
     everything: bool = False
     grants: tuple[tuple[str, str], ...] = ()   # (domain, level), sorted
     rights: tuple[tuple[str, str], ...] = ()   # (feature, none | read | write), sorted; ignored when everything
+    off: frozenset[str] = frozenset()   # features of components turned off (domin.components): nobody has them
 
     def can(self, feature: str, level: str = "read") -> bool:
         """The feature right: may this user use the feature at this level (read / write) at all?"""
+        if feature in self.off:
+            return False
         if self.everything:
             return True
         return RIGHTS.index(dict(self.rights).get(feature, "none")) >= RIGHTS.index(level)

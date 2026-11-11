@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Components · Settings · domin{% endblock %}
+{% block page %}settings{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Components</h1>
+  <p class="muted">Which parts of domin run here. Off: its pages and API answer "not found", its menu entries and
+    feature rights are hidden, the worker skips its jobs and its schedules wait. Nothing is deleted; turning it on
+    again brings it all back. At least one component stays on.</p></div></section>
+{% set sub = "components" %}{% include "_settings_nav.html" %}
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<form method="post" action="{{ base }}/settings/components">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <section class="card">
+    <h2>Components <small>installed: {{ rows|selectattr('installed')|map(attribute='label')|join(', ') }}</small></h2>
+    {% for r in rows %}
+    <div class="component{% if not r.installed %} muted{% endif %}">
+      <label class="tick"><input type="checkbox" name="{{ r.name }}" {% if r.on %}checked{% endif %}
+        {% if not r.installed %}disabled{% endif %}> <b>{{ r.label }}</b>
+        {% if not r.installed %}<span class="pill">not installed</span>{% elif r.on %}<span class="pill done">on</span>{% else %}<span class="pill fix-no">off</span>{% endif %}</label>
+      <p class="muted small-print">{{ r.what }}.</p>
+      {% if not r.installed %}<p class="small-print">Install it (the data is kept): <code>{{ r.command }}</code></p>{% endif %}
+    </div>
+    {% endfor %}
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </section>
+</form>
+<p class="muted small-print">Shared by both: sign-in, accounts and users, these settings, Operations, Routes, host
+  tags and the CSV import (Settings with the inventory, Posture &gt; Import targets with the posture).</p>
+{% endblock %}

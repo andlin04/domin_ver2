@@ -129,6 +129,17 @@ a public issue for it.
 - Scheduled rescans queue normal jobs (same queue, limits, scopes and sandbox); maintainers manage those of their
   domains, every change is in the audit table.
 
+## Components
+- `install.sh --components inventory` leaves out the posture component and so has a smaller attack surface:
+  - no nmap;
+  - no Tor or Mullvad root helper units or scripts;
+  - no raw sockets for the worker.
+
+  Removing posture from an existing install takes those away again (the packages stay; remove them with apt if
+  nothing else uses them).
+- A component turned off in Settings > Components answers 404 on all its routes, pages and API alike, checked
+  before sign-in and rights. The worker takes none of its jobs.
+
 ## Root helpers
 - The app never runs privileged commands. Settings actions that need root (Tor on/off, the Mullvad tunnel) drop
   a request file in `/var/lib/domin`; a root path unit runs a fixed script from

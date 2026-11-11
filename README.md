@@ -164,6 +164,32 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
 - **Update:** unpack the new package, `bash deploy/install.sh` (options kept in `/etc/domin.env`; database, users and
   certificate kept). **Remove:** `bash deploy/uninstall.sh` (data kept) or `--purge`.
 
+### Components
+domin has two components: **inventory** (the DNS inventory pages, the public scan API and scheduled refreshes) and
+**posture** (security posture and CVEs, scans and schedules, nmap discovery, scan profiles). Both modes install both
+unless `--components` says otherwise:
+
+```bash
+bash deploy/install.sh ... --components inventory            # DNS inventory only: no nmap, Tor or root helpers
+bash deploy/install.sh ... --components posture              # posture only
+bash deploy/install.sh --components inventory,posture        # later: add the missing one in place (data kept)
+```
+
+- **Kept** in `/etc/domin.env` (`DOMIN_COMPONENTS`); later runs and `update.sh` follow it.
+- **Posture brings** nmap, Tor, wireguard-tools, the Tor/Mullvad root helper units and (`--raw`) the worker's raw
+  sockets. A run without posture removes those units, scripts and raw sockets and prints what it removed. The
+  packages and all data (scans, findings, schedules) stay.
+- **Settings > Components** (admin): one switch per installed component. A component that is not installed is
+  greyed out and shows its install command. Off means:
+  - its pages and API answer 404, and its menu entries and feature rights are hidden;
+  - the worker skips its jobs and its schedules wait;
+  - nothing is deleted.
+
+  At least one component stays on. With inventory off, `/` opens Posture.
+- **Posture only:** nmap discovery works as before. The CSV import is under **Posture > Import targets**, with the
+  same mapping dialog as Settings > CSV import; its domains and addresses become posture targets. No page links to
+  DNS records.
+
 ## Signed-in area
 - Everything under `/admin`, HTTPS only.
 - `DOMIN_ADMIN_IPS` (/etc/domin.env, IPs or CIDRs; set by `install.sh --admin-ip`; `systemctl restart domin` after

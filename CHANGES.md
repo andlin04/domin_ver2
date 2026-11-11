@@ -2,6 +2,36 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Components: inventory and posture, installed and turned on separately
+
+- **`install.sh --components inventory,posture`** (default both; kept as `DOMIN_COMPONENTS` in `/etc/domin.env`).
+  - Posture brings nmap, tor, wireguard-tools, the Tor/Mullvad helper units and (`--raw`) the raw-socket drop-in.
+  - `--raw` needs posture.
+  - Re-running with an added component installs it in place.
+  - Re-running without posture stops and removes its units, scripts and raw sockets, and prints what went. The
+    data and packages stay.
+  - `update.sh` keeps the posture helper files off an install without posture.
+- **Settings > Components** (admin): one switch per installed component (kv `components`). A component that is not
+  installed is greyed out and shows its install command. Off means:
+  - its routes (pages and API) answer 404;
+  - its nav entries, feature rights (user edit) and sign-in setting are hidden, and their stored values are kept
+    on save;
+  - the worker skips its jobs: DNS jobs with nmap discovery and schedule jobs count as posture, all others as
+    inventory;
+  - posture's schedules and the daily CVE refresh wait, and inventory's refreshes and retries are not queued;
+  - data is kept.
+
+  At least one component stays on; changes are audited (`components`).
+- **Posture without inventory:**
+  - `/` redirects to Posture, and the brand link goes there too;
+  - no "View DNS records" or `/d/` links render;
+  - nmap discovery works;
+  - **Posture > Import targets** (admin) is the CSV import, with the same upload and mapping dialog. It returns
+    to Posture, and its rows become posture targets. With inventory on it also stays in Settings.
+- Rollback: `git revert` this commit and run update.sh (or install.sh). The kv `components` row and
+  `DOMIN_COMPONENTS` are ignored by the old code. On an inventory-only install, re-run the old install.sh to put the
+  posture helpers back.
+
 ## 2026-11-11: Admins set passwords directly; set-password links removed
 
 - Users > Add a user takes Password and Confirm (both required); Generate fills both with 20 random characters
