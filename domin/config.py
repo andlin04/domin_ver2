@@ -15,6 +15,14 @@ def parse_components(text: str) -> tuple[str, ...]:
     return tuple(c for c in COMPONENTS if c in names) or COMPONENTS
 
 
+TOTP_KEY = "/etc/domin/totp.key"   # install.sh / update.sh create it (root:domin 0640); tests point DOMIN_TOTP_KEY away
+
+
+def totp_key_path() -> Path:
+    """The two-factor encryption key file (domin.secretbox): DOMIN_TOTP_KEY, else /etc/domin/totp.key."""
+    return Path(os.environ.get("DOMIN_TOTP_KEY", "").strip() or TOTP_KEY)
+
+
 @dataclass(frozen=True)
 class Settings:
     db_path: Path
@@ -48,6 +56,7 @@ class Settings:
     install_mode: str = "public"  # install.sh: "internal" (on-prem, --internal) or "public"
     scan_nets: tuple[str, ...] = ()   # on-prem: private networks the scans may reach (install --scan-nets)
     components: tuple[str, ...] = COMPONENTS   # installed parts (install.sh --components); Settings turns them on/off
+    totp_key: Path = Path(TOTP_KEY)   # two-factor secrets' encryption key (read per use by domin.secretbox)
 
     @property
     def internal_mode(self) -> bool:
@@ -108,4 +117,5 @@ class Settings:
             install_mode="internal" if env("DOMIN_INSTALL_MODE", "").strip().lower() == "internal" else "public",
             scan_nets=tuple(x.strip() for x in env("DOMIN_SCAN_NETS", "").split(",") if x.strip()),
             components=parse_components(env("DOMIN_COMPONENTS", "")),
+            totp_key=totp_key_path(),
         )

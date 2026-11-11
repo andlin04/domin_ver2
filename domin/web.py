@@ -935,7 +935,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             u = users.get(c, pend["user_id"]) if pend else None
             if not u or u["disabled"]:
                 return back()   # expired: start again
-            if not users.verify_second_factor(c, u["id"], data.get("code", "")):
+            try:
+                ok = users.verify_second_factor(c, u["id"], data.get("code", ""))
+            except users.KeyUnavailable:   # logged in users; fails closed
+                admin.login_failed(c, who)
+                return priv(page(request, "totp.html", 503, base=base, error=users.TOTP_UNAVAILABLE))
+            if not ok:
                 admin.login_failed(c, who)
                 return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
             conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
@@ -1047,7 +1052,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            users.start_enrol(c, u["id"])
+            try:
+                users.start_enrol(c, u["id"])
+            except users.KeyUnavailable as e:
+                users.log.error("2FA enrolment of %s refused: %s", u["name"], e)
+                return shell(request, "account.html", u, s, 503, enrol=None, otpauth="",
+                             must_setup=users.needs_totp_setup(c, u), error=users.TOTP_UNAVAILABLE)
         return back(base + "/account")
 
     @app.post(base + "/account/2fa/confirm", include_in_schema=False)
@@ -1082,7 +1092,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return shell(request, "account.html", u, s, 429, enrol=None, otpauth="", must_setup=False,
                              error="Too many failed tries; wait 15 minutes.")
             proof = data.get("proof", "")
-            if not (users.verify_password(c, u["name"], proof) or users.verify_second_factor(c, u["id"], proof)):
+            try:
+                ok = bool(users.verify_password(c, u["name"], proof)) or users.verify_second_factor(c, u["id"], proof)
+            except users.KeyUnavailable:   # no TOTP code can be checked; the password still can
+                ok = False
+            if not ok:
                 admin.login_failed(c, who)
                 return shell(request, "account.html", u, s, 401, enrol=None, otpauth="", must_setup=False,
                              error="Enter your current password or a code from your authenticator to turn it off.")

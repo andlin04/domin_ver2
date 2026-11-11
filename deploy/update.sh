@@ -69,6 +69,15 @@ fi
 find "$APP" -name __pycache__ -type d -prune -exec rm -rf {} +
 chown -R root:root "$APP"
 chmod -R go-w "$APP"
+# Two-factor encryption key, as install.sh makes it: created when missing, never overwritten; the app encrypts the
+# stored secrets with it at its next start
+if [ ! -s /etc/domin/totp.key ] && id -u domin >/dev/null 2>&1; then
+  [ -d /etc/domin ] || install -d -m 755 /etc/domin
+  (umask 077; head -c 32 /dev/urandom | base64 | tr '+/' '-_' > /etc/domin/totp.key)
+  chown root:domin /etc/domin/totp.key && chmod 640 /etc/domin/totp.key
+  echo "two-factor key: created /etc/domin/totp.key (root:domin 0640); back it up apart from the database"
+  [ -n "$changed" ] || changed=domin/secretbox.py   # restart web and worker below, so they encrypt with it now
+fi
 [ -n "$changed" ] || exit 0
 
 # Proxy settings for pip from /etc/domin.env, parsed as KEY=VALUE (never run as shell code)

@@ -2,6 +2,22 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Two-factor secrets encrypted at rest
+
+- `users.totp_secret` and pending enrolments (kv `enrol:*`, secret plus recovery codes) are Fernet-encrypted with
+  the key in `/etc/domin/totp.key` (root:domin 0640; `DOMIN_TOTP_KEY` overrides). Stored values start with `f1:`.
+  A leaked database copy no longer disables 2FA.
+- `install.sh` and `update.sh` create the key when missing, never overwrite it; `update.sh` restarts web and
+  worker when it creates one. At start the app encrypts plaintext values (idempotent; without a key they stay and
+  a warning is logged).
+- Missing or wrong key: the app starts; TOTP codes are refused (logged; sign-in shows "2FA unavailable, contact an
+  admin"); recovery codes, the admin 2FA reset, `user-2fa-reset` and `admin-password` work.
+- New CLI `totp-rekey --new-key FILE [--old-key FILE]` (README: two-factor key).
+- New dependency `cryptography` (with `cffi`, `pycparser`), pinned with hashes; `update.sh` installs it.
+- **Back up `/etc/domin/totp.key` separately** from the database.
+- Rollback: `git revert` this commit and run update.sh, then `user-2fa-reset <name>` for each user with 2FA (the
+  old code cannot read `f1:` values, so it accepts no TOTP code; recovery codes still work). The key file can stay.
+
 ## 2026-11-11: Components page and Import targets: layout
 
 - The notes on Settings > Components and Posture > Import targets are left-aligned body text (they were centered

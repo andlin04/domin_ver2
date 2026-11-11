@@ -1,5 +1,5 @@
 """CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-csv <csv>|refresh-fixes|
-user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password}."""
+user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password|totp-rekey}."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import access, admin, csvimport, cve, db, importer, jobs, posture, tools, users
+from . import access, admin, csvimport, cve, db, importer, jobs, posture, secretbox, tools, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -73,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     u2 = sub.add_parser("user-2fa-reset", help="turn a user's two-factor off")
     u2.add_argument("name")
     sub.add_parser("admin-password", help="set the 'admin' user's password (kept for one release)")
+    rk = sub.add_parser("totp-rekey", help="re-encrypt every stored two-factor secret with a new key (README: "
+                                           "two-factor key); then move the new key file over DOMIN_TOTP_KEY")
+    rk.add_argument("--new-key", type=Path, required=True,
+                    help="file for the new key: written with a fresh key when missing or empty, else read")
+    rk.add_argument("--old-key", type=Path, help="the key the values are encrypted with (default: DOMIN_TOTP_KEY)")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -210,6 +215,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             users.set_password(conn, u["id"], pw)
         print("admin password set; open sessions were signed out")
+    elif args.cmd == "totp-rekey":
+        try:
+            old = secretbox.load(args.old_key)
+            if not args.new_key.exists() or args.new_key.stat().st_size == 0:
+                secretbox.write_key(args.new_key, secretbox.new_key())
+            new = secretbox.load(args.new_key)
+            with db.connect(settings.db_path) as conn:
+                n = users.rekey_totp(conn, old, new)
+        except (secretbox.KeyUnavailable, OSError) as e:
+            print(f"totp-rekey: {e}; nothing changed", file=sys.stderr)
+            return 1
+        print(f"totp-rekey: {n} values re-encrypted with {args.new_key}; now move it over "
+              f"{secretbox.key_path()} (root:domin 0640) and restart domin and domin-worker")
     return 0
 
 

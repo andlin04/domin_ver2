@@ -209,6 +209,26 @@ bash deploy/install.sh --components inventory,posture        # later: add the mi
   `user-grant <name> <domain|*> <viewer|admin|none>`, `user-2fa-reset <name>`,
   `admin-password` (the `admin` user's password). An existing single `admin_password` becomes an `admin` user on
   first start.
+- **Two-factor key:** the TOTP secrets (and a pending enrolment) are stored encrypted (Fernet, prefix `f1:`) with
+  the key in `/etc/domin/totp.key` (root:domin 0640; `DOMIN_TOTP_KEY` overrides the path). `install.sh` and
+  `update.sh` create it when missing and never overwrite it; the app encrypts older plaintext values at start.
+  - **Back up the key separately from the database** (another place than the database backups). A database restored
+    without its key still starts and signs in by password, but no TOTP code is accepted ("2FA unavailable, contact
+    an admin"; recovery codes still work): reset each user's 2FA (Users page, or `user-2fa-reset <name>`), and
+    they enrol again. `admin-password` and `user-passwd` need no key.
+  - **New key** (as root; the CLI runs as domin):
+
+    ```bash
+    install -o domin -g domin -m 600 /dev/null /etc/domin/totp.key.new
+    cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 /opt/domin/venv/bin/python -m domin totp-rekey --new-key /etc/domin/totp.key.new
+    chown root:domin /etc/domin/totp.key.new && chmod 640 /etc/domin/totp.key.new
+    mv /etc/domin/totp.key.new /etc/domin/totp.key && systemctl restart domin domin-worker
+    ```
+
+    `totp-rekey` writes a fresh key into an empty `--new-key` file (or uses the key in it) and re-encrypts every
+    value in one transaction; `--old-key FILE` when the values are under another key than `DOMIN_TOTP_KEY`. A value
+    the old key cannot decrypt stops it with nothing changed. Between the re-encryption and the restart, TOTP codes
+    are refused.
 - **Usage statistics:** visitors, page views, visit length and page order, top pages, domains, CSV downloads, tools,
   referrers, countries, scans started and refused; bots counted apart; kept 180 days.
 - **Privacy:** no IP addresses stored; a visitor is a hash of address + browser with a daily salt; scan rate limits

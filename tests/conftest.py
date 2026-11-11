@@ -27,6 +27,21 @@ def no_proxy_connect(monkeypatch):
 TEST_SCAN_NETS = "10.0.0.0/8,172.16.0.0/12,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
 
 
+@pytest.fixture(scope="session")
+def totp_key_file(tmp_path_factory):
+    """A throwaway two-factor encryption key for the whole run (never /etc/domin/totp.key)."""
+    from domin import secretbox
+    path = tmp_path_factory.mktemp("totpkey") / "totp.key"
+    secretbox.write_key(path, secretbox.new_key())
+    return path
+
+
+@pytest.fixture(autouse=True)
+def totp_key(monkeypatch, totp_key_file):
+    monkeypatch.setenv("DOMIN_TOTP_KEY", str(totp_key_file))
+    return totp_key_file
+
+
 @pytest.fixture(autouse=True)
 def on_prem_test_networks(monkeypatch):
     monkeypatch.setenv("DOMIN_INSTALL_MODE", "internal")

@@ -213,6 +213,11 @@ if [ ! -f /etc/domin.env ]; then
       "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
+# Two-factor encryption key (domin/secretbox.py): created once, never overwritten. Back it up apart from the
+# database: a restored database without it needs every user's 2FA reset.
+[ -d /etc/domin ] || install -d -m 755 /etc/domin
+[ -s /etc/domin/totp.key ] || (umask 077; head -c 32 /dev/urandom | base64 | tr '+/' '-_' > /etc/domin/totp.key)
+chown root:domin /etc/domin/totp.key && chmod 640 /etc/domin/totp.key
 setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines stay
   (umask 027; { grep -v "^$1=" /etc/domin.env || true; echo "$1=$2"; } > /etc/domin.env.new)
   chown root:domin /etc/domin.env.new && mv /etc/domin.env.new /etc/domin.env

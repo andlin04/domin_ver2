@@ -11,9 +11,16 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import sqlite3
 
-from . import admin, db, tags, totp
+from cryptography.fernet import Fernet
+
+from . import admin, db, secretbox, tags, totp
+from .secretbox import KeyUnavailable
+
+log = logging.getLogger("domin.users")
+TOTP_UNAVAILABLE = "2FA unavailable, contact an admin."   # the key file is missing or wrong (domin.secretbox)
 
 ROLES = ("power", "admin")
 ROLE_LABELS = {"power": "power user", "admin": "admin"}
@@ -166,27 +173,36 @@ def verify_password(conn: sqlite3.Connection, name: str, password: str) -> dict 
 # --- second factor -----------------------------------------------------------------------------------------------
 
 def start_enrol(conn: sqlite3.Connection, user_id: int) -> tuple[str, list[str]]:
-    """A fresh secret and recovery codes to show the user; stored only once they confirm (confirm_enrol)."""
+    """A fresh secret and recovery codes to show the user; stored (encrypted) only once they confirm
+    (confirm_enrol). Raises KeyUnavailable when the key file is missing or malformed."""
     secret = totp.new_secret()
     codes = totp.new_recovery_codes()
-    admin.kv_set(conn, f"enrol:{user_id}", json.dumps({"secret": secret, "recovery": codes}))
+    admin.kv_set(conn, f"enrol:{user_id}", secretbox.encrypt(json.dumps({"secret": secret, "recovery": codes})))
     return secret, codes
 
 
 def enrol_pending(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """The pending enrolment (secret and the recovery codes in plaintext), or None: none, or the key cannot
+    decrypt it (logged; starting again replaces it)."""
     raw = admin.kv_get(conn, f"enrol:{user_id}")
-    return json.loads(raw) if raw else None
+    if not raw:
+        return None
+    try:
+        return json.loads(secretbox.decrypt(raw))
+    except KeyUnavailable as e:
+        log.error("2FA enrolment of user id %s unreadable: %s", user_id, e)
+        return None
 
 
 def confirm_enrol(conn: sqlite3.Connection, user_id: int, code: str) -> list[str] | None:
     """Turn 2FA on once the user proves one code from the app; returns the recovery codes, or None if the code is
-    wrong. The codes were already shown at enrolment; this just stores their hashes."""
+    wrong. The codes were already shown at enrolment; this stores the secret encrypted and only the codes' hashes."""
     pending = enrol_pending(conn, user_id)
     if not pending or totp.verify(pending["secret"], code) is None:
         return None
     hashes = [totp.hash_recovery(c) for c in pending["recovery"]]
     conn.execute("UPDATE users SET totp_secret = ?, recovery = ?, totp_last_step = -1 WHERE id = ?",
-                 (pending["secret"], json.dumps(hashes), user_id))
+                 (secretbox.encrypt(pending["secret"]), json.dumps(hashes), user_id))
     conn.execute("DELETE FROM kv WHERE key = ?", (f"enrol:{user_id}",))
     return pending["recovery"]
 
@@ -197,11 +213,19 @@ def disable_totp(conn: sqlite3.Connection, user_id: int) -> None:
 
 
 def verify_second_factor(conn: sqlite3.Connection, user_id: int, code: str) -> bool:
-    """Accept a TOTP code (once per step) or an unused recovery code (consumed)."""
+    """Accept a TOTP code (once per step) or an unused recovery code (consumed). The secret is decrypted only here;
+    when the key file is missing or wrong, no TOTP code is accepted (fails closed, logged) and KeyUnavailable is
+    raised unless a recovery code matched (those are hashes, independent of the key)."""
     u = get(conn, user_id)
     if not u or not u["has_totp"] or not code:
         return False
-    step = totp.verify(u["totp_secret"], code, last_step=u["totp_last_step"])
+    try:
+        secret = secretbox.decrypt(u["totp_secret"])
+    except KeyUnavailable as e:
+        log.error("2FA unavailable for user %s: %s; restore the key file, or an admin resets the user's 2FA",
+                  u["name"], e)
+        secret = None
+    step = totp.verify(secret, code, last_step=u["totp_last_step"]) if secret else None
     if step is not None:
         conn.execute("UPDATE users SET totp_last_step = ? WHERE id = ?", (step, user_id))
         return True
@@ -210,7 +234,50 @@ def verify_second_factor(conn: sqlite3.Connection, user_id: int, code: str) -> b
         left = [x for x in u["recovery"] if x != h]
         conn.execute("UPDATE users SET recovery = ? WHERE id = ?", (json.dumps(left), user_id))
         return True
+    if secret is None:
+        raise KeyUnavailable(TOTP_UNAVAILABLE)
     return False
+
+
+def _totp_values(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """Every stored two-factor value: (table, key, value) for users.totp_secret and kv enrol:*."""
+    rows = [("users", str(r["id"]), r["totp_secret"]) for r in conn.execute(
+        "SELECT id, totp_secret FROM users WHERE totp_secret != ''")]
+    return rows + [("kv", r["key"], r["value"]) for r in conn.execute(
+        "SELECT key, value FROM kv WHERE key LIKE 'enrol:%'")]
+
+
+def _store_totp_value(conn: sqlite3.Connection, table: str, key: str, value: str) -> None:
+    if table == "users":
+        conn.execute("UPDATE users SET totp_secret = ? WHERE id = ?", (value, int(key)))
+    else:
+        conn.execute("UPDATE kv SET value = ? WHERE key = ?", (value, key))
+
+
+def migrate_totp_encryption(conn: sqlite3.Connection) -> int:
+    """Encrypt plaintext two-factor values from before encryption (no 'f1:' prefix); idempotent. Without a usable
+    key nothing changes (logged) and the next start tries again. Returns how many values were encrypted."""
+    plain = [v for v in _totp_values(conn) if not secretbox.is_encrypted(v[2])]
+    if not plain:
+        return 0
+    try:
+        key = secretbox.load()
+    except KeyUnavailable as e:
+        log.warning("%d two-factor values stay unencrypted until the key is there: %s", len(plain), e)
+        return 0
+    for table, k, value in plain:
+        _store_totp_value(conn, table, k, secretbox.encrypt(value, key))
+    log.info("two-factor values encrypted: %d", len(plain))
+    return len(plain)
+
+
+def rekey_totp(conn: sqlite3.Connection, old: Fernet, new: Fernet) -> int:
+    """Re-encrypt every two-factor value with the new key (plaintext ones are encrypted too). All are decrypted
+    first: one that the old key cannot decrypt raises KeyUnavailable and nothing changes. Returns the count."""
+    values = [(t, k, secretbox.decrypt(v, old)) for t, k, v in _totp_values(conn)]
+    for table, k, plain in values:
+        _store_totp_value(conn, table, k, secretbox.encrypt(plain, new))
+    return len(values)
 
 
 def totp_required(conn: sqlite3.Connection, user: dict) -> bool:

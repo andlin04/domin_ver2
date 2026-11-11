@@ -305,6 +305,7 @@ def init(path: Path) -> None:
         users.migrate_legacy_admin(conn)
         users.migrate_roles(conn)
         users.migrate_signin(conn)
+        users.migrate_totp_encryption(conn)   # plaintext two-factor values from before encryption; needs the key
 
 
 def domain_id(conn: sqlite3.Connection, name: str, added: str | None = None) -> int:

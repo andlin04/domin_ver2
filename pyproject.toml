@@ -13,6 +13,7 @@ dependencies = [
     "pycountry>=24.6",
     "fpdf2>=2.8",           # posture reports as PDF (domin/reports.py)
     "segno>=1.6",           # two-factor setup QR code (domin/totp.py)
+    "cryptography>=44",     # Fernet: two-factor secrets encrypted at rest (domin/secretbox.py)
 ]
 
 [project.optional-dependencies]
