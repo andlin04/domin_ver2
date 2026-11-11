@@ -84,9 +84,23 @@ def csv_safe(value):
 
 
 def session_for(c, request: Request, settings: Settings) -> dict | None:
-    """The request's session; with sign-in turned off (DOMIN_ALLOW_NO_LOGIN + Settings) the stand-in one."""
+    """The request's session; with sign-in turned off (DOMIN_ALLOW_NO_LOGIN + Settings) the stand-in one, which counts
+    in the admin area always and in the inventory and posture areas unless Settings requires sign-in there."""
     s = admin.session(c, request.cookies.get(COOKIE))
-    return s or (admin.no_login_session(c) if settings.allow_no_login else None)
+    if s or not settings.allow_no_login:
+        return s
+    where = access.area(request.url.path)
+    if where != "admin" and users.signin_required(c)[where]:
+        return None
+    return admin.no_login_session(c)
+
+
+def safe_next(target: str | None) -> str:
+    """A same-site path to return to after sign-in ('' = none): starts with one /, no backslash or control text."""
+    t = (target or "").strip()
+    if not t.startswith("/") or t.startswith("//") or "\\" in t or any(ord(ch) < 32 for ch in t) or len(t) > 2000:
+        return ""
+    return t
 
 
 def create_app(settings: Settings | None = None, http: httpx.Client | None = None) -> FastAPI:
@@ -217,13 +231,38 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                          agent=request.headers.get("user-agent", "")[:300],
                          ref="" if ref == request.url.hostname else ref)
 
+    def signin_gate(request: Request) -> Response | None:
+        """Settings, Sign-in: a visitor without a user on a page whose area requires sign-in goes to the sign-in page
+        (API, drill data, CSV and form posts: 401). Inventory: every visitor without a session, except private API
+        clients (DOMIN_INTERNAL_IPS) on /api/. Posture: only the lab stand-in is turned away here; a visitor without
+        a session gets the posture handlers' own answer, as before."""
+        path = request.url.path
+        where = access.area(path)
+        if where == "admin" or path.startswith("/static/") or path == "/healthz":
+            return None
+        if where == "inventory" and path.startswith("/api/") and peer_in(request, internal_nets):
+            return None
+        with conn() as c:
+            if not users.signin_required(c)[where]:
+                return None
+            s = session_for(c, request, settings)
+            u = users.get(c, s["user_id"]) if s and s["user_id"] else None
+            if u and not u["disabled"]:
+                return None
+            if where == "posture" and not (settings.allow_no_login and admin.no_login_session(c)):
+                return None
+        if request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv"):
+            return JSONResponse({"error": "Sign in first."}, status_code=401, headers=PRIVATE)
+        here = path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"{ADMIN}?{urlencode({'next': here})}", status_code=303, headers=PRIVATE)
+
     @app.middleware("http")
     async def headers(request: Request, call_next):
         path = request.url.path
         if (path == ADMIN or path.startswith(ADMIN + "/")) and not net_ok(request):
             resp = JSONResponse({"detail": "Not Found"}, status_code=404)   # same answer as a path that doesn't exist
         else:
-            resp = await call_next(request)
+            resp = await run_in_threadpool(signin_gate, request) or await call_next(request)
         resp.headers.update(SECURITY_HEADERS)
         if request.url.path.startswith("/static/"):
             resp.headers["Cache-Control"] = "no-cache"   # revalidate (ETag) so a deploy shows at once
@@ -726,50 +765,58 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.get(base, response_class=HTMLResponse, include_in_schema=False)
     def admin_page(request: Request):
+        nxt = safe_next(request.query_params.get("next"))
         with conn() as c:
             s, u = current(request, c)
-            if u:
+            if u and not (nxt and s.get("token_hash") == ""):   # the lab stand-in sent here to sign in for real
+                if nxt:
+                    return back(nxt)
                 if u["role"] == "admin":
                     return dashboard(request, c, u, s)
                 return back(base + "/security")
             any_user = users.count(c) > 0
-        return priv(page(request, "login.html", base=base, any_user=any_user, error=""))
+        return priv(page(request, "login.html", base=base, any_user=any_user, error="", next=nxt))
+
+    def signed_in(c, u: dict, nxt: str) -> RedirectResponse:
+        """After the password (and code): a user who must set up two-factor (role or own tick) goes to My account
+        first; else back where the sign-in started, or the start page."""
+        users.record_login(c, u["id"])
+        resp = back(base + "/account" if users.needs_totp_setup(c, u) else nxt or base)
+        set_session(resp, c, u["id"])
+        return resp
 
     @app.post(base + "/login", include_in_schema=False)
     async def admin_login(request: Request):
         data = await form(request)
+        nxt = safe_next(data.get("next"))
         with conn() as c:
             who = admin.client_key(c, client_ip(request))
             if admin.login_blocked(c, who):
                 return priv(page(request, "login.html", 429, base=base, any_user=users.count(c) > 0,
-                                 error="Too many failed sign-ins; wait 15 minutes."))
+                                 error="Too many failed sign-ins; wait 15 minutes.", next=nxt))
             u = users.verify_password(c, data.get("name", ""), data.get("password", ""))
             if not u:
                 admin.login_failed(c, who)
                 return priv(page(request, "login.html", 401, base=base, any_user=users.count(c) > 0,
-                                 error="Wrong user name or password."))
+                                 error="Wrong user name or password.", next=nxt))
             if u["has_totp"]:
                 token = secrets.token_urlsafe(24)
                 expires = (datetime.now() + timedelta(minutes=PENDING_MIN)).isoformat(timespec="seconds")
                 admin.kv_set(c, f"login2fa:{admin._token_hash(token)}",
-                             json.dumps({"user_id": u["id"], "expires": expires}))
+                             json.dumps({"user_id": u["id"], "expires": expires, "next": nxt}))
                 resp = priv(page(request, "totp.html", base=base, error=""))
                 resp.set_cookie(PENDING, token, max_age=PENDING_MIN * 60, path=base, secure=True, httponly=True,
                                 samesite="strict")
                 return resp
-            users.record_login(c, u["id"])
-            resp = back()
-            set_session(resp, c, u["id"])
-            return resp
+            return signed_in(c, u, nxt)
 
-    def _pending_user(c, token: str | None) -> dict | None:
+    def _pending(c, token: str | None) -> dict | None:
+        """The pending second-factor step: {user_id, expires, next}, or None when unknown or expired."""
         raw = admin.kv_get(c, f"login2fa:{admin._token_hash(token)}") if token else None
         if not raw:
             return None
         data = json.loads(raw)
-        if data["expires"] < db.now():
-            return None
-        return users.get(c, data["user_id"])
+        return None if data["expires"] < db.now() else data
 
     @app.post(base + "/login/totp", include_in_schema=False)
     async def admin_login_totp(request: Request):
@@ -779,16 +826,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             who = admin.client_key(c, client_ip(request))
             if admin.login_blocked(c, who):
                 return priv(page(request, "totp.html", 429, base=base, error="Too many tries; wait 15 minutes."))
-            u = _pending_user(c, token)
+            pend = _pending(c, token)
+            u = users.get(c, pend["user_id"]) if pend else None
             if not u or u["disabled"]:
                 return back()   # expired: start again
             if not users.verify_second_factor(c, u["id"], data.get("code", "")):
                 admin.login_failed(c, who)
                 return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
             conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
-            users.record_login(c, u["id"])
-            resp = back()
-            set_session(resp, c, u["id"])
+            resp = signed_in(c, u, safe_next(pend.get("next")))
             resp.delete_cookie(PENDING, path=base, secure=True, httponly=True, samesite="strict")
             return resp
 
@@ -892,9 +938,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if users.required_for(c, u["role"]):
+            if users.totp_required(c, u):
                 return shell(request, "account.html", u, s, 403, enrol=None, otpauth="", must_setup=False,
-                             error="Two-factor is required for your role and cannot be turned off.")
+                             error="Two-factor is required for your account and cannot be turned off.")
             users.disable_totp(c, u["id"])
         return back(base + "/account", "2fa-off")
 
@@ -911,6 +957,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def users_view(request, c, u, s, status: int = 200, error: str = "", link: str = ""):
         rows = users.listing(c)
         return shell(request, "users.html", u, s, status, users=rows, roles=users.ROLES,
+                     must_2fa={r["id"]: users.totp_required(c, r) for r in rows},
                      last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows},
                      grants=access.all_grants(c), levels=access.LEVEL_LABELS, audit=access.audit_recent(c),
                      link=link or request.query_params.get("link", ""), error=error)
@@ -931,7 +978,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return shell(request, "user_edit.html", u, s, status, target=target, roles=users.ROLES,
                      last_admin=users.is_last_admin(c, target["id"]), grant_rows=rows + [{"domain": "",
                      "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
-                     error=error)
+                     role_2fa=users.required_for(c, target["role"]), error=error)
 
     @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
     def user_edit_page(request: Request, user_id: PathId):
@@ -1006,6 +1053,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 users.disable_totp(c, user_id)
                 access.audit(c, u["name"], "reset-2fa", target["name"])
                 return back(after, "user-saved")
+            if action == "require-2fa":
+                want = data.get("required") == "on"
+                users.set_totp_required(c, user_id, want)
+                if want != target["totp_required"]:
+                    access.audit(c, u["name"], "require-2fa", target["name"], "on" if want else "off")
+                return back(after, "user-saved")
             if action == "reset-password":
                 token = users.new_setpw_token(c, user_id)
                 access.audit(c, u["name"], "reset-password", target["name"])
@@ -1042,7 +1095,25 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      countries=countries, roles=users.ROLES, error=error,
                      internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,
                      sync=publicsync.status(settings.db_path.parent, c),
-                     allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None)
+                     allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None,
+                     signin=users.signin_required(c))
+
+    @app.post(base + "/settings/signin", include_in_schema=False)
+    async def settings_signin(request: Request):
+        """Where sign-in is required: inventory pages, posture (the lab stand-in; elsewhere posture always needs it)."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            old = users.signin_required(c)
+            new = {"inventory": data.get("inventory") == "on",
+                   "posture": data.get("posture") == "on" or not settings.allow_no_login}
+            users.set_signin_required(c, **new)
+            if new != old:
+                access.audit(c, u["name"], "sign-in", "settings",
+                             ", ".join(f"{k} {'required' if v else 'open'}" for k, v in new.items()))
+        return back(base + "/settings#signin", "saved")
 
     @app.post(base + "/settings/no-login", include_in_schema=False)
     async def settings_no_login(request: Request):
@@ -1054,7 +1125,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return redirect
             if not settings.allow_no_login:
                 raise HTTPException(403, "Sign-in can only be turned off with DOMIN_ALLOW_NO_LOGIN=1.")
-            admin.set_no_login(c, u["id"] if data.get("off") == "1" else None, s["csrf"])
+            off = data.get("off") == "1"
+            admin.set_no_login(c, u["id"] if off else None, s["csrf"])
+            # the old switch's meaning: off opens posture to the stand-in too, on requires sign-in there again
+            users.set_signin_required(c, users.signin_required(c)["inventory"], not off)
         return back(base + "/settings", "saved")
 
     @app.post(base + "/settings/public-sync", include_in_schema=False)

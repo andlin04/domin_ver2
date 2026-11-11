@@ -7,6 +7,7 @@ Scope.sql(column) to its WHERE clause, so one place decides what a user sees."""
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -72,6 +73,17 @@ class Scope:
 
 FULL = Scope(everything=True)
 NONE = Scope()
+
+ADMIN_BASE = "/admin"
+_POSTURE = re.compile(r"/admin/(security(?!/(scan-settings|profiles|discovery-profiles)(/|$))(/.*)?"
+                      r"|schedules(/.*)?|tags|discovery/scan)")
+
+
+def area(path: str) -> str:
+    """The sign-in area of a path (Settings, Sign-in): "inventory" (the public pages), "posture" or "admin"."""
+    if path != ADMIN_BASE and not path.startswith(ADMIN_BASE + "/"):
+        return "inventory"
+    return "posture" if _POSTURE.fullmatch(path) else "admin"
 
 
 def grants(conn: sqlite3.Connection, user_id: int) -> list[dict]:

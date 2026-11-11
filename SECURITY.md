@@ -66,7 +66,11 @@ a public issue for it.
 - Roles: admin, or power user limited to granted domains (viewer or domain admin per domain, covering the domains
   under it). One scope filter in every list, search, CSV, chart, count and posture query; an object outside a
   power user's grants answers 404 like an unknown one. Only admins grant; the last enabled admin cannot be
-  demoted, disabled or deleted. Inventory pages stay public to visitors without a session (as before).
+  demoted, disabled or deleted. Inventory pages stay public to visitors without a session unless Settings,
+  "Sign-in required for: Inventory" is ticked (then the sign-in page; API, CSV and drill data 401; private API
+  clients of `DOMIN_INTERNAL_IPS` keep /api/). Posture always needs a session; the lab stand-in (sign-in turned off,
+  `DOMIN_ALLOW_NO_LOGIN`) counts there only while "Posture" is unticked. Two-factor can be required per role and per
+  user; such a user is sent to My account after each sign-in until enrolled, and cannot turn it off.
 - The scan sandbox still refuses every non-public address except `--scan-nets` and `--internal-dns`, written as a
   systemd drop-in; this host's own addresses are cut out of those networks (systemd lets an allow entry win over
   any deny entry). The web service gets no internal networks, only the HTTP proxy, if one is set.

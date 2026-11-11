@@ -144,11 +144,33 @@
   </form>
 </section>
 
+<section class="card" id="signin">
+  <h2>Sign-in required for</h2>
+  <form method="post" action="{{ base }}/settings/signin">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick"><input type="checkbox" name="inventory" {% if signin.inventory %}checked{% endif %}>
+      Inventory <small class="muted">inventory pages, all records, domain pages, search, CSV, drill data, whois and
+      e-mail tools</small></label>
+    <label class="tick"><input type="checkbox" name="posture" {% if signin.posture or not allow_no_login %}checked{% endif %}
+      {% if not allow_no_login %}disabled{% endif %}>
+      Posture <small class="muted">posture pages, CVEs, scans and schedules</small></label>
+    <p class="muted small-print">Inventory unticked: open to every visitor that reaches this site, as before (a public
+      server: the internet). Ticked: a visitor without a session goes to the sign-in page (API, CSV and drill data:
+      401); private API clients (DOMIN_INTERNAL_IPS) keep /api/.
+      {% if allow_no_login %}Posture unticked: while sign-in is turned off (below), every visitor reads and acts on
+      posture as that admin.{% else %}Posture always needs sign-in here (DOMIN_ALLOW_NO_LOGIN is not set).{% endif %}
+      The admin area (Operations, Settings, Users) always needs sign-in{% if allow_no_login %}, except while it is
+      turned off below{% endif %}.</p>
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </form>
+</section>
+
 {% if allow_no_login %}
 <section class="card warn-card">
   <h2>Sign-in <small>development and lab only</small></h2>
-  <p class="muted">Off: every visitor that reaches this server acts as the admin who turned it off. Allowed here because
-    DOMIN_ALLOW_NO_LOGIN is set; never set it on a public server.</p>
+  <p class="muted">Off: every visitor that reaches this server acts as the admin who turned it off, in the admin area
+    and where "Sign-in required for" above is unticked. Allowed here because DOMIN_ALLOW_NO_LOGIN is set; never set it
+    on a public server.</p>
   <form method="post" action="{{ base }}/settings/no-login">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="tick"><input type="checkbox" name="off" value="1" {% if no_login_on %}checked{% endif %}>

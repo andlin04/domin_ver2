@@ -9,7 +9,8 @@
 </section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-{% if must_setup %}<p class="note bad" role="alert">Two-factor is required for your role. Set it up below.</p>{% endif %}
+{% if must_setup %}<p class="note bad" role="alert">Two-factor is required for your account. Set it up below:
+  Set up two-factor, add the secret to your authenticator app, enter its code.</p>{% endif %}
 
 {% if recovery %}
 <section class="card">

@@ -69,7 +69,9 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   power user (only the domains granted to it). Per domain a grant is viewer (reads inventory, posture, CVEs,
   reports) or domain admin (also posture scans and host tags there); a grant covers the domains under it. Changes
   to users, roles and grants are logged on the Users page.
-- **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role.
+- **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role
+  (Settings) and per user (Users, edit page; the user enrols under My account, sent there after sign-in).
+  Settings, "Sign-in required for": Inventory (the public pages) and/or Posture; inventory is open by default.
 - **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
   (cancel, stop, retry), tuning without restart.
 

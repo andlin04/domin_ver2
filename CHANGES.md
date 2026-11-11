@@ -2,6 +2,24 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Sign-in per area, two-factor per user
+
+- Settings, "Sign-in required for": Inventory and/or Posture (docs/delegation.md, Sign-in). Inventory ticked: a
+  visitor without a session goes to the sign-in page and back to the page after it; API, CSV and drill data answer
+  401; private API clients (`DOMIN_INTERNAL_IPS`) keep `/api/`. Posture always needs a user; unticked lets the lab
+  stand-in (sign-in turned off, `DOMIN_ALLOW_NO_LOGIN`) in, as the old switch did. The admin area needs a session or
+  that stand-in. Audit: `sign-in`.
+- Users, edit page: "Require two-factor for this user", the reset button and a line on enrolling under My account.
+  Users who must have two-factor (role or own tick) and have none are sent to My account after each sign-in (also
+  for the role rule, which before only showed a note there). The 2FA column marks "required" users not enrolled.
+- Sign-in page: keeps `?next=` (same-site paths only) through the password and code steps.
+- Migration on start (once, kv `auth:signin`): inventory open; posture required unless sign-in was turned off at
+  that moment. Nothing changes until an admin saves the setting. `users.totp_required` existed (unused) and is used
+  now.
+- Rollback: `git revert` this commit and re-run install.sh; older code ignores `auth:signin` and
+  `users.totp_required` (inventory public again, per-user 2FA no longer enforced). To undo the per-user ticks first:
+  `UPDATE users SET totp_required = 0`.
+
 ## 2026-11-11: Scheduled rescans in Posture · Scans, route check, header and table fixes
 
 - Scheduled rescans moved to a section of Posture · Scans: domain, name, recurrence, what runs, next and last run,

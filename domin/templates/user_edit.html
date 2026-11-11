@@ -23,6 +23,25 @@
     {% else %}Admin: every domain, users and settings. Power user: the domains below only.{% endif %}</p>
 </section>
 
+<section class="card" id="two-factor">
+  <h2>Two-factor <small>{{ 'on' if target.has_totp else 'not set up' }}</small></h2>
+  <form method="post" action="{{ base }}/users/{{ target.id }}/require-2fa" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="from" value="edit">
+    <label class="tick"><input type="checkbox" name="required" {% if target.totp_required %}checked{% endif %}>
+      Require two-factor for this user</label>
+    <button class="btn" type="submit">Save</button>
+  </form>
+  {% if target.has_totp %}
+  <form method="post" action="{{ base }}/users/{{ target.id }}/reset-2fa" class="inline"
+        data-confirm="Reset two-factor for {{ target.name }}? They set it up again at their next sign-in if it is required.">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="from" value="edit">
+    <button class="btn" type="submit">Reset two-factor</button></form>
+  {% endif %}
+  <p class="muted">{% if role_2fa %}Also required for every {{ role_labels[target.role] }} (Settings). {% endif %}The user
+    enrols under <a href="{{ base }}/account">My account</a>: Set up two-factor, add the secret to an authenticator
+    app, confirm with a code. Required and not set up: each sign-in opens My account first.</p>
+</section>
+
 <section class="card">
   <h2>Domains <small>{{ grant_rows|selectattr('domain')|list|length }} granted</small></h2>
   {% if target.role == 'admin' %}<p class="note">An admin sees every domain; these grants apply only if the role

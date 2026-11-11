@@ -40,7 +40,7 @@
         {% else %}{% for g in grants.get(us.id, []) %}<span class="grant">{{ 'every domain' if g.domain == '*' else g.domain }}
           <span class="pill {{ 'ok' if g.level == 'admin' }}">{{ levels[g.level] }}</span></span>{% if not loop.last %} {% endif %}
         {% else %}<span class="muted">none</span>{% endfor %}{% endif %}</td>
-      <td>{{ 'on' if us.has_totp else '–' }}</td>
+      <td>{% if us.has_totp %}on{% elif must_2fa[us.id] %}<span class="pill bad" title="Required (role or user), not set up yet">required</span>{% else %}–{% endif %}</td>
       <td>{{ 'disabled' if us.disabled else 'active' }}</td>
       <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
       <td class="row-actions">

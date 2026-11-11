@@ -166,9 +166,48 @@ def verify_second_factor(conn: sqlite3.Connection, user_id: int, code: str) -> b
     return False
 
 
+def totp_required(conn: sqlite3.Connection, user: dict) -> bool:
+    """True when this user must have a second factor: its role is ticked in Settings, or its own tick (Users, edit
+    page)."""
+    return bool(user["totp_required"]) or required_for(conn, user["role"])
+
+
+def set_totp_required(conn: sqlite3.Connection, user_id: int, required: bool) -> None:
+    conn.execute("UPDATE users SET totp_required = ? WHERE id = ?", (int(required), user_id))
+
+
 def needs_totp_setup(conn: sqlite3.Connection, user: dict) -> bool:
-    """True when policy requires a second factor the user has not set up yet."""
-    return required_for(conn, user["role"]) and not user["has_totp"]
+    """True when policy (role or user) requires a second factor the user has not set up yet."""
+    return totp_required(conn, user) and not user["has_totp"]
+
+
+# --- where sign-in is required (Settings, Sign-in) ---------------------------------------------------------------
+# inventory: the public pages (inventory, all records, domain pages, search, CSV, drill data, whois and e-mail
+# tools); unticked they are open to every visitor that reaches the site. posture: the Posture pages always need a
+# user; the setting decides whether the lab stand-in (sign-in turned off, DOMIN_ALLOW_NO_LOGIN) counts there. The
+# admin area always needs a session or that stand-in.
+
+SIGNIN_KEY = "auth:signin"
+SIGNIN_AREAS = ("inventory", "posture")
+
+
+def signin_required(conn: sqlite3.Connection) -> dict[str, bool]:
+    raw = admin.kv_get(conn, SIGNIN_KEY)
+    saved = json.loads(raw) if raw else {}
+    return {"inventory": bool(saved.get("inventory", False)), "posture": bool(saved.get("posture", True))}
+
+
+def set_signin_required(conn: sqlite3.Connection, inventory: bool, posture: bool) -> None:
+    admin.kv_set(conn, SIGNIN_KEY, json.dumps({"inventory": bool(inventory), "posture": bool(posture)}))
+
+
+def migrate_signin(conn: sqlite3.Connection) -> bool:
+    """Once: the setting from the old switch, so nothing changes. Inventory was open; posture followed the sign-in-off
+    switch (off = the stand-in counted there). Returns True when it wrote the setting."""
+    if admin.kv_get(conn, SIGNIN_KEY) is not None:
+        return False
+    set_signin_required(conn, False, admin.no_login_session(conn) is None)
+    return True
 
 
 # --- one-time set-password tokens (for invites and admin resets) --------------------------------------------------

@@ -290,6 +290,7 @@ def init(path: Path) -> None:
         from . import users  # local import: users -> admin -> db
         users.migrate_legacy_admin(conn)
         users.migrate_roles(conn)
+        users.migrate_signin(conn)
 
 
 def domain_id(conn: sqlite3.Connection, name: str, added: str | None = None) -> int:
