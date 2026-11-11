@@ -35,6 +35,7 @@ from . import (
     admin,
     cve,
     db,
+    discovery,
     fingerprint,
     jobs,
     mullvad,
@@ -42,13 +43,14 @@ from . import (
     proxy,
     publicsync,
     reports,
+    schedules,
     tags,
     tools,
     totp,
     users,
 )
 from .config import Settings
-from .validate import normalize_domain
+from .validate import is_internal, normalize_domain
 
 HERE = Path(__file__).parent
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
@@ -314,11 +316,22 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 tag = ""
         posture_report = posture.report(posture_rows)
         posture_report["charts"]["trend"] = posture_trend
+        sched_rows, sched_opts, discovered, internal = [], None, [], False
+        if user:   # schedules and the nmap discovery stage: signed-in, like posture
+            with conn() as c:
+                sched_rows = schedules.for_domain(c, d["name"])
+                if scope.manages(d["name"]):
+                    sched_opts = schedule_opts(c, d["name"])
+                if current.get("discovery"):
+                    discovered = db.discovery_results(c, current["id"])
+                internal = is_internal(d["name"], admin.effective(settings, c).internal_zones)
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
                     posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
-                    tag_counts=dict(sorted(tag_counts.items())), tag=tag)
+                    tag_counts=dict(sorted(tag_counts.items())), tag=tag, sched_rows=sched_rows,
+                    sched_opts=sched_opts, new_schedule=new_schedule(sched_opts), discovered=discovered,
+                    domain_internal=internal, notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
         """Host names added / removed at each scan versus the one before it."""
@@ -595,7 +608,39 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running.",
-           "sync-requested": "Sync started; reload in a minute for the result."}
+           "sync-requested": "Sync started; reload in a minute for the result.",
+           "schedule-saved": "Schedule saved; its next run is shown below.", "schedule-deleted": "Schedule removed.",
+           "schedule-run": "Schedule run queued.", "schedule-on": "Schedule enabled; next run from now.",
+           "schedule-off": "Schedule disabled.", "discovery-queued": "Scan with nmap discovery queued.",
+           "discovery-open": "A scan of this domain is already queued or running; it keeps its own parameters."}
+
+
+def schedule_opts(c, domain: str) -> dict:
+    """The choices of the schedule form for one domain."""
+    hosts = posture.host_list(c, domain)
+    return {"posture": posture.profiles(c), "discovery": discovery.profiles(c), "hosts": hosts,
+            "tags": sorted({t for h in hosts for t in h["tags"] + h["net_tags"]}), "freqs": schedules.FREQS,
+            "weekdays": schedules.WEEKDAYS, "host_modes": schedules.HOST_MODES,
+            "default_discovery": discovery.get_default(c)}
+
+
+def new_schedule(opts: dict | None) -> dict:
+    """A new schedule form's starting values."""
+    if not opts:
+        return {}
+    return {"name": "Weekly rescan", "enabled": "1", "discovery": "1", "discovery_profile": opts["default_discovery"],
+            "posture": "", "posture_profile": posture.DEFAULT_PROFILE, "host_mode": "all", "freq": "weekly",
+            "at_time": "03:00", "weekday": "6", "monthday": "1", "every": "1", "chosen": []}
+
+
+def schedule_form(s: dict) -> dict:
+    """A saved schedule as form values."""
+    return {**{k: str(s[k]) for k in schedules.COLS if k != "hosts"}, "chosen": json.loads(s["hosts"] or "[]")}
+
+
+def refused_form(data: dict) -> dict:
+    """A refused schedule form as it was sent (unticked boxes stay unticked)."""
+    return {**data, "enabled": data.get("enabled", "0"), "chosen": [k[2:] for k in data if k.startswith("h:")]}
 PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
 PENDING_MIN = 5
@@ -661,6 +706,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def dashboard(request: Request, c, u: dict, s: dict, error: str = "", status: int = 200) -> HTMLResponse:
         live = admin.effective(settings, c)
         return shell(request, "admin.html", u, s, status, stats=admin.report(c), jobs=jobs.admin_list(c),
+                     sched_rows=schedules.listing(c, request.state.scope),
                      tunable=[(k, *v, getattr(live, k)) for k, v in admin.TUNABLE.items()], error=error)
 
     @app.get(base, response_class=HTMLResponse, include_in_schema=False)
@@ -1323,9 +1369,203 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return back()
             if u["role"] != "admin":
                 return profiles_view(request, u, s, 403, "Changing scan profiles needs the admin role.")
+            if uses := posture.profile_used_by(c, name):
+                return profiles_view(request, u, s, 409, f"{name} is used by schedule(s) {', '.join(uses)}: pick "
+                                     "another profile there first.")
             if not posture.delete_profile(c, name):
                 return profiles_view(request, u, s, 422, "The default profile cannot be deleted.")
         return back(f"{base}/security/profiles")
+
+    # --- discovery profiles (nmap stage of inventory scans; admins edit, anyone signed in reads) -------------------
+
+    disc_page = base + "/security/discovery-profiles"
+
+    def discovery_view(request, c, u, s, status: int = 200, error: str = "", form: dict | None = None,
+                       editing: bool = False):
+        raw_ok = admin.kv_get(c, posture.RAW_KEY) == "1" and users.get_scope(c)["raw_scans"]
+        rows = [{**p, "command": discovery.command_line(p, raw=raw_ok), "used_by": discovery.used_by(c, p["name"])}
+                for p in discovery.profiles(c)]
+        return shell(request, "discovery_profiles.html", u, s, status, profiles=rows, error=error, form=form or {},
+                     editing=editing, methods=discovery.METHODS, port_modes=discovery.PORT_MODES, raw_ok=raw_ok,
+                     probe_max=discovery.PROBE_MAX, ports_max=discovery.PORTS_MAX, default=discovery.get_default(c),
+                     route_names=proxy.names(proxy.get(c), proxy.tests(c)))
+
+    @app.get(disc_page, response_class=HTMLResponse, include_in_schema=False)
+    def discovery_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            p = discovery.profile(c, request.query_params.get("edit", "")) or {}
+            form = {k: str(p[k]) for k in discovery.FIELDS} if p else {}
+            return discovery_view(request, c, u, s, form=form, editing=bool(p))
+
+    @app.post(disc_page, include_in_schema=False)
+    async def discovery_save(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            raw_ok = admin.kv_get(c, posture.RAW_KEY) == "1" and users.get_scope(c)["raw_scans"]
+            p, error = discovery.check(data, {r["id"] for r in proxy.get(c)["routes"]}, raw_ok)
+            if not p:
+                return discovery_view(request, c, u, s, 422, error, data)
+            discovery.save(c, p, u["name"])
+            access.audit(c, u["name"], "discovery-profile-save", p["name"], discovery.command_line(p, raw_ok))
+        return back(disc_page, "saved")
+
+    @app.post(disc_page + "/default", include_in_schema=False)
+    async def discovery_default(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            name = (data.get("name") or "").strip()
+            try:
+                discovery.set_default(c, name)
+            except ValueError as exc:
+                return discovery_view(request, c, u, s, 422, str(exc))
+            access.audit(c, u["name"], "discovery-profile-default", name or "(none)", "")
+        return back(disc_page, "saved")
+
+    @app.post(disc_page + "/{name}/delete", include_in_schema=False)
+    async def discovery_delete(request: Request, name: str):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            if why := discovery.delete(c, name):
+                return discovery_view(request, c, u, s, 409 if "used by" in why else 422, why)
+            access.audit(c, u["name"], "discovery-profile-delete", name, "")
+        return back(disc_page, "saved")
+
+    @app.post(base + "/discovery/scan", include_in_schema=False)
+    async def discovery_scan(request: Request):
+        """"Scan with nmap" on a domain page: an inventory scan with a discovery stage (domain admin of the domain)."""
+        data = await form(request)
+        dom = (data.get("domain") or "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            grants = request.state.scope
+            if not db.domain(c, dom) or not grants.sees(dom):
+                raise HTTPException(404, f"{dom} has not been scanned")
+            if not grants.manages(dom):
+                raise HTTPException(403, f"Scanning needs domain admin rights on {dom}.")
+            if not users.domain_allowed(c, dom):
+                raise HTTPException(403, f"{dom} is outside the inventory scope (Settings).")
+            name = (data.get("profile") or "").strip()
+            if not discovery.profile(c, name):
+                raise HTTPException(422, "Pick an existing discovery profile.")
+            busy = c.execute("SELECT 1 FROM jobs WHERE domain = ? AND status IN ('queued', 'running')",
+                             (dom,)).fetchone()
+            job = jobs.enqueue(c, dom, client="admin", discovery=name)
+            access.audit(c, u["name"], "discovery-scan", dom, f"profile {name}, job {job['id']}"
+                         + (" (joined the open job)" if busy else ""))
+        return back(f"/d/{dom}", "discovery-open" if busy else "discovery-queued")
+
+    # --- schedules (domin.schedules): domain admins on their domains, viewers read, outside = 404 ------------------
+
+    def schedule_or_404(c, sid: int, grants: access.Scope) -> dict:
+        sc = schedules.get(c, sid)
+        if not sc or not grants.sees(sc["domain"]):
+            raise HTTPException(404, "No such schedule")
+        return sc
+
+    def schedule_view(request, c, u, s, dom: str, sid: int | None, sf: dict, status: int = 200, error: str = ""):
+        grants = request.state.scope
+        rows = [r for r in schedules.for_domain(c, dom) if r["id"] == sid] if sid else []
+        return shell(request, "schedule.html", u, s, status, error=error, sf=sf, sf_id=sid, sched_domain=dom,
+                     sched_rows=rows, can_manage=grants.manages(dom),
+                     sched_opts=schedule_opts(c, dom) if grants.manages(dom) else None)
+
+    def schedule_rights(request, c, dom: str) -> None:
+        grants = request.state.scope
+        if not db.domain(c, dom) or not grants.sees(dom):
+            raise HTTPException(404, f"{dom} has not been scanned")
+        if not grants.manages(dom):
+            raise HTTPException(403, f"Schedules need domain admin rights on {dom}.")
+
+    @app.get(base + "/schedules/{sid}", response_class=HTMLResponse, include_in_schema=False)
+    def schedule_page(request: Request, sid: PathId):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            return schedule_view(request, c, u, s, sc["domain"], sid, schedule_form(sc))
+
+    @app.post(base + "/schedules", include_in_schema=False)
+    async def schedule_create(request: Request):
+        data = await form(request, limit=300_000)   # one h:<name> box per chosen host
+        dom = (data.get("domain") or "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            schedule_rights(request, c, dom)
+            p, error = schedules.check(c, dom, data)
+            if not p:
+                return schedule_view(request, c, u, s, dom, None, refused_form(data), 422, error)
+            sid = schedules.create(c, dom, p, u["name"])
+            access.audit(c, u["name"], "schedule-create", dom, f"#{sid} {p['name']}")
+        return back(f"/d/{dom}#schedules", "schedule-saved")
+
+    @app.post(base + "/schedules/{sid}", include_in_schema=False)
+    async def schedule_update(request: Request, sid: PathId):
+        data = await form(request, limit=300_000)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            schedule_rights(request, c, sc["domain"])
+            p, error = schedules.check(c, sc["domain"], data)
+            if not p:
+                return schedule_view(request, c, u, s, sc["domain"], sid, refused_form(data), 422, error)
+            schedules.update(c, sid, p, u["name"])
+            access.audit(c, u["name"], "schedule-update", sc["domain"], f"#{sid} {p['name']}")
+        return back(f"/d/{sc['domain']}#schedules", "schedule-saved")
+
+    @app.post(base + "/schedules/{sid}/{action}", include_in_schema=False)
+    async def schedule_action(request: Request, sid: PathId, action: str):
+        if action not in ("delete", "run", "enabled"):
+            raise HTTPException(404, "Not Found")
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            dom = sc["domain"]
+            schedule_rights(request, c, dom)
+            if action == "delete":
+                schedules.delete(c, sid)
+                notice = "schedule-deleted"
+            elif action == "enabled":
+                on = data.get("on") == "1"
+                schedules.set_enabled(c, sid, on, u["name"])
+                notice = "schedule-on" if on else "schedule-off"
+            else:
+                run = schedules.run_now(c, sid)
+                if run is None:
+                    raise HTTPException(409, "The previous run of this schedule is still queued or running.")
+                notice = "schedule-run"
+            access.audit(c, u["name"], f"schedule-{action}", dom, f"#{sid} {sc['name']}"
+                         + (f": {run['result']}" if action == "run" else f" on={data.get('on')}" if action == "enabled"
+                            else ""))
+        where = data.get("from") or ""
+        return back(f"{base}#schedules" if where == "ops" else f"/d/{dom}#schedules", notice)
 
     # --- routes: named scan routes and the shared route settings (admin only; URL kept from "Scan settings") ------
 

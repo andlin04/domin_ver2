@@ -420,6 +420,11 @@ def posture_ok(scope: dict, ip: str, country: str) -> bool:
             and _country_ok(country, scope["countries_allow"], scope["countries_deny"]))
 
 
+def posture_ip_ok(scope: dict, ip: str) -> bool:
+    """The posture IP allow/deny rules only (an address without a country: internal networks)."""
+    return _ip_ok([ip], scope["ip_allow"], scope["ip_deny"])
+
+
 def posture_ip_in_scope(conn: sqlite3.Connection, ip: str) -> bool:
     """True when the posture / fingerprint engine may probe this address (IP allow/deny only)."""
     scope = get_scope(conn)

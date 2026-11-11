@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS scans (
     countries INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     eu INTEGER NOT NULL DEFAULT 0,        -- addresses in an EU country
-    eu_known INTEGER NOT NULL DEFAULT 0   -- addresses with a known country
+    eu_known INTEGER NOT NULL DEFAULT 0,  -- addresses with a known country
+    discovery TEXT NOT NULL DEFAULT '',   -- discovery profile of the nmap stage ('' = none ran)
+    discovery_params TEXT NOT NULL DEFAULT ''   -- the nmap command line(s) of that stage
 );
 CREATE INDEX IF NOT EXISTS scans_domain ON scans(domain_id, started);
 CREATE TABLE IF NOT EXISTS records (
@@ -51,7 +53,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     scan_id INTEGER,
     client TEXT NOT NULL DEFAULT '',
     progress TEXT NOT NULL DEFAULT '',
-    error TEXT
+    error TEXT,
+    discovery TEXT NOT NULL DEFAULT '',  -- discovery profile for the nmap stage ('' = DNS only)
+    schedule_id INTEGER                  -- the schedule that queued it
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created);
 CREATE TABLE IF NOT EXISTS ip_cache (
@@ -115,7 +119,8 @@ CREATE TABLE IF NOT EXISTS posture_scans (   -- stage 2: one fingerprint + CVE m
     params TEXT NOT NULL DEFAULT '',      -- the nmap command line that ran
     route TEXT NOT NULL DEFAULT '',       -- scan route id from the profile ('' = the default route, 'direct')
     chunks INTEGER NOT NULL DEFAULT 0,    -- port chunks in this scan (one nmap run each)
-    chunks_done INTEGER NOT NULL DEFAULT 0  -- chunks finished; services/raw hold their results (resume point)
+    chunks_done INTEGER NOT NULL DEFAULT 0,  -- chunks finished; services/raw hold their results (resume point)
+    schedule_id INTEGER                     -- the schedule that queued it
 );
 CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, picked per posture scan
     name TEXT PRIMARY KEY,
@@ -146,6 +151,61 @@ CREATE TABLE IF NOT EXISTS grants (   -- delegation: a power user's domains (dom
     added_by TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (user_id, domain)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS discovery_profiles (   -- nmap discovery stage parameters (domin.discovery)
+    name TEXT PRIMARY KEY,
+    method TEXT NOT NULL DEFAULT 'syn',      -- default | none | syn | ack | udp | echo | timestamp
+    probe_ports TEXT NOT NULL DEFAULT '',    -- -PS/-PA/-PU port list
+    port_mode TEXT NOT NULL DEFAULT 'none',  -- none (-sn) | top | list
+    top_ports INTEGER NOT NULL DEFAULT 100,
+    ports TEXT NOT NULL DEFAULT '',
+    timing INTEGER NOT NULL DEFAULT 3,       -- -T0..-T5
+    max_rate INTEGER NOT NULL DEFAULT 0,     -- 0 = unset
+    max_retries INTEGER NOT NULL DEFAULT 1,
+    host_timeout INTEGER NOT NULL DEFAULT 120,
+    rdns INTEGER NOT NULL DEFAULT 0,         -- 1 = -R, 0 = -n
+    route TEXT NOT NULL DEFAULT '',          -- '' = the inventory route, 'direct', or a route id
+    note TEXT NOT NULL DEFAULT '',
+    updated TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS discovery_results (   -- what the nmap discovery stage of a scan found
+    scan_id INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    ip TEXT NOT NULL,
+    names TEXT NOT NULL DEFAULT '',    -- names nmap reported, comma separated
+    ports TEXT NOT NULL DEFAULT '',    -- open ports, e.g. 22/tcp,443/tcp
+    reason TEXT NOT NULL DEFAULT ''    -- why nmap counted it as up
+);
+CREATE INDEX IF NOT EXISTS discovery_results_scan ON discovery_results(scan_id);
+CREATE TABLE IF NOT EXISTS schedules (   -- scheduled rescans of one domain (domin.schedules)
+    id INTEGER PRIMARY KEY,
+    domain TEXT NOT NULL,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    discovery INTEGER NOT NULL DEFAULT 0,          -- run an inventory scan
+    discovery_profile TEXT NOT NULL DEFAULT '',    -- '' = DNS only
+    posture INTEGER NOT NULL DEFAULT 0,            -- run posture scans
+    posture_profile TEXT NOT NULL DEFAULT 'default',
+    host_mode TEXT NOT NULL DEFAULT 'all',         -- all | list | tag
+    hosts TEXT NOT NULL DEFAULT '[]',              -- json: chosen host names (list)
+    tag TEXT NOT NULL DEFAULT '',                  -- host or network tag (tag)
+    freq TEXT NOT NULL DEFAULT 'daily',            -- daily | weekly | monthly | hours | days
+    at_time TEXT NOT NULL DEFAULT '03:00',         -- HH:MM server local time
+    weekday INTEGER NOT NULL DEFAULT 0,            -- 0 = Monday
+    monthday INTEGER NOT NULL DEFAULT 1,
+    every INTEGER NOT NULL DEFAULT 1,              -- N for hours / days
+    anchor TEXT NOT NULL DEFAULT '',               -- first slot (local), the base of every N hours / days
+    next_ts REAL,                                  -- epoch of the next run (NULL = none)
+    next_run TEXT NOT NULL DEFAULT '',             -- the same, local time, for display
+    last_run TEXT NOT NULL DEFAULT '',
+    last_job INTEGER,                              -- inventory job of the last run
+    wait_job INTEGER,                              -- inventory job whose end queues the posture part
+    last_result TEXT NOT NULL DEFAULT '',
+    created TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS schedules_domain ON schedules(domain);
 CREATE TABLE IF NOT EXISTS audit (    -- who changed users, roles and grants
     id INTEGER PRIMARY KEY,
     at TEXT NOT NULL,
@@ -210,6 +270,20 @@ def init(path: Path) -> None:
                 conn.execute(f"ALTER TABLE posture_scans ADD COLUMN {col} {ddl}")
         if "route" not in {r["name"] for r in conn.execute("PRAGMA table_info(posture_profiles)")}:
             conn.execute("ALTER TABLE posture_profiles ADD COLUMN route TEXT NOT NULL DEFAULT ''")
+        for table, cols in (("jobs", (("discovery", "TEXT NOT NULL DEFAULT ''"), ("schedule_id", "INTEGER"))),
+                            ("scans", (("discovery", "TEXT NOT NULL DEFAULT ''"),
+                                       ("discovery_params", "TEXT NOT NULL DEFAULT ''"))),
+                            ("posture_scans", (("schedule_id", "INTEGER"),))):
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for col, ddl in cols:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        conn.execute("CREATE INDEX IF NOT EXISTS jobs_schedule ON jobs(schedule_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS posture_schedule ON posture_scans(schedule_id, status)")
+        conn.execute("""INSERT OR IGNORE INTO discovery_profiles (name, method, probe_ports, port_mode, timing,
+                        max_rate, max_retries, host_timeout, rdns, note, updated) VALUES ('default', 'syn',
+                        '22,80,443', 'none', 3, 100, 1, 120, 0, 'TCP SYN ping on 22, 80, 443; no port check', ?)""",
+                     (now(),))
         from .fingerprint import DEFAULT_PORTS  # local import: fingerprint -> cve
         conn.execute("INSERT OR IGNORE INTO posture_profiles (name, ports, note, updated) VALUES ('default', ?, ?, ?)",
                      (DEFAULT_PORTS, "Common services, light version probes", now()))
@@ -247,6 +321,19 @@ def save_scan(conn: sqlite3.Connection, domain: str, started: str, source: str, 
     return sid
 
 
+def save_discovery(conn: sqlite3.Connection, scan_id: int, profile: str, params: str, found: list[dict]) -> None:
+    """The nmap discovery stage of a scan (domin.discovery): its profile, command line and live addresses."""
+    conn.execute("UPDATE scans SET discovery = ?, discovery_params = ? WHERE id = ?", (profile, params, scan_id))
+    conn.executemany("INSERT INTO discovery_results (scan_id, ip, names, ports, reason) VALUES (?, ?, ?, ?, ?)",
+                     [(scan_id, f["ip"], ",".join(f.get("names") or []), ",".join(f.get("ports") or []),
+                       f.get("reason") or "") for f in found])
+
+
+def discovery_results(conn: sqlite3.Connection, scan_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute("SELECT ip, names, ports, reason FROM discovery_results WHERE scan_id = ? "
+                                          "ORDER BY ip", (scan_id,))]
+
+
 def delete_domain(conn: sqlite3.Connection, name: str) -> bool:
     """Admin action: drop a domain and all of its scans, records and jobs from the inventory. Returns False when
     the domain is unknown. User accounts, settings and scope are untouched."""
@@ -258,6 +345,8 @@ def delete_domain(conn: sqlite3.Connection, name: str) -> bool:
     conn.execute("DELETE FROM scans WHERE domain_id = ?", (did,))
     conn.execute("DELETE FROM jobs WHERE domain = ?", (name,))
     conn.execute("DELETE FROM posture_scans WHERE domain = ?", (name,))
+    conn.execute("DELETE FROM schedules WHERE domain = ?", (name,))
+    conn.execute("DELETE FROM discovery_results WHERE scan_id NOT IN (SELECT id FROM scans)")
     conn.execute("DELETE FROM host_tags WHERE host = ? OR host LIKE ?", (name, "%." + name))
     conn.execute("DELETE FROM domains WHERE id = ?", (did,))
     return True
@@ -328,7 +417,7 @@ def domain(conn: sqlite3.Connection, name: str) -> dict | None:
 
 def history(conn: sqlite3.Connection, name: str) -> list[dict]:
     sql = """SELECT s.id, s.started, s.source, s.status, s.hosts, s.resolved, s.ips, s.asns, s.countries, s.error,
-                    s.eu, s.eu_known
+                    s.eu, s.eu_known, s.discovery, s.discovery_params
              FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ? ORDER BY s.started"""
     return [{**dict(r), "eu_pct": eu_pct(r["eu"], r["eu_known"])} for r in conn.execute(sql, (name,))]
 

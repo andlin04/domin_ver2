@@ -36,7 +36,7 @@ import dns.zone
 import httpx
 import pycountry
 
-from . import admin, db, proxy, tools
+from . import admin, db, discovery, proxy, tools
 from .config import Settings
 from .validate import is_internal, is_under, normalize_domain
 
@@ -389,8 +389,10 @@ def _lan_address(ip: str) -> bool:
 
 def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Progress = lambda _: None,
         client: httpx.Client | None = None, resolver: dns.resolver.Resolver | None = None,
-        enricher: Enricher | None = None, notes: list[str] | None = None) -> list[dict]:
-    """The scan's records. `notes` collects what made the result incomplete (failed sources, the host cap)."""
+        enricher: Enricher | None = None, notes: list[str] | None = None, nmap: str = "",
+        stage: dict | None = None) -> list[dict]:
+    """The scan's records. `notes` collects what made the result incomplete (failed sources, the host cap). nmap: a
+    discovery profile name to run the nmap discovery stage with ('' = DNS only); `stage` gets its result."""
     notes = notes if notes is not None else []
     internal = is_internal(domain, settings.internal_zones)
     via = None
@@ -442,7 +444,14 @@ def run(conn: sqlite3.Connection, domain: str, settings: Settings, progress: Pro
         with ThreadPoolExecutor(settings.scan_workers) as pool:
             resolved = dict(zip(candidates, pool.map(lambda h: resolve(h, resolver), candidates), strict=True))
         # the client stays open: a routed scan's DNS and owner look-ups go through it
-        return _records(conn, hosts_of(resolved, guessed, wildcard, internal), progress, internal, enricher)
+        records = _records(conn, hosts_of(resolved, guessed, wildcard, internal), progress, internal, enricher)
+        if nmap:   # optional nmap stage (domin.discovery): this scan's addresses, or the internal networks
+            got = discovery.stage(conn, nmap, records, internal, settings, notes, progress)
+            if internal:
+                records += discovery.new_records(got["found"], records, domain)
+            if stage is not None:
+                stage.update(got)
+        return records
     finally:
         if own_client:
             client.close()

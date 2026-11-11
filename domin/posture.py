@@ -97,8 +97,14 @@ def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("DELETE FROM posture_profiles WHERE name = ?", (name,)).rowcount > 0
 
 
+def profile_used_by(conn: sqlite3.Connection, name: str) -> list[str]:
+    """Schedules ("domain: name") whose posture part uses a profile."""
+    return [f"{r['domain']}: {r['name']}" for r in conn.execute(
+        "SELECT domain, name FROM schedules WHERE posture = 1 AND posture_profile = ? ORDER BY domain, name", (name,))]
+
+
 def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict | str, requested_by: str,
-            batch: list[int] | None = None) -> int:
+            batch: list[int] | None = None, schedule_id: int | None = None) -> int:
     """Queue one posture scan per address with the profile's parameters (prof: name, ports, intensity, timing,
     timeout, route; a bare port list means the default knobs and route); an address already queued or running for
     the domain is left alone. Returns how many were queued. batch, when given, gets the row id per address (new or
@@ -114,11 +120,11 @@ def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict
                 batch.append(row["id"])
             continue
         cur = conn.execute("""INSERT INTO posture_scans (domain, ip, hosts, country, ports, status, requested_by,
-                              created, profile, intensity, timing, timeout, route) VALUES (?, ?, ?, ?, ?, 'queued',
-                              ?, ?, ?, ?, ?, ?, ?)""",
+                              created, profile, intensity, timing, timeout, route, schedule_id) VALUES (?, ?, ?, ?, ?,
+                              'queued', ?, ?, ?, ?, ?, ?, ?, ?)""",
                            (domain, t["ip"], ",".join(t["hosts"]), t["country"], prof["ports"], requested_by,
                             db.now(), prof["name"], prof["intensity"], prof["timing"], prof["timeout"],
-                            prof.get("route") or ""))
+                            prof.get("route") or "", schedule_id))
         if batch is not None:
             batch.append(cur.lastrowid)
         n += 1

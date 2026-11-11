@@ -597,7 +597,8 @@ def test_analyst_tags_hosts_and_groups_by_tag(settings, nmap):
                    follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].startswith(f"/d/{DOM}")
         page = h.get(f"/d/{DOM}?tag=storage").text
-        assert "Group by tag" in page and "nas.corp.example" in page and "cdn.corp.example" not in page
+        records = page.split('id="records"')[1]   # the schedule form's host pick list holds every host
+        assert "Group by tag" in page and "nas.corp.example" in records and "cdn.corp.example" not in records
         h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
                                     "action": "remove"})
         assert "Group by tag" not in h.get(f"/d/{DOM}").text

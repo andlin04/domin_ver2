@@ -73,6 +73,8 @@
     <li><span class="pill {{ j.status }}">{{ j.status }}</span>
       <a href="/d/{{ j.domain }}">{{ j.domain }}</a>
       <span class="muted">{{ j.created[:16].replace('T', ' ') }}</span>
+      {% if j.discovery %}<span class="pill">nmap {{ j.discovery }}</span>{% endif %}
+      {% if j.schedule_id %}<span class="pill">schedule #{{ j.schedule_id }}</span>{% endif %}
       {% if j.status == 'running' %}<span class="muted">{{ j.progress }}</span>{% endif %}
       {% if j.error %}<span class="bad-text">{{ j.error }}</span>{% endif %}
       {% if j.status in ('queued', 'running') %}
@@ -92,6 +94,12 @@
       <td class="num">{{ d.failed }}</td><td class="num">{{ d.cancelled }}</td><td class="num">{{ d.clients }}</td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
+</section>
+
+<section class="card" id="schedules">
+  <h2>Scheduled rescans <small>{{ sched_rows|length }} · {{ sched_rows|selectattr('enabled')|list|length }} enabled ·
+    add one on a domain page</small></h2>
+  {% with show_domain=true %}{% include "_schedules_list.html" %}{% endwith %}
 </section>
 
 <section class="card">

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Schedule · {{ sched_domain }} · domin{% endblock %}
+{% block page %}domain{% endblock %}
+{% block content %}
+<section class="hero"><div>
+  <p class="crumbs"><a href="/">Overview</a> / <a href="/d/{{ sched_domain }}#schedules">{{ sched_domain }}</a> /</p>
+  <h1>{% if sf_id %}Schedule {{ sf.get('name', '') }}{% else %}New schedule{% endif %}</h1>
+  <p class="muted">Scheduled rescan of {{ sched_domain }}. Queued like any scan: same limits, scope and sandbox. A run
+    missed while the server was down runs once; a run whose previous one is still open is skipped.</p></div></section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+{% if sched_rows %}
+<section class="card">{% with show_domain=false %}{% include "_schedules_list.html" %}{% endwith %}</section>
+{% endif %}
+
+{% if can_manage %}
+<section class="card" id="schedule-form">
+  <h2>{{ 'Edit' if sf_id else 'Add' }} <small>saving computes the next run again from now</small></h2>
+  {% include "_schedule_form.html" %}
+</section>
+{% endif %}
+{% endblock %}

@@ -20,6 +20,14 @@
       <button class="btn primary" type="submit">Scan now</button>
       <div class="scan-status" data-scan-status {% if not open_job %}hidden{% endif %} data-job="{{ open_job or '' }}"></div>
     </form>
+    {% if user and access.manages(domain.name) and sched_opts %}
+    <form method="post" action="{{ admin_base }}/discovery/scan" class="inline nmap-scan"
+          data-confirm="Scan {{ domain.name }} with an nmap discovery stage? It sweeps {{ 'the internal networks (Settings)' if domain_internal else 'only the addresses this scan finds for the domain' }}.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
+      <select name="profile" aria-label="Discovery profile">{% for p in sched_opts.discovery %}<option value="{{ p.name }}" {% if p.name == sched_opts.default_discovery %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+      <button class="btn" type="submit">Scan with nmap</button>
+    </form>
+    {% endif %}
     <a class="btn" href="/tools?domain={{ domain.name }}">Whois &amp; e-mail</a>
     <a class="btn" href="/scans/{{ current.id }}.csv">CSV</a>
     {% if user and user.role == 'admin' %}
@@ -42,6 +50,15 @@
   {% include "_posture_progress.html" %}
   {% endwith %}
   {% with rep=posture_report %}{% include "_posture_summary.html" %}{% endwith %}
+  <section class="card" id="schedules">
+    <h2>Scheduled rescans <small>{{ sched_rows|length }} · server local time</small></h2>
+    {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+    {% with show_domain=false %}{% include "_schedules_list.html" %}{% endwith %}
+    {% if access.manages(domain.name) %}
+    <details class="add-schedule"><summary class="btn small">Add a schedule</summary>
+      {% with sf=new_schedule, sf_id=none, sched_domain=domain.name %}{% include "_schedule_form.html" %}{% endwith %}
+    </details>{% endif %}
+  </section>
   <h2 class="section-title">Inventory</h2>
 </div>
 {% endif %}
@@ -62,6 +79,17 @@
 </section>
 {% if current.error and current.status == 'done' %}
 <p class="note" role="status">This scan may be incomplete: {{ current.error }}.</p>
+{% endif %}
+{% if user and current.discovery %}
+<section class="card" id="discovery">
+  <h2>nmap discovery <small>profile {{ current.discovery }} · {{ discovered|length }} live address(es)</small></h2>
+  <p class="mono small">{{ current.discovery_params or 'not run' }}</p>
+  {% if discovered %}<div class="table-wrap short"><table>
+    <thead><tr><th>Address</th><th>Reverse names</th><th>Open ports</th><th>Reason</th></tr></thead>
+    <tbody>{% for f in discovered %}<tr><td class="mono">{{ f.ip }}</td><td>{{ f.names }}</td><td class="mono">{{ f.ports }}</td>
+      <td>{{ f.reason }}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
 {% endif %}
 
 <section class="kpis">

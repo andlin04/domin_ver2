@@ -71,6 +71,14 @@ a public issue for it.
   systemd drop-in; this host's own addresses are cut out of those networks (systemd lets an allow entry win over
   any deny entry). The web service gets no internal networks, only the HTTP proxy, if one is set.
 - `--raw` gives the scan worker CAP_NET_RAW/CAP_NET_ADMIN for nmap SYN scans; off by default, `--no-raw` removes it.
+- nmap discovery: a profile holds no targets. A public domain's stage sweeps only the global addresses that scan's
+  DNS stages tied to the domain, inside the posture scope; an internal domain's stage the hosts of Settings ·
+  Internal networks inside the posture IP scope (cap 8192). Every argument comes from an allowlist (method, port
+  lists of digits and ranges, bounded numbers, route id), passed as an argv list with a 0600 temporary targets file:
+  no free text reaches the command line. Raw-only probes (ACK, UDP, ICMP) need `--raw` and Settings · Raw network
+  access. It runs in the worker's sandbox like every scan. Only admins edit discovery profiles.
+- Scheduled rescans queue normal jobs (same queue, limits, scopes and sandbox); domain admins manage those of their
+  domains, every change is in the audit table.
 
 ## Root helpers
 - The app never runs privileged commands. Settings actions that need root (Tor on/off, the Mullvad tunnel, the

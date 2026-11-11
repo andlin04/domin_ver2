@@ -1,0 +1,58 @@
+{# The schedule form: domain page (new) and the schedule page (edit, or a refused save). Needs sf (form values),
+   sf_id (None = new), sched_domain, sched_opts {posture, discovery, hosts, tags, freqs, weekdays, host_modes}. #}
+{% set chosen = sf.get('chosen', []) %}
+<form method="post" action="{{ admin_base }}/schedules{% if sf_id %}/{{ sf_id }}{% endif %}" class="schedule-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="domain" value="{{ sched_domain }}">
+  <div class="grid g3">
+    <label class="field">Name
+      <input name="name" value="{{ sf.get('name', '') }}" required maxlength="60"></label>
+    <label class="field">Recurrence <small>server local time</small>
+      <select name="freq">{% for k, label in sched_opts.freqs.items() %}<option value="{{ k }}" {% if sf.get('freq', 'weekly') == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label class="field">Time <small>HH:MM; every N hours: the first run</small>
+      <input name="at_time" type="time" value="{{ sf.get('at_time', '03:00') }}" required></label>
+    <label class="field">Weekday <small>weekly</small>
+      <select name="weekday">{% for d in sched_opts.weekdays %}<option value="{{ loop.index0 }}" {% if sf.get('weekday', '0')|string == loop.index0|string %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
+    <label class="field">Day of month <small>monthly; 29-31 = last day in shorter months</small>
+      <input name="monthday" type="number" min="1" max="31" value="{{ sf.get('monthday', 1) }}"></label>
+    <label class="field">Every N <small>hours 1-168 / days 1-365</small>
+      <input name="every" type="number" min="1" max="365" value="{{ sf.get('every', 1) }}"></label>
+  </div>
+  <div class="grid g3">
+    <div class="field">
+      <label class="tick"><input type="checkbox" name="discovery" {% if sf.get('discovery') in ('1', 'on', 1) %}checked{% endif %}>
+        Inventory scan</label>
+      <label class="field">Discovery profile <small>nmap stage after DNS; none = DNS only</small>
+        <select name="discovery_profile"><option value="">None (DNS only)</option>
+          {% for p in sched_opts.discovery %}<option value="{{ p.name }}" {% if sf.get('discovery_profile', '') == p.name %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="field">
+      <label class="tick"><input type="checkbox" name="posture" {% if sf.get('posture') in ('1', 'on', 1) %}checked{% endif %}>
+        Posture scan <small class="muted">after the inventory scan when both</small></label>
+      <label class="field">Posture profile
+        <select name="posture_profile">{% for p in sched_opts.posture %}<option value="{{ p.name }}" {% if sf.get('posture_profile', 'default') == p.name %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="field">
+      <label class="field">Posture hosts
+        <select name="host_mode">{% for k, label in sched_opts.host_modes.items() %}<option value="{{ k }}" {% if sf.get('host_mode', 'all') == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label class="field">Tag <small>with "Hosts with a tag"</small>
+        <select name="tag"><option value="">–</option>
+          {% for t in sched_opts.tags %}<option value="{{ t }}" {% if sf.get('tag', '') == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+    </div>
+  </div>
+  <details class="host-pick" {% if sf.get('host_mode') == 'list' %}open{% endif %}>
+    <summary>Chosen hosts <small>{{ chosen|length }} ticked · latest inventory, {{ sched_opts.hosts|length }} host names</small></summary>
+    <input class="filter" placeholder="Filter host names…" data-filter="#sched-hosts-{{ sf_id or 'new' }}" aria-label="Filter host names">
+    <div class="table-wrap short"><table id="sched-hosts-{{ sf_id or 'new' }}">
+      <thead><tr><th></th><th>Host</th><th>Addresses</th><th>Tags</th></tr></thead>
+      <tbody>{% for h in sched_opts.hosts %}<tr>
+        <td><input type="checkbox" name="h:{{ h.host }}" aria-label="Scan {{ h.host }}" {% if h.host in chosen %}checked{% endif %}></td>
+        <td class="host">{{ h.host }}{% if h.skip %} <small class="muted">{{ h.skip }}</small>{% endif %}</td>
+        <td class="mono">{{ h.ips|join(', ') }}</td>
+        <td>{% for t in h.tags + h.net_tags %}<span class="pill">{{ t }}</span>{% endfor %}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">No host name with an address in the latest inventory scan</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  <p><label class="tick"><input type="checkbox" name="enabled" {% if sf.get('enabled', '1') in ('1', 'on', 1) %}checked{% endif %}> Enabled</label>
+    <button class="btn primary" type="submit">{{ 'Save schedule' if sf_id else 'Add schedule' }}</button></p>
+</form>

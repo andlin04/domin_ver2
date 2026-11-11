@@ -267,6 +267,51 @@ def seed_posture(c, cve_file: Path) -> None:
                  WHERE ip = '192.0.2.53'""", ((NOW - timedelta(minutes=2)).isoformat(timespec="seconds"),))
 
 
+def seed_schedules(c) -> None:
+    """Discovery profiles, an nmap stage on example.com's latest scan, and schedules with past runs."""
+    from domin import discovery, schedules
+    for p in ({"name": "web-quick", "method": "none", "probe_ports": "", "port_mode": "list", "ports": "80,443,8443",
+               "top_ports": 100, "timing": 3, "max_rate": 50, "max_retries": 1, "host_timeout": 120, "rdns": 0,
+               "route": "r3", "note": "Proxy route: no ping, connect check of the web ports"},
+              {"name": "lan-sweep", "method": "syn", "probe_ports": "22,80,443,445", "port_mode": "top",
+               "top_ports": 20, "ports": "", "timing": 4, "max_rate": 300, "max_retries": 2, "host_timeout": 300,
+               "rdns": 1, "route": "", "note": "Internal networks: reverse names, top 20 ports"}):
+        discovery.save(c, p, "alice")
+    discovery.set_default(c, "default")
+    sid = c.execute("""SELECT s.id FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = 'example.com'
+                       ORDER BY s.started DESC LIMIT 1""").fetchone()[0]
+    ips = [r[0] for r in c.execute("SELECT DISTINCT ip FROM records WHERE scan_id = ? AND ip != '' ORDER BY ip",
+                                   (sid,))]
+    found = [{"ip": ip, "names": [], "ports": ["443/tcp"] + (["80/tcp"] if i % 2 else []),
+              "reason": "syn-ack"} for i, ip in enumerate(ips[:5])]
+    db.save_discovery(c, sid, "default", "nmap -PS22,80,443 -sn -n -T3 --max-retries 1 --host-timeout 120s "
+                                         f"--max-rate 100 -oX - -iL <{len(ips)} addresses>", found)
+    hosts = posture.hosts(c, "example.com")
+    now = NOW.timestamp()
+    forms = [("example.com", {"name": "Weekly inventory + nmap", "discovery": "on", "discovery_profile": "default",
+                              "freq": "weekly", "weekday": "6", "at_time": "03:00"}),
+             ("example.com", {"name": "Web hosts posture", "posture": "on", "posture_profile": "web",
+                              "host_mode": "list", "freq": "monthly", "monthday": "31", "at_time": "02:30",
+                              **{f"h:{h}": "on" for h in hosts[:3]}}),
+             ("example.org", {"name": "Cloud hosts nightly", "discovery": "on", "posture": "on",
+                              "posture_profile": "default", "host_mode": "tag", "tag": "cloud", "freq": "daily",
+                              "at_time": "01:15"}),
+             ("example.net", {"name": "Every 6 hours", "discovery": "on", "freq": "hours", "every": "6",
+                              "at_time": "00:00"})]
+    for dom, f in forms:
+        p, err = schedules.check(c, dom, {"enabled": "on", "weekday": "0", "monthday": "1", "every": "1", **f})
+        if not p:
+            raise SystemExit(f"demo schedule {f['name']}: {err}")
+        schedules.create(c, dom, p, "alice", now=now)
+    job = c.execute("SELECT id FROM jobs WHERE domain = 'example.com' ORDER BY id DESC LIMIT 1").fetchone()[0]
+    c.execute("UPDATE schedules SET last_run = ?, last_job = ?, last_result = ? WHERE id = 1",
+              (stamp(4, 3), job, f"inventory job #{job} queued (nmap discovery: default)"))
+    c.execute("""UPDATE schedules SET last_run = ?, hosts = json_insert(hosts, '$[#]', 'old.example.com'),
+                 last_result = 'posture: 2 address(es) queued with profile web; hosts no longer in the domain, '
+                 || 'skipped: old.example.com' WHERE id = 2""", (stamp(11, 2),))
+    c.execute("UPDATE schedules SET enabled = 0 WHERE id = 4")
+
+
 def seed_settings(c) -> str:
     """Users, scan profiles, routes and scope; returns the demo admin's TOTP secret."""
     alice = users.create(c, "alice", "admin", DEMO_PASSWORD)
@@ -424,6 +469,8 @@ def hide_card(heading: str) -> str:
 OPEN_CVE = ("setTimeout(() => { for (const s of ['details.posture-detail', 'details.svc-group', 'details.cve-item'])"
             " { const d = document.querySelector('#posture-hosts ' + s); if (d) d.open = true; } }, 500);")
 
+OPEN_SCHEDULE = "document.querySelector('details.add-schedule').open = true;"
+
 # name: (path, signed in: True = the demo admin, a name = that power user, False = signed out, height, script)
 SHOTS = {
     "signin": ("/admin", False, 760, ""),
@@ -448,6 +495,10 @@ SHOTS = {
     "user-edit": ("/admin/users/4", True, 760, ""),   # carol (4th user): two domain grants
     "posture-power": ("/admin/security/analysis", "carol", 1500, ""),
     "account": ("/admin/account", True, 900, ""),
+    "discovery-profiles": ("/admin/security/discovery-profiles", True, 1300, ""),
+    "domain-schedules": ("/d/example.com", True, 1500, OPEN_SCHEDULE + from_card("Scheduled rescans")),
+    "schedule-edit": ("/admin/schedules/2", True, 1250, "document.querySelector('details.host-pick').open = true;"),
+    "operations-schedules": ("/admin", True, 700, from_card("Scheduled rescans")),
 }
 LIGHT = ("overview", "posture-overview")   # also shot in the light theme: NAME-light.png
 
@@ -512,6 +563,7 @@ def main() -> int:
             secret = seed_settings(c)
             seed_inventory(c)
             seed_posture(c, settings.cve_db_file)
+            seed_schedules(c)
             ids = [r[0] for r in c.execute("""SELECT s.id FROM scans s JOIN domains d ON d.id = s.domain_id
                                               WHERE d.name = 'example.com' ORDER BY s.started""")]
         path, *rest = SHOTS["domain-compare"]
