@@ -9,7 +9,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   switch and the import have no network. Update: install.sh copies the units (an existing install: re-run install.sh).
 - `tor-switch.sh`: a failed `systemctl disable` now fails the switch instead of reporting "off" with tor running.
 - On-prem: HSTS once `/etc/domin/tls.crt` is CA-signed (re-run install.sh after installing it); `--firewall`
-  opens HTTP/HTTPS only to `--admin-sources`.
+  opens HTTP/HTTPS only to `--admin-sources`. `--firewall` replaces its own 22/80/443 rules on each run (a changed
+  list no longer leaves the old networks open) and keeps `--ssh-from` in `/etc/domin.env` (`DOMIN_SSH_FROM`), so an
+  update with `--firewall` alone no longer opens SSH to everyone. Clean-VM tested on Debian 13.
 - `pip-audit` of `deploy/requirements.txt`: no known vulnerabilities; the command is in SECURITY.md.
 - Rollback: `git revert` this commit and re-run install.sh (units back to unsandboxed, ufw rules back to any).
 

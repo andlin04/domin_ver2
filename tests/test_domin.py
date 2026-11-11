@@ -532,6 +532,8 @@ def test_internal_install_hsts_only_when_ca_signed_and_firewall_follows_admin_so
     fw = install[install.index('if [ "$FIREWALL" = 1 ]'):]
     assert 'if [ "$INTERNAL" = 1 ] && [ "$SOURCES" != any ]' in fw
     assert 'ufw allow from "$net" to any port 80,443 proto tcp' in fw
+    assert 'setenv DOMIN_SSH_FROM "$SSH_FROM"; else SSH_FROM=$(envget DOMIN_SSH_FROM)' in fw   # kept for updates
+    assert fw.index("ufw --force delete") < fw.index("ufw allow")   # old 22/80/443 rules go first
 
 
 def test_amass_runs_passive_then_active(monkeypatch):

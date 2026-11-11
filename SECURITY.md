@@ -52,7 +52,7 @@ a public issue for it.
 - Chart.js is vendored; pages load nothing from other sites.
 
 ## Network
-- `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list. On-prem, HTTP and
+- `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list (kept for later runs). On-prem, HTTP and
   HTTPS are open only to `--admin-sources` (unless `any`), so the firewall and nginx both enforce that list.
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.

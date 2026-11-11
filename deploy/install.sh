@@ -499,14 +499,18 @@ fi
 
 if [ "$FIREWALL" = 1 ]; then
   apt-get install -y -q ufw >/dev/null
+  # --ssh-from is kept for later runs (an update without it must not open SSH to everyone)
+  if [ -n "$SSH_FROM" ]; then setenv DOMIN_SSH_FROM "$SSH_FROM"; else SSH_FROM=$(envget DOMIN_SSH_FROM); fi
+  # the 22/80/443 rules are this script's: drop the old ones (highest number first), then add the current lists
+  for n in $(ufw status numbered | sed -n 's/^\[ *\([0-9]*\)\] \(22\|80\|443\|80,443\)\/tcp .*/\1/p' | sort -rn); do
+    ufw --force delete "$n" >/dev/null
+  done
   if [ -n "$SSH_FROM" ]; then
-    ufw delete allow 22/tcp >/dev/null 2>&1 || true
     for net in ${SSH_FROM//,/ }; do ufw allow from "$net" to any port 22 proto tcp >/dev/null; done
   else
     ufw allow 22/tcp >/dev/null
   fi
   if [ "$INTERNAL" = 1 ] && [ "$SOURCES" != any ]; then   # on-prem: the web ports only from --admin-sources
-    ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 443/tcp >/dev/null 2>&1 || true
     for net in ${SOURCES//,/ }; do ufw allow from "$net" to any port 80,443 proto tcp >/dev/null; done
   else
     ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
