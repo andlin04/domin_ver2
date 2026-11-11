@@ -57,6 +57,18 @@
       <kbd title="Press / to search">/</kbd>
     </form>
     {% endif %}
+    {% if user %}{% set role = role_labels.get(user.role, user.role) if role_labels is defined else user.role %}
+    <div class="who" title="Signed in as {{ user.name }} ({{ role }})">
+      <a class="who-name" href="/admin/account"><span class="who-lbl muted">signed in as </span><b>{{ user.name }}</b>
+        <span class="muted">({{ role }})</span></a>
+      {% if not no_login and csrf %}
+      <form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="icon-btn" type="submit" title="Log out" aria-label="Log out">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button></form>
+      {% endif %}
+    </div>
+    {% endif %}
     <button class="icon-btn" id="theme" title="Toggle light / dark" aria-label="Toggle theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
     </button>

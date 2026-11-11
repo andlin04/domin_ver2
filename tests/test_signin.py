@@ -222,3 +222,29 @@ def test_two_factor_setup_shows_the_uri_as_a_qr_code(settings):
         assert segno.make(uri, error="m").svg_inline(scale=4, border=4, dark="#000", light="#fff",
                                                      svgclass="qr-code", lineclass=None) == svg
         assert "style" not in svg and "script" not in svg and 'fill="#fff"' in svg and 'stroke="#000"' in svg
+
+
+# --- header: signed-in user and log out ---------------------------------------------------------------------------
+
+def test_header_shows_the_user_and_a_logout_form(settings):
+    h = client(settings)
+    login(h, "boss")
+    for path in ("/", BASE + "/account", BASE + "/users"):
+        text = h.get(path).text
+        assert 'class="who"' in text and "<b>boss</b>" in text and "(admin)" in text
+        assert 'action="/admin/logout"' in text
+    login(h, "pia")
+    assert "<b>pia</b>" in h.get(BASE + "/account").text and "(power user)" in h.get(BASE + "/account").text
+    assert 'class="who"' not in client(settings).get("/").text   # nobody signed in: no user, no logout
+
+
+def test_logout_needs_the_csrf_token(settings):
+    h = client(settings)
+    login(h, "boss")
+    assert h.post(BASE + "/logout", data={"csrf": "wrong"}, follow_redirects=False).status_code == 403
+    assert h.get(BASE + "/account", follow_redirects=False).status_code == 200   # still signed in
+    r = h.post(BASE + "/logout", data={"csrf": csrf_of(h)}, follow_redirects=False)
+    assert r.status_code == 303
+    assert h.get(BASE + "/account", follow_redirects=False).status_code == 303   # signed out
+    with db.connect(settings.db_path) as c:
+        assert c.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0] == 0

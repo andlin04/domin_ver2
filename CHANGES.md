@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Header: signed-in user and Log out
+
+- Every page shows "signed in as <name> (role)" top right of the menu bar (links to My account) and a Log out icon
+  button (POST with the CSRF token, the existing logout route). On phones the label shortens to the name and role.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Two-factor secrets encrypted at rest
 
 - `users.totp_secret` and pending enrolments (kv `enrol:*`, secret plus recovery codes) are Fernet-encrypted with

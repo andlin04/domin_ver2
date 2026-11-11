@@ -78,6 +78,7 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   Admins create users with a password (typed or Generate, with Copy) and hand it over themselves; Set password on a
   user's page resets it and signs that user out. A user may change or keep an admin-set password at the next 3
   sign-ins; the 4th requires a new one ([docs/delegation.md](docs/delegation.md)).
+- **Header:** every page shows "signed in as <name> (role)" top right (links to My account) and a Log out button.
 - **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
   (cancel, stop, retry), tuning without restart.
 

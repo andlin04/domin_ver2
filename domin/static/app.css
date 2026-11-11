@@ -99,6 +99,13 @@ h2 small, h3 small { color: var(--muted); font-weight: 400; margin-left: .35rem;
 }
 .jump input:focus + kbd { display: none; }
 .icon-btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: .3rem; cursor: pointer; display: flex; }
+/* signed-in user and log out, top right of the bar (before the theme button) */
+.who { margin-left: auto; display: flex; align-items: center; gap: .5rem; min-width: 0; font-size: .85rem; }
+.jump + .who { margin-left: 0; }
+.who form { margin: 0; }
+.who-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+.who-name:hover { text-decoration: none; color: var(--accent); }
+.who .icon-btn svg { width: 18px; height: 18px; }
 
 .wrap { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; display: grid; gap: 1.25rem; }
 .foot { text-align: center; color: var(--muted); font-size: .8rem; padding: 1rem; }
@@ -307,7 +314,10 @@ td form { margin: 0; }
   .topbar nav { gap: 0; padding-left: .25rem; font-size: .9rem; }
   .topbar nav a, .nav-menu > summary { padding: 0 .45rem; white-space: nowrap; }
   .nav-drop { right: 0; left: auto; }
-  .icon-btn { margin-left: auto; }
+  .topbar-in > .icon-btn { margin-left: auto; }
+  .who ~ .icon-btn { margin-left: 0; }
+  .who { margin-left: auto; }
+  .who-name { max-width: 12rem; }
   .scan-form input, .filter { width: 100%; }
   .scan-form { width: 100%; }
   .hero { align-items: stretch; }
@@ -329,6 +339,8 @@ td form { margin: 0; }
   .topbar nav .nav-sep { margin: 0 .1rem; }
   .nav-menu { position: static; }
   .nav-drop { top: 100%; right: .5rem; left: auto; }
+  .who-lbl { display: none; }
+  .who-name { max-width: 42vw; }
 }
 
 /* signed-in area: users, account, settings, security */

@@ -42,7 +42,8 @@ a public issue for it.
   5 failed sign-ins in 15 minutes block the client (30 in total block everyone; a wrong current password or code on
   My account counts too), session and second-factor cookies `__Host-` (Path=/), Secure, HttpOnly, SameSite=Strict,
   CSRF token on every form, `Cache-Control: no-store`. Changing the password needs the current one; turning
-  two-factor off needs the current password or a code.
+  two-factor off needs the current password or a code. Log out (the header button on every page) is a POST with
+  the session's CSRF token, so another site cannot sign a user out.
 - **Two-factor secrets at rest:** TOTP secrets and pending enrolments (secret plus recovery codes) are Fernet-encrypted
   (`f1:` prefix) with a key outside the database, `/etc/domin/totp.key` (root:domin 0640); they are decrypted only
   to check a code or show the enrolment QR. Recovery codes are kept only as SHA-256 hashes once enrolment is
