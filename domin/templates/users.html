@@ -7,6 +7,27 @@
 {% include "_roles_info.html" %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% if waiting %}
+<section class="card warn-card" id="waiting">
+  <h2>Sign-ins waiting for approval <small>new place, user without two-factor</small></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="fit">When</th><th class="fit">User</th><th class="fit">Address</th><th class="fit">Country</th><th>Browser</th><th class="fit">Decision</th></tr></thead>
+    <tbody>{% for w in waiting %}<tr>
+      <td class="muted">{{ w.at[:16].replace('T', ' ') }}</td><td><a href="{{ base }}/users/{{ w.user_id }}">{{ w.name }}</a></td>
+      <td class="mono">{{ w.ip }}</td><td>{{ w.cc or '–' }}</td><td>{{ w.browser }}</td>
+      <td class="row-actions">
+        {% for act, label in (('approve-place', 'Approve'), ('deny-place', 'Deny')) %}
+        <form method="post" action="{{ base }}/users/{{ w.user_id }}/{{ act }}" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ w.id }}">
+          <button class="btn small{{ ' primary' if loop.first }}" type="submit">{{ label }}</button></form>
+        {% endfor %}
+      </td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="muted">Approve: the place counts as seen and the user signs in again. Deny: sign-ins from there stay refused
+    for the new-place days (Settings).</p>
+</section>
+{% endif %}
 <section class="card">
   <h2>Add a user</h2>
   <form method="post" action="{{ base }}/users/add" class="stack">
@@ -43,7 +64,8 @@
         {% else %}<span class="muted">none</span>{% endfor %}{% endif %}</td>
       <td>{% if us.has_totp %}on{% elif must_2fa[us.id] %}<span class="pill bad" title="Required (role or user), not set up yet">required</span>{% else %}–{% endif %}</td>
       <td>{{ 'disabled' if us.disabled else 'active' }}{% if pw_state[us.id] %}
-        <span class="pill {{ 'bad' if us.must_renew else 'warn' }}">{{ pw_state[us.id] }}</span>{% endif %}</td>
+        <span class="pill {{ 'bad' if us.must_renew else 'warn' }}">{{ pw_state[us.id] }}</span>{% endif %}
+        {% if waiting|selectattr('user_id', 'equalto', us.id)|list %}<a class="pill warn" href="#waiting">new place: approve?</a>{% endif %}</td>
       <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
       <td class="row-actions">
         <a class="btn small" href="{{ base }}/users/{{ us.id }}">Edit</a>

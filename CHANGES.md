@@ -2,6 +2,25 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Sign-in protection and session list
+
+- **Sign-in protection** (`domin/guard.py`; Settings > General, "Sign-in protection"; each rule on by default):
+  one session per user; new place (country not seen in N days, default 90; the /24 when the country is unknown):
+  two-factor users give the code, others wait for an admin (Users: approve or deny; flagged on the user row);
+  impossible travel (over 900 km/h between country centroids from `static/world.json`): refused, sessions ended,
+  must-renew plus two-factor required. Exempt: `DOMIN_ADMIN_IPS` and trusted ranges. The last enabled admin only
+  gets the two-factor step-up. Every hit is audited with user, address, country and rule.
+- **Sessions:** My account lists them (created, address, country, browser) with Sign out and Sign out all others;
+  admins see and end a user's sessions on the user's page.
+- **My account** moved out of the Admin menu: the signed-in name in the header opens it (the menu hides when a
+  user has no admin pages).
+- **TOTP key backup:** README and SECURITY now say the key is backed up with the host's backup (VM image or
+  full-host backup), not separately; a database-only backup cannot decrypt the 2FA secrets without it.
+- Database: new columns `admin_sessions.created/ip/country/agent` and tables `signin_history`, `signin_pending`
+  (added at start). Signed-in users' addresses are now stored (sessions; sign-ins for the new-place days).
+- Rollback: `git revert` this commit and run update.sh. The new columns and tables stay unused; to drop the stored
+  addresses: `DELETE FROM signin_history; DELETE FROM signin_pending;` in the database.
+
 ## 2026-11-11: Header: signed-in user and Log out
 
 - Every page shows "signed in as <name> (role)" top right of the menu bar (links to My account) and a Log out icon

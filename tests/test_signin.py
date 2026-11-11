@@ -233,6 +233,10 @@ def test_header_shows_the_user_and_a_logout_form(settings):
         text = h.get(path).text
         assert 'class="who"' in text and "<b>boss</b>" in text and "(admin)" in text
         assert 'action="/admin/logout"' in text
+        # My account is the name in the header, no longer an entry of the Admin menu
+        assert re.search(r'class="who-name[^"]*" href="/admin/account"', text)
+        menu = re.search(r'<div class="nav-drop">(.*?)</div>', text, re.S).group(1)
+        assert "/admin/account" not in menu and "My account" not in menu
     login(h, "pia")
     assert "<b>pia</b>" in h.get(BASE + "/account").text and "(power user)" in h.get(BASE + "/account").text
     assert 'class="who"' not in client(settings).get("/").text   # nobody signed in: no user, no logout

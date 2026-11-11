@@ -75,6 +75,25 @@
     app, confirm with a code. Required and not set up: each sign-in opens My account first.</p>
 </section>
 
+<section class="card" id="sessions">
+  <h2>Sessions <small>{{ sessions|length }} signed in</small></h2>
+  {% if sessions %}<div class="table-wrap"><table>
+    <thead><tr><th class="fit">Created</th><th class="fit">Address</th><th class="fit">Country</th><th>Browser</th><th class="fit"></th></tr></thead>
+    <tbody>{% for x in sessions %}<tr>
+      <td class="muted">{{ x.created[:16].replace('T', ' ') or '–' }}</td><td class="mono">{{ x.ip or '–' }}</td>
+      <td>{{ x.country or '–' }}</td>
+      <td>{{ x.browser }}{% if x.current %} <span class="pill ok">your browser</span>{% endif %}</td>
+      <td><form method="post" action="{{ base }}/users/{{ target.id }}/end-session" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="sid" value="{{ x.sid }}">
+        <button class="btn small" type="submit">Sign out</button></form></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <form method="post" action="{{ base }}/users/{{ target.id }}/end-sessions" class="inline"
+        data-confirm="Sign {{ target.name }} out everywhere?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">Sign out everywhere</button></form>
+  {% else %}<p class="muted">Not signed in anywhere.</p>{% endif %}
+</section>
+
 <section class="card">
   <h2>Domains <small>{{ grant_rows|selectattr('domain')|list|length }} granted</small></h2>
   {% if target.role == 'admin' %}<p class="note">An admin sees every domain; these grants apply only if the role

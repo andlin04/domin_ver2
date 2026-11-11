@@ -51,7 +51,8 @@ a public issue for it.
   - **Protects:** copies of the database (backups, rollback copies, a stolen file): without the key they do not
     disable anyone's second factor.
   - **Does not protect against:** a compromised domin process or root on the host (both can read the key), nor a
-    backup that holds the key next to the database. Back the key up separately.
+    backup that holds the key next to the database. The key is backed up with the host's backup (VM image or
+    full-host backup), not separately; a database-only backup cannot decrypt the 2FA secrets without it.
   - **Missing or wrong key:** the app starts; no TOTP code is accepted (logged, "2FA unavailable, contact an admin");
     recovery codes still work; an admin resets the user's 2FA. Password break-glass (`admin-password`,
     `user-passwd`) needs no key. `totp-rekey` re-encrypts everything with a new key (README).
@@ -80,7 +81,19 @@ a public issue for it.
   certificate is CA-signed.
 - **Output:** templates escape everything; script-built HTML escapes third-party text; CSV cells that a spreadsheet
   would run as a formula are prefixed with `'`.
-- **Privacy:** no IP addresses are stored; visitors are a daily-salted hash, scan clients a salted hash kept 24 hours.
+- **Privacy:** no visitor IP addresses are stored; visitors are a daily-salted hash, scan clients a salted hash kept
+  24 hours. Signed-in users only: each session keeps its address, country and user agent until it ends or expires,
+  and each sign-in's address and country are kept for the new-place days (default 90) for sign-in protection.
+- **Sign-in protection** (`domin/guard.py`, checked after the password, before the code): one session per user;
+  a new place (country, or /24 / IPv6 /48 when the country is unknown, not seen in N days) needs the code from
+  two-factor users and an admin's approval for the others; impossible travel (over 900 km/h between country
+  centroids) refuses the sign-in, ends every session of the user and requires a new password and two-factor.
+  `DOMIN_ADMIN_IPS` and the trusted ranges (Settings) are exempt. The last enabled admin only ever gets the
+  two-factor step-up, never a block, and `admin-password` is unaffected, so an admin can always get back in. The
+  country comes from the local DB-IP table (no network call at sign-in); a VPN or proxy defeats the place rules,
+  so they are a soft layer on top of the password and two-factor. Every hit is audited with user, address, country
+  and rule. Approve, deny and session sign-out are POSTs with the CSRF token; an admin's approval is bound to the
+  user in the URL.
 
 ## Supply chain
 - Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time"), the full

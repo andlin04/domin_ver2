@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, components, csvimport, cve, db, posture, proxy, scanner, tools, users
+from . import admin, components, csvimport, cve, db, guard, posture, proxy, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -278,6 +278,7 @@ def housekeeping(settings: Settings) -> None:
         live = admin.effective(settings, conn)
         forget_clients(conn)
         admin.prune(conn, live.analytics_days)
+        guard.prune(conn)
         if n := sweep_stuck(conn, live.scan_timeout_hours):
             log.warning("%d stuck jobs failed", n)
         if "inventory" not in _on(conn, settings):   # inventory off: no retries or refreshes queued

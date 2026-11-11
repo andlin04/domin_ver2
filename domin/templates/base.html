@@ -29,18 +29,20 @@
       <span class="nav-sep" aria-hidden="true"></span>
       {% if access.can('posture') %}<a href="/admin/security" {{ here('security') }}>Posture</a>
       {% elif access.can('scans') %}<a href="/admin/security/scans" {{ here('security') }}>Posture</a>{% endif %}
+      {# My account: the signed-in name top right (.who); the menu holds the admin pages only, hidden when empty #}
+      {% set set_home = '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' if access.can('profiles')
+         else '/admin/security/discovery-profiles' if access.can('discovery') else '/admin/security/lookup' if access.can('posture') else '' %}
+      {% if user.role == 'admin' or set_home or (inv_on and access.manages_any) %}
       <details class="nav-menu" data-nav-menu>
-        <summary {% if sec in ('admin', 'settings', 'users', 'viewers', 'account') %}class="active"{% endif %}>Admin</summary>
+        <summary {% if sec in ('admin', 'settings', 'users', 'viewers') %}class="active"{% endif %}>Admin</summary>
         <div class="nav-drop">
           {% if user.role == 'admin' %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
-          {% set set_home = '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' if access.can('profiles')
-             else '/admin/security/discovery-profiles' if access.can('discovery') else '/admin/security/lookup' if access.can('posture') else '' %}
           {% if set_home %}<a href="{{ set_home }}" {{ here('settings') }}>Settings</a>{% endif %}
           {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
           {% if inv_on and access.manages_any %}<a href="/admin/viewers" {{ here('viewers') }}>Domain viewers</a>{% endif %}
-          <a class="nav-acct" href="/admin/account" {{ here('account') }} title="Signed in as {{ user.name }}"><span>My account</span><small class="muted">{{ user.name }}</small></a>
         </div>
       </details>
+      {% endif %}
       {% if no_login %}<a class="pill fix-no" href="/admin/settings" title="Sign-in is turned off (Settings)">sign-in off</a>{% endif %}
       {% elif signed_in_hint %}
       <span class="nav-sep" aria-hidden="true"></span>
@@ -59,7 +61,8 @@
     {% endif %}
     {% if user %}{% set role = role_labels.get(user.role, user.role) if role_labels is defined else user.role %}
     <div class="who" title="Signed in as {{ user.name }} ({{ role }})">
-      <a class="who-name" href="/admin/account"><span class="who-lbl muted">signed in as </span><b>{{ user.name }}</b>
+      <a class="who-name{% if sec == 'account' %} active{% endif %}" href="/admin/account" title="My account"
+         {% if sec == 'account' %}aria-current="page"{% endif %}><span class="who-lbl muted">signed in as </span><b>{{ user.name }}</b>
         <span class="muted">({{ role }})</span></a>
       {% if not no_login and csrf %}
       <form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}">

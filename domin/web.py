@@ -43,6 +43,7 @@ from . import (
     db,
     discovery,
     fingerprint,
+    guard,
     jobs,
     mullvad,
     netscope,
@@ -713,7 +714,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         limit_lookups(request)
         return tools.email_security(d)
 
-    add_admin(app, settings, conn, page, client_ip, client, comps_on, limited)
+    add_admin(app, settings, conn, page, client_ip, client, comps_on, limited, peer_ip, admin_nets)
     return app
 
 
@@ -724,7 +725,9 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "relays": "Mullvad relay list refreshed.", "route-saved": "Route saved.", "route-deleted": "Route removed.",
            "default-saved": "Preferred route saved: the default for posture scans.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
-           "2fa-off": "Two-factor turned off.",
+           "2fa-off": "Two-factor turned off.", "session-ended": "Session(s) signed out.",
+           "place-approved": "Sign-in approved: the user can sign in from there now.",
+           "place-denied": "Sign-in denied.",
            "pw-set-admin": "Password set and the user's sessions ended. Hand the password over yourself; the user "
                            f"may keep it for {users.GRACE_SIGNINS} sign-ins, then must renew it.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
@@ -791,7 +794,8 @@ def _is_ip(text: str) -> bool:
     return True
 
 
-def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client, comps_on, limited) -> None:
+def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client, comps_on, limited,
+              peer_ip, admin_nets) -> None:
     """The signed-in area under /admin (behind the optional DOMIN_ADMIN_IPS network allowlist). User accounts with
     roles (admin, power user with per-domain grants: domin.access), optional TOTP second factor, a session cookie and
     a CSRF token per form."""
@@ -839,9 +843,17 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return priv(page(request, name, status, base=base, user=u, csrf=s["csrf"], notice=notice,
                          no_login=s.get("token_hash") == "", **ctx))
 
-    def set_session(resp, c, user_id: int):
-        resp.set_cookie(COOKIE, admin.new_session(c, user_id), max_age=admin.SESSION_HOURS * 3600, path="/",
-                        secure=True, httponly=True, samesite="strict")
+    def where_from(request: Request, c) -> tuple[str, str, str]:
+        """(address, country code, user agent) of a sign-in, for the session list and sign-in protection."""
+        ip = peer_ip(request)
+        return ip, admin.country(c, ip), request.headers.get("user-agent", "")[:300]
+
+    def set_session(resp, c, user_id: int, request: Request):
+        """A new session for the user; with one session per user (sign-in protection) its others end first."""
+        if guard.config(c)["one_session"]:
+            admin.end_user_sessions(c, user_id)
+        resp.set_cookie(COOKIE, admin.new_session(c, user_id, *where_from(request, c)),
+                        max_age=admin.SESSION_HOURS * 3600, path="/", secure=True, httponly=True, samesite="strict")
 
     # --- dashboard and sign-in -----------------------------------------------------------------------------------
 
@@ -870,12 +882,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def renew_url(nxt: str) -> str:
         return RENEW + (f"?{urlencode({'next': nxt})}" if nxt else "")
 
-    def signed_in(c, u: dict, nxt: str) -> RedirectResponse:
+    def signed_in(c, u: dict, nxt: str, request: Request) -> RedirectResponse:
         """After the password (and code). An admin-set password with no grace sign-in left: the renewal page, the
         only one this session reaches until it is changed. Else a user who must set up two-factor (role or own tick)
         goes to My account first (it offers the password change too); else a grace sign-in of an admin-set password
         offers the change (or keep); else back where the sign-in started, or the start page."""
         users.record_login(c, u["id"])
+        ip, cc, _ = where_from(request, c)
+        guard.remember(c, u["id"], ip, cc)   # this place counts as seen (sign-in protection)
+        u = users.get(c, u["id"]) or u   # a break-glass step-up may have just required two-factor
         step = users.count_signin(c, u)
         if step == "renew":
             target = renew_url(nxt)
@@ -886,8 +901,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         else:
             target = nxt or base
         resp = back(target)
-        set_session(resp, c, u["id"])
+        set_session(resp, c, u["id"], request)
         return resp
+
+    def guard_check(request: Request, c, u: dict) -> guard.Decision:
+        ip, cc, agent = where_from(request, c)
+        return guard.check(c, u, ip, cc, agent, guard.exempt(guard.config(c), ip, admin_nets))
 
     @app.post(base + "/login", include_in_schema=False)
     async def admin_login(request: Request):
@@ -903,6 +922,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 admin.login_failed(c, who)
                 return priv(page(request, "login.html", 401, base=base, any_user=users.count(c) > 0,
                                  error="Wrong user name or password.", next=nxt))
+            dec = guard_check(request, c, u)
+            if dec.action in guard.MESSAGES:   # pending approval, denied, impossible travel: refused
+                return priv(page(request, "login.html", 403, base=base, any_user=True,
+                                 error=guard.MESSAGES[dec.action], next=nxt))
             if u["has_totp"]:
                 token = secrets.token_urlsafe(24)
                 expires = (datetime.now() + timedelta(minutes=PENDING_MIN)).isoformat(timespec="seconds")
@@ -913,7 +936,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 resp.set_cookie(PENDING, token, max_age=PENDING_MIN * 60, path="/", secure=True, httponly=True,
                                 samesite="strict")
                 return resp
-            return signed_in(c, u, nxt)
+            return signed_in(c, u, nxt, request)
 
     def _pending(c, token: str | None) -> dict | None:
         """The pending second-factor step: {user_id, expires, next}, or None when unknown or expired."""
@@ -944,7 +967,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 admin.login_failed(c, who)
                 return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
             conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
-            resp = signed_in(c, u, safe_next(pend.get("next")))
+            resp = signed_in(c, u, safe_next(pend.get("next")), request)
             resp.delete_cookie(PENDING, path="/", secure=True, httponly=True, samesite="strict")
             return resp
 
@@ -1005,7 +1028,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             users.set_password(c, u["id"], new)   # clears the mark; signs every browser out, this one back in below
             access.audit(c, u["name"], "password changed (self)", u["name"])
             resp = back(base + "/account" if users.needs_totp_setup(c, u) else nxt or base, "pw-changed")
-            set_session(resp, c, u["id"])
+            set_session(resp, c, u["id"], request)
         return resp
 
     # --- account (any signed-in user) ----------------------------------------------------------------------------
@@ -1019,8 +1042,39 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             pending = users.enrol_pending(c, u["id"])
             uri = totp.provisioning_uri(pending["secret"], u["name"]) if pending else ""
             must_setup = users.needs_totp_setup(c, u)
+            mine = guard.sessions(c, u["id"], s.get("token_hash", ""))
         return shell(request, "account.html", u, s, enrol=pending, otpauth=uri, qr=qr_markup(uri),
-                     must_setup=must_setup, error="")
+                     must_setup=must_setup, error="", sessions=mine)
+
+    @app.post(base + "/account/sessions/{sid}/end", include_in_schema=False)
+    async def account_session_end(request: Request, sid: PathId):
+        """Sign out one of my sessions (this one too: then the cookie goes)."""
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            mine = {r["sid"]: r for r in guard.sessions(c, u["id"], s.get("token_hash", ""))}
+            if sid not in mine:
+                raise HTTPException(404, "No such session")
+            guard.end_session(c, u["id"], sid)
+            access.audit(c, u["name"], "session ended (self)", u["name"], f"address {mine[sid]['ip'] or '?'}")
+        if mine[sid]["current"]:
+            resp = back()
+            resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+            return resp
+        return back(base + "/account#sessions", "session-ended")
+
+    @app.post(base + "/account/sessions/others", include_in_schema=False)
+    async def account_sessions_others(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if n := guard.end_others(c, u["id"], s.get("token_hash", "")):
+                access.audit(c, u["name"], "sessions ended (self)", u["name"], f"{n} other session(s)")
+        return back(base + "/account#sessions", "session-ended")
 
     @app.post(base + "/account/password", include_in_schema=False)
     async def account_password(request: Request):
@@ -1124,7 +1178,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      pw_state={r["id"]: users.pw_state(r) for r in rows}, min_pw=users.MIN_PASSWORD,
                      grace=users.GRACE_SIGNINS,
                      grants=access.all_grants(c), levels=access.LEVEL_LABELS, audit=access.audit_recent(c),
-                     error=error, form_name=form_name, form_role=form_role)
+                     error=error, form_name=form_name, form_role=form_role, waiting=guard.pending(c))
 
     @app.get(base + "/users", response_class=HTMLResponse, include_in_schema=False)
     def users_page(request: Request):
@@ -1150,7 +1204,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      features={f: v for f, v in access.FEATURES.items() if f not in hidden_features(request, c)},
                      admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
                      right_labels=access.RIGHT_LABELS, pw_state=users.pw_state(target), min_pw=users.MIN_PASSWORD,
-                     grace=users.GRACE_SIGNINS)
+                     grace=users.GRACE_SIGNINS, sessions=guard.sessions(c, target["id"], s.get("token_hash", "")))
 
     @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
     def user_edit_page(request: Request, user_id: PathId):
@@ -1249,6 +1303,26 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 users.set_password(c, user_id, data["password"], by_admin=True)   # signs that user out everywhere
                 access.audit(c, u["name"], "set password (admin)", target["name"])
                 return back(f"{base}/users/{user_id}#password", "pw-set-admin")
+            if action == "end-session":
+                try:
+                    sid = int(data.get("sid", ""))
+                except ValueError:
+                    raise HTTPException(422, "No session given") from None
+                if guard.end_session(c, user_id, sid):
+                    access.audit(c, u["name"], "session ended (admin)", target["name"])
+                return back(f"{base}/users/{user_id}#sessions", "session-ended")
+            if action == "end-sessions":
+                admin.end_user_sessions(c, user_id)
+                access.audit(c, u["name"], "sessions ended (admin)", target["name"], "all")
+                return back(f"{base}/users/{user_id}#sessions", "session-ended")
+            if action in ("approve-place", "deny-place"):
+                try:
+                    pid = int(data.get("pid", ""))
+                except ValueError:
+                    raise HTTPException(422, "No sign-in given") from None
+                if not guard.decide(c, user_id, pid, action == "approve-place", u["name"]):
+                    raise HTTPException(404, "No such waiting sign-in")
+                return back(base + "/users", "place-approved" if action == "approve-place" else "place-denied")
             if action == "delete":
                 if users.is_last_admin(c, user_id):
                     raise HTTPException(409, "This is the last admin; cannot delete it")
@@ -1332,7 +1406,25 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,
                      csv_import=csvimport.status(c), csv_max_mb=csvimport.MAX_BYTES // (1024 * 1024),
                      allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None,
-                     signin=users.signin_required(c))
+                     signin=users.signin_required(c), guard=guard.config(c),
+                     guard_days=(guard.DAYS_MIN, guard.DAYS_MAX), travel_kmh=guard.TRAVEL_KMH)
+
+    @app.post(base + "/settings/guard", include_in_schema=False)
+    async def settings_guard(request: Request):
+        """Sign-in protection (domin.guard): each rule on or off, the new-place days, trusted ranges."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            old = guard.config(c)
+            try:
+                new = guard.save_config(c, data)
+            except ValueError as exc:
+                return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
+            if changed := [f"{k} {new[k]}" for k in new if new[k] != old[k]]:
+                access.audit(c, u["name"], "sign-in protection", "settings", "; ".join(changed))
+        return back(base + "/settings#guard", "saved")
 
     @app.post(base + "/settings/signin", include_in_schema=False)
     async def settings_signin(request: Request):

@@ -72,4 +72,23 @@
     {% endif %}
   </div>
 </section>
+
+{% if sessions is defined %}
+<section class="card" id="sessions">
+  <h2>Sessions <small>{{ sessions|length }} signed in</small></h2>
+  {% if sessions %}<div class="table-wrap"><table>
+    <thead><tr><th class="fit">Created</th><th class="fit">Address</th><th class="fit">Country</th><th>Browser</th><th class="fit"></th></tr></thead>
+    <tbody>{% for x in sessions %}<tr>
+      <td class="muted">{{ x.created[:16].replace('T', ' ') or '–' }}</td><td class="mono">{{ x.ip or '–' }}</td>
+      <td>{{ x.country or '–' }}</td>
+      <td>{{ x.browser }}{% if x.current %} <span class="pill ok">this browser</span>{% endif %}</td>
+      <td><form method="post" action="{{ base }}/account/sessions/{{ x.sid }}/end" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Sign out</button></form></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% if sessions|length > 1 %}<form method="post" action="{{ base }}/account/sessions/others" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">Sign out all others</button></form>{% endif %}
+  {% else %}<p class="muted">No sessions (sign-in is turned off).</p>{% endif %}
+</section>
+{% endif %}
 {% endblock %}

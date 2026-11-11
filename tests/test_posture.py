@@ -803,7 +803,8 @@ def test_sign_in_can_be_turned_off_only_where_the_environment_allows_it(settings
         assert r.status_code == 303
     with app_client(dev) as h:   # no cookie: acts as adm, forms work
         page = h.get("/admin/security/scans").text
-        assert "sign-in off" in page and '<span>My account</span><small class="muted">adm</small>' in page
+        assert "sign-in off" in page and "<b>adm</b>" in page   # the header names the stand-in's admin
+        assert 'action="/admin/logout"' not in page   # nothing to log out of
         anon = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
         assert h.post("/admin/settings/no-login", data={"csrf": anon}, follow_redirects=False).status_code == 303
     with app_client(dev) as h:   # back on

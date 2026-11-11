@@ -151,6 +151,29 @@
   </form>
 </section>
 
+<section class="card" id="guard">
+  <h2>Sign-in protection <small>checked after the password</small></h2>
+  <form method="post" action="{{ base }}/settings/guard" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick"><input type="checkbox" name="one_session" {% if guard.one_session %}checked{% endif %}>
+      One session per user <small class="muted">a new sign-in signs that user's other browsers out</small></label>
+    <label class="tick"><input type="checkbox" name="new_place" {% if guard.new_place %}checked{% endif %}>
+      New place <small class="muted">a country (the /24 when the country is unknown) not seen for the user in the
+      days below: users with two-factor give a code, users without wait for an admin (Users: approve or deny)</small></label>
+    <label>Days a place counts as seen
+      <input type="number" name="new_place_days" value="{{ guard.new_place_days }}" min="{{ guard_days[0] }}"
+             max="{{ guard_days[1] }}" required></label>
+    <label class="tick"><input type="checkbox" name="travel" {% if guard.travel %}checked{% endif %}>
+      Impossible travel <small class="muted">faster than {{ travel_kmh }} km/h between the countries of two sign-ins:
+      refused, the user's sessions end, a new password and two-factor are required</small></label>
+    <label>Trusted ranges <small class="muted">addresses or CIDRs, one per line; exempt like DOMIN_ADMIN_IPS</small>
+      <textarea name="trusted" rows="3" aria-label="Trusted ranges">{{ guard.trusted|join('\n') }}</textarea></label>
+    <p class="muted small-print">The last enabled admin is never blocked: it only gets the two-factor step-up (without
+      two-factor it must enrol right after signing in). Every rule hit is in the audit log (Users, Changes).</p>
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </form>
+</section>
+
 {% if allow_no_login %}
 <section class="card warn-card">
   <h2>Sign-in <small>development and lab only</small></h2>

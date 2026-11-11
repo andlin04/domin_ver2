@@ -167,12 +167,15 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def new_session(conn: sqlite3.Connection, user_id: int | None = None) -> str:
-    """Returns the cookie token; only its hash is stored, next to the session's CSRF token and its user."""
+def new_session(conn: sqlite3.Connection, user_id: int | None = None, ip: str = "", cc: str = "",
+                agent: str = "") -> str:
+    """Returns the cookie token; only its hash is stored, next to the session's CSRF token, its user and, for the
+    session list, when and from where (address, country, user agent) it was made."""
     token = secrets.token_urlsafe(32)
     expires = (datetime.now() + timedelta(hours=SESSION_HOURS)).isoformat(timespec="seconds")
-    conn.execute("INSERT INTO admin_sessions (token_hash, csrf, expires, user_id) VALUES (?, ?, ?, ?)",
-                 (_token_hash(token), secrets.token_urlsafe(24), expires, user_id))
+    conn.execute("INSERT INTO admin_sessions (token_hash, csrf, expires, user_id, created, ip, country, agent) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (_token_hash(token), secrets.token_urlsafe(24), expires, user_id,
+                                                     db.now(), ip[:64], cc.upper(), agent[:300]))
     return token
 
 

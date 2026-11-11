@@ -84,6 +84,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS admin_sessions (token_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires TEXT NOT NULL,
     user_id INTEGER);
 CREATE TABLE IF NOT EXISTS admin_fails (client TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS signin_history (   -- completed sign-ins per user (domin.guard), kept N days
+    id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '',
+    net TEXT NOT NULL DEFAULT '', cc TEXT NOT NULL DEFAULT '', place TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS signin_history_user ON signin_history(user_id, at);
+CREATE TABLE IF NOT EXISTS signin_pending (   -- sign-ins from a new place waiting for an admin (domin.guard)
+    id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '',
+    net TEXT NOT NULL DEFAULT '', cc TEXT NOT NULL DEFAULT '', place TEXT NOT NULL, agent TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | denied
+    decided_by TEXT NOT NULL DEFAULT '', decided_at TEXT);
 CREATE TABLE IF NOT EXISTS visits (
     id INTEGER PRIMARY KEY,
     at TEXT NOT NULL,
@@ -275,6 +284,10 @@ def init(path: Path) -> None:
         conn.execute("DELETE FROM kv WHERE key LIKE 'setpw:%' OR key LIKE 'setpw-link:%'")
         if "user_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(admin_sessions)")}:
             conn.execute("ALTER TABLE admin_sessions ADD COLUMN user_id INTEGER")
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(admin_sessions)")}
+        for col in ("created", "ip", "country", "agent"):   # the session list (My account, Users)
+            if col not in have:
+                conn.execute(f"ALTER TABLE admin_sessions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
         have = {r["name"] for r in conn.execute("PRAGMA table_info(posture_scans)")}
         for col, ddl in (("profile", "TEXT NOT NULL DEFAULT ''"), ("intensity", "INTEGER NOT NULL DEFAULT 2"),
                          ("timing", "INTEGER NOT NULL DEFAULT 3"), ("timeout", "INTEGER NOT NULL DEFAULT 120"),

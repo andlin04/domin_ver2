@@ -78,7 +78,8 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   Admins create users with a password (typed or Generate, with Copy) and hand it over themselves; Set password on a
   user's page resets it and signs that user out. A user may change or keep an admin-set password at the next 3
   sign-ins; the 4th requires a new one ([docs/delegation.md](docs/delegation.md)).
-- **Header:** every page shows "signed in as <name> (role)" top right (links to My account) and a Log out button.
+- **Header:** every page shows "signed in as <name> (role)" top right and a Log out button; the name opens My
+  account (no longer in the Admin menu).
 - **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
   (cancel, stop, retry), tuning without restart.
 
@@ -213,8 +214,8 @@ bash deploy/install.sh --components inventory,posture        # later: add the mi
 - **Two-factor key:** the TOTP secrets (and a pending enrolment) are stored encrypted (Fernet, prefix `f1:`) with
   the key in `/etc/domin/totp.key` (root:domin 0640; `DOMIN_TOTP_KEY` overrides the path). `install.sh` and
   `update.sh` create it when missing and never overwrite it; the app encrypts older plaintext values at start.
-  - **Back up the key separately from the database** (another place than the database backups). A database restored
-    without its key still starts and signs in by password, but no TOTP code is accepted ("2FA unavailable, contact
+  - **Backup:** the key is backed up with the host's backup (VM image or full-host backup); no separate key backup.
+    A database-only backup cannot decrypt the 2FA secrets without it. A database restored without its key still starts and signs in by password, but no TOTP code is accepted ("2FA unavailable, contact
     an admin"; recovery codes still work): reset each user's 2FA (Users page, or `user-2fa-reset <name>`), and
     they enrol again. `admin-password` and `user-passwd` need no key.
   - **New key** (as root; the CLI runs as domin):
@@ -232,8 +233,23 @@ bash deploy/install.sh --components inventory,posture        # later: add the mi
     are refused.
 - **Usage statistics:** visitors, page views, visit length and page order, top pages, domains, CSV downloads, tools,
   referrers, countries, scans started and refused; bots counted apart; kept 180 days.
-- **Privacy:** no IP addresses stored; a visitor is a hash of address + browser with a daily salt; scan rate limits
-  use a salted hash.
+- **Privacy:** no visitor IP addresses stored; a visitor is a hash of address + browser with a daily salt; scan rate
+  limits use a salted hash. Signed-in users are the exception: their sessions keep the address, country and browser
+  (the session list), and sign-in protection keeps each sign-in's address and country for the new-place days.
+- **Sign-in protection** (Settings > General; each rule on by default, can be turned off):
+  - **One session per user:** a new sign-in signs that user's other browsers out.
+  - **New place:** a country not seen for the user in N days (default 90; the /24, or /48 for IPv6, when the
+    country is unknown). With two-factor: the code step. Without: refused and waiting for an admin (Users: "Sign-ins
+    waiting for approval", Approve or Deny; the user row shows "new place: approve?"). A first sign-in sets the
+    baseline.
+  - **Impossible travel:** over 900 km/h between the country centroids of the previous and this sign-in (same or
+    unknown country: skipped): refused, all the user's sessions end, a new password and two-factor are required.
+  - **Exempt:** `DOMIN_ADMIN_IPS` and the trusted ranges in Settings (the hit is still logged as "exempt").
+  - **Break-glass:** the last enabled admin is never blocked, only stepped up (without two-factor it must enrol
+    right after the sign-in); `admin-password` still works.
+  - Every hit is in the audit log (Users, Changes) with user, address, country and rule.
+- **Sessions:** My account lists your sessions (created, address, country, browser): Sign out one, or Sign out all
+  others. Admins see and end a user's sessions on the user's page (Users, Edit).
 - **Countries:** [DB-IP](https://db-ip.com) IP to Country Lite (CC BY 4.0), downloaded by the installer; re-run the
   installer monthly to refresh.
 - **Tuning** (no restart): pause the worker, once-per-day limit, scans per hour, queue length, lookups per minute, max
