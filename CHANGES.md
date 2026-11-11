@@ -1,6 +1,22 @@
 # Changes
 
-Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
+All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
+update in place; the database, `/etc/domin.env` and certificates stay.
+
+## 2026-11-11: Documentation for publishing, MIT license
+
+- README shortened to an overview; the details moved to docs/: FEATURES.md, INSTALL.md, CONFIGURATION.md (every
+  `DOMIN_*` key), OPERATIONS.md (CLI), ARCHITECTURE.md; the security model moved from SECURITY.md to docs/HARDENING.md,
+  SECURITY.md is now the security policy.
+- MIT license (LICENSE, pyproject `license`), THIRD-PARTY-NOTICES.md (vendored Chart.js and Natural Earth, external
+  programs, data sources), CONTRIBUTING.md, issue and pull request templates; pyproject description, URLs and
+  classifiers.
+- The page footer credits DB-IP (CC BY 4.0, attribution required); the CVE look-up page carries the NVD notice.
+  Vendored Chart.js 4.4.1 carries its upstream MIT banner again.
+- Comments and texts that named other internal projects are neutral; the `--admin-ip` comments say what
+  `DOMIN_ADMIN_IPS` does (an optional allowlist; empty = sign-in alone).
+- `deploy/package.sh` also packs LICENSE, THIRD-PARTY-NOTICES.md and docs/*.md.
+- Rollback: `git revert` this commit and run update.sh (footer and CVE look-up texts; the rest is documentation).
 
 ## 2026-11-11: Optional hidden sign-in link
 

@@ -43,7 +43,7 @@ class Settings:
     scans_paused: bool = False     # the worker leaves queued jobs waiting
     posture_parallel: int = 1      # posture scans running at once (up to POSTURE_SLOTS worker threads)
     analytics_days: int = 180      # visit statistics older than this are deleted
-    admin_ips: tuple[str, ...] = ()   # addresses/networks that see /admin and its link; empty = no admin page
+    admin_ips: tuple[str, ...] = ()   # optional network allowlist for /admin; empty = sign-in alone
     internal_ips: tuple[str, ...] = ()   # private API clients (over a VPN): POST /api/scan without visitor limits
     internal_zones: tuple[str, ...] = ()   # domain suffixes scanned internally: resolve via internal_dns, no egress
     internal_dns: tuple[str, ...] = ()   # resolver addresses for internal scans (the LAN DNS server)

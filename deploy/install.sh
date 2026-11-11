@@ -11,8 +11,8 @@
 #   --no-worker         install the scan worker but don't start it (pages and tools only, no scans)
 #   --firewall          enable ufw with SSH (22), HTTP and HTTPS only (on-prem: HTTP/HTTPS from --admin-sources)
 #   --ssh-from CIDRS    with --firewall: SSH only from these networks (comma-separated; default any)
-#   --admin-ip CIDRS    client addresses that get the admin page /admin (comma-separated); without it, and without
-#                       DOMIN_ADMIN_IPS in /etc/domin.env, there is no admin page
+#   --admin-ip CIDRS    optional network allowlist for /admin (comma-separated; DOMIN_ADMIN_IPS); others get 404.
+#                       Without it the sign-in alone governs /admin
 #   --deny CIDRS        extra addresses the app and the scans may never connect to (e.g. your home or office), on top
 #                       of the non-public ranges and this server's own addresses; kept for later runs
 #   --alias A           extra host name for the same site (e.g. www.example.com)
@@ -213,8 +213,8 @@ if [ ! -f /etc/domin.env ]; then
       "$DATA" > /etc/domin.env )
   chown root:domin /etc/domin.env
 fi
-# Two-factor encryption key (domin/secretbox.py): created once, never overwritten. Back it up apart from the
-# database: a restored database without it needs every user's 2FA reset.
+# Two-factor encryption key (domin/secretbox.py): created once, never overwritten. Backed up with the host's
+# backup (VM image or full host); a restored database without it needs every user's 2FA reset.
 [ -d /etc/domin ] || install -d -m 755 /etc/domin
 [ -s /etc/domin/totp.key ] || (umask 077; head -c 32 /dev/urandom | base64 | tr '+/' '-_' > /etc/domin/totp.key)
 chown root:domin /etc/domin/totp.key && chmod 640 /etc/domin/totp.key
@@ -222,8 +222,8 @@ setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines 
   (umask 027; { grep -v "^$1=" /etc/domin.env || true; echo "$1=$2"; } > /etc/domin.env.new)
   chown root:domin /etc/domin.env.new && mv /etc/domin.env.new /etc/domin.env
 }
-# Admin page at /admin, served and linked only for DOMIN_ADMIN_IPS (comma-separated IPs/CIDRs; edit, then
-# systemctl restart domin); everyone else gets 404. `python -m domin admin-password` sets its password.
+# Optional network allowlist for /admin, DOMIN_ADMIN_IPS (comma-separated IPs/CIDRs; edit, then
+# systemctl restart domin): when set, everyone else gets 404; when empty, the sign-in alone governs /admin.
 [ -z "$ADMIN_IP" ] || setenv DOMIN_ADMIN_IPS "$ADMIN_IP"
 setenv DOMIN_COMPONENTS "$COMPONENTS"   # what is installed; the app and update.sh read it
 # --deny is kept in the env file (the app ignores it) so a later run without it keeps the list.
@@ -387,7 +387,7 @@ unit domin "domin web app" "$APP/venv/bin/uvicorn --factory domin.web:create_app
 unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker" 16G 2000
 
 if [ "$INTERNAL" = 1 ]; then
-  # On-prem TLS (as wg-admin): the key never leaves this host and only nginx's master process (root) reads it.
+  # On-prem TLS: the key never leaves this host and only nginx's master process (root) reads it.
   # Self-signed (825 days) until /etc/domin/tls.crt is replaced with a certificate your CA signed from tls.csr
   # (left while the certificate is self-signed or has under 30 days left), then re-run install.sh (adds HSTS).
   [ -d /etc/domin ] || install -d -m 755 /etc/domin

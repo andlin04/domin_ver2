@@ -120,14 +120,15 @@
 <section class="card">
   <h2>About the CVE database</h2>
   <ul class="bullets">
-    <li>Source: {{ cve_source }} (OSV.dev for packages, NVD for products matched by CPE) — the same sources the
-      infrastructure vulnerability watch uses. Both update continuously as advisories are published.</li>
+    <li>Source: {{ cve_source }} (OSV.dev for packages, NVD for products matched by CPE).
+      Both update continuously as advisories are published.</li>
     <li>Mode: <b>{{ cve_mode }}</b>. {% if cve_mode == 'own' %}This instance maintains its own database at
       <code>{{ cve_db }}</code>, re-querying a target older than {{ cve_ttl }} day(s).{% else %}This instance reads a
       shared database at <code>{{ cve_db }}</code>, read-only; it does not query the network.{% endif %}</li>
     <li>Host fingerprinting (the <b>Host</b> tab) runs an nmap connect scan (<code>-sT -sV</code>, no OS detection,
       no raw packets) of an in-scope address, then matches each service's CPEs against the sources above. You can
       also enter a product or package version by hand.</li>
+    <li>This product uses the NVD API but is not endorsed or certified by the NVD.</li>
   </ul>
 </section>
 {% endblock %}

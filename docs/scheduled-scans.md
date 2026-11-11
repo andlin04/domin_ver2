@@ -1,6 +1,6 @@
 # Scheduled rescans and nmap discovery profiles
 
-Owner requests (2026-11-11):
+Design notes. Goals:
 1. Schedule rescans of a domain, with a scanning profile and the hosts to rescan.
 2. Discovery scan profiles to tune the nmap parameters of a discovery scan.
 
@@ -131,7 +131,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 - Audit table: schedule add, edit, delete, enable/disable, run now; discovery profile save, delete, default.
 - The worker runs a schedule without its creator: scope and posture rules apply at run time; the creator's rights
-  are not checked again (open: owner).
+  are not checked again (open question).
 
 ## UI
 
@@ -167,7 +167,7 @@ address among the hosts the schedule's posture part covers (latest inventory).
 - Rollback: older code ignores the new tables and columns. Disable all schedules first
   (`UPDATE schedules SET enabled = 0`), then deploy the older code.
 
-## Open (owner)
+## Open questions
 
 - Add live internal addresses without a name to the inventory (address as host name), so posture can scan them?
 - Re-check the creator's rights when a schedule runs (a maintainer who lost the grant)?

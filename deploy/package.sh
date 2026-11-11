@@ -16,6 +16,6 @@ NAME=domin-$VERSION-$COMMIT
 mkdir -p dist
 # only what a host runs or an admin reads: no tests, no git files
 git archive --format=tar.gz --prefix="$NAME/" -o "dist/$NAME.tar.gz" "$REF" \
-  domin deploy pyproject.toml README.md SECURITY.md CHANGES.md
+  domin deploy pyproject.toml README.md SECURITY.md CHANGES.md LICENSE THIRD-PARTY-NOTICES.md 'docs/*.md'
 (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 echo "dist/$NAME.tar.gz ($(du -h "dist/$NAME.tar.gz" | cut -f1)), sha256 $(cut -c1-16 "dist/$NAME.tar.gz.sha256")..."

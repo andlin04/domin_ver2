@@ -1,7 +1,25 @@
 [project]
 name = "domin"
 version = "2.0.0"
-description = "Domain inventory: host names, addresses and hosting providers per domain, over time"
+description = "Domain DNS and security posture inventory: host names, hosting, exposed services and CVEs per domain, over time"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Andreas Lindkvist" }]
+keywords = ["dns", "inventory", "attack-surface", "nmap", "cve", "security", "fastapi"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: Name Service (DNS)",
+    "Topic :: Security",
+    "Topic :: System :: Networking :: Monitoring",
+]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -16,11 +34,17 @@ dependencies = [
     "cryptography>=44",     # Fernet: two-factor secrets encrypted at rest (domin/secretbox.py)
 ]
 
+[project.urls]
+Homepage = "https://github.com/andlin04/domin_ver2"
+Documentation = "https://github.com/andlin04/domin_ver2/tree/main/docs"
+Changelog = "https://github.com/andlin04/domin_ver2/blob/main/CHANGES.md"
+Issues = "https://github.com/andlin04/domin_ver2/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

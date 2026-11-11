@@ -1,12 +1,12 @@
 # Delegation: power users with per-domain grants
 
-Owner request (2026-11-11): power users with domains assigned to manage or audit; more admin accounts; posture
+Design notes. Goal: power users with domains assigned to manage or audit; more admin accounts; posture
 content from the assigned rights; viewer and administrative rights per domain.
 
 ## Roles
 | Role | Access |
 | --- | --- |
-| admin | Everything: every domain, users and grants, Settings, Routes, Operations (jobs, tuning), scan profiles, public DB sync, sign-in switch. Several admins allowed. |
+| admin | Everything: every domain, users and grants, Settings, Routes, Operations (jobs, tuning), scan profiles, CSV import, sign-in switch. Several admins allowed. |
 | power (shown "power user") | Only the domains of its grants, only the features of its rights (below). No admin-only pages. |
 
 - Last admin: an enabled admin cannot be demoted, disabled or deleted while it is the only one (409; CLI refuses).
@@ -28,7 +28,7 @@ content from the assigned rights; viewer and administrative rights per domain.
 - Who grants: admins (any grant, Users page); a maintainer: viewer only, on a domain it is maintainer of
   (Domain viewers, below).
 
-## Feature rights (owner 2026-11-11)
+## Feature rights
 - Per power user, per feature: none / read / read-write (column `users.rights`, JSON). Admins: everything.
 - Features:
 
@@ -56,7 +56,7 @@ content from the assigned rights; viewer and administrative rights per domain.
   Scan profiles, Discovery profiles read; Scans & schedules, Tags read-write. New users get the same; admins change
   them on the edit page (audit `rights`).
 
-## Domain viewers (owner 2026-11-11; moved off the domain page 2026-11-11)
+## Domain viewers
 - Admin menu > Domain viewers (`GET /admin/viewers?domain=<name>`), for a maintainer of any domain (and admins):
   pick a domain you administer (admins: every domain), see the grants on exactly that domain, "Add viewer" (a pick
   of enabled power users, not the actor) and "Remove" on viewer rows. No maintainer grant: 404. The inventory
@@ -74,7 +74,7 @@ content from the assigned rights; viewer and administrative rights per domain.
 - Admin, sign-in off (`DOMIN_ALLOW_NO_LOGIN` + Settings): everything (unchanged; sign-in off acts as that admin).
 - Anonymous visitors: public inventory pages, unless Sign-in (below) requires it. Posture is signed-in only.
 
-## Sign-in (owner 2026-11-11)
+## Sign-in
 - Settings, "Sign-in required for": Inventory, Posture, both or neither (kv `auth:signin`).
 - Inventory (inventory pages, all records, domain pages, search, CSV, drill data, whois/e-mail tools, `POST
   /api/scan`): unticked = open to every visitor that reaches the site (as before; public mode: the internet).
@@ -90,7 +90,7 @@ content from the assigned rights; viewer and administrative rights per domain.
   an admin saves the setting. Audit: `sign-in`.
 - Public mode with "neither": unchanged (inventory public, posture and admin behind sign-in).
 
-## Passwords set by an admin (owner 2026-11-11)
+## Passwords set by an admin
 - Users > Add a user: name, role, Password + Confirm (Generate fills both with 20 random characters in the browser,
   Show/Hide, Copy). A user's edit page: Set password (same fields), which ends that user's sessions. Users list:
   Set password links there. Policy: the two fields match, 12+ characters (`users.password_problem`, also the CLI).
@@ -121,7 +121,7 @@ content from the assigned rights; viewer and administrative rights per domain.
 - Out-of-scope object: same answer as an unknown one (404 for `/d/<name>`, compare, scan records/CSV, history,
   job; the posture page ignores an unknown `?domain=` as before).
 - Action on a visible domain without maintainer rights: 403 with the reason.
-- Admin-only (404 to power users): Users, Settings, Routes, Operations/tuning/jobs, public DB sync, sign-in switch,
+- Admin-only (404 to power users): Users, Settings, Routes, Operations/tuning/jobs, CSV import, sign-in switch,
   domain delete. Profile changes follow the feature rights.
 
 ## Not changed
@@ -141,6 +141,5 @@ content from the assigned rights; viewer and administrative rights per domain.
   `UPDATE users SET role = 'viewer' WHERE role = 'power'`, then deploy the older code. The `grants` and `audit`
   tables stay and are ignored.
 
-## Open (owner)
+## Open questions
 - Default rights of new power users: the migration defaults (above); "none" everywhere would be stricter.
-- Sign-in: My account shows the secret and an otpauth link, no QR image (needs a QR encoder; none is installed).

@@ -1,6 +1,6 @@
 """Syslog forwarding of audit and security events (Settings > Logging), RFC 5424.
 
-Off by default (no server). The options follow wg-admin's Logging settings (server, port 514, UDP or TCP) plus TLS,
+Off by default (no server). Options: server, port (514), UDP, TCP or TLS,
 the facility and the app-name. Sent: sign-ins, sign-in failures, sign-in protection hits and every audit entry
 (admin changes). Never blocks a request: messages go to a bounded in-process queue that a background thread sends;
 a full queue or a failed send drops the message and counts it, and the last error shows in Settings. TCP and TLS use

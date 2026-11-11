@@ -504,7 +504,7 @@ details.svc-group:first-child { border-top: 0; }
 .cve-head .num { min-width: 2.2rem; color: var(--muted); }
 .cve-body { padding: .2rem .8rem .6rem 1.6rem; background: var(--surface-2); }
 .cve-body p { margin: .35rem 0; }
-/* Posture expandables: a chevron that points right when closed and turns down when open (as in wg-admin) */
+/* Posture expandables: a chevron that points right when closed and turns down when open */
 /* Posture Filter box: last in the panel, pushed right; rows it filters out */
 .card.controls form.posture-pick { flex: 1 1 100%; }   /* its own row: Domain, Host, Show … Filter on the right */
 .card.controls .pick-filter { margin-left: auto; }

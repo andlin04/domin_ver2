@@ -1,6 +1,6 @@
 """CVE lookups for the security / posture engine.
 
-Same sources as the infrastructure vulnerability watch: OSV.dev for packages (Debian, Ubuntu, PyPI, Go, npm, ...)
+Sources: OSV.dev for packages (Debian, Ubuntu, PyPI, Go, npm, ...)
 and NVD (by CPE) for products that OSV does not carry. Both are updated continuously upstream as advisories land;
 NVD publishes within hours and OSV mirrors the distro and ecosystem feeds on a similar cadence.
 
