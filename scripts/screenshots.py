@@ -546,6 +546,7 @@ SHOTS = {
                                 OPEN_SCHEDULE + from_card("Scheduled rescans")),
     "operations-schedules": ("/admin", True, 300, from_card("Scheduled rescans")),
     "settings-signin": ("/admin/settings", True, 520, from_card("Sign-in required for")),
+    "settings-csv-import": ("/admin/settings", True, 420, from_card("CSV import")),
     "domain-viewers": ("/d/example.com", "carol", 560, from_card("Viewers")),
     "table-cves": ("/admin/security/analysis?domain=example.com", True, 1000,
                    "document.querySelector('[data-tab=cves]')?.click();" + show_from("section.host-list")),
