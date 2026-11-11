@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: README and screenshots
+
+- README: both parts (domain inventory, security posture) as lists, screenshots with made-up demo data
+  (`docs/screenshots/`, made by `scripts/screenshots.py`), legal disclaimer (internal use).
+- Settings help text examples: `corp.example` and `10.0.0.0/24`.
+- Rollback: `git revert` this commit (docs, the screenshot script and two help-text examples only).
+
 ## 2026-11-11: Tor off by default, switch in Settings; root helpers write safely
 
 - Tor is installed but off on new installs; Settings > Routes has Turn Tor on/off (admins), applied by a root path

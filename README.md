@@ -1,32 +1,89 @@
 # domin 2
 
-Domain inventory: host names, addresses and hosting providers per domain, and how they change between scans.
+Domain DNS and security posture inventory tool
 
-- **Overview:** totals, scans per day, hosting countries and providers across all domains, filterable domain table.
-- **Domain page:** footprint over time, host names added/removed per scan, countries and providers, changes since
-  the previous scan, all records (filter, sort, CSV), compare any two scans.
-- **Drilldown (All):** a tab on the overview's domain card and a page of its own (`/all`): the domain page's analysis for every domain at once: host names, addresses, domains, ASNs,
-  countries and EU share, charts of countries, providers and ASNs (click a bar to filter), and every record. Search
-  host, address, ASN, prefix, network, description or country, in the latest scans or the whole history (first
-  and last seen); the search and the column filters narrow the figures, charts and table together. CSV download.
-  Filtering runs in the browser as you type: the page fetches the whole dataset once (`/data/drill.json`, gzip'd,
-  about 1.7 MB for 163k records; built once per scan, the history once an hour; cached by the browser), so many
-  users filtering at once cost the server nothing. Without it (no JavaScript, load error) the same filters run on
-  the server when Enter is pressed.
-- **Tables:** sort by any column; a filter box under each column heading, and the filters add up (Drilldown:
-  across every match, not just the page shown).
-- **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
-- **Signed-in area:** user accounts with roles (viewer / analyst / admin), optional two-factor (TOTP), a Users page,
-  a Settings/scope page and a Security tab, plus the admin dashboard (usage statistics without stored IP addresses,
-  scan job control, live tuning — see below).
+- Two parts: a public **domain inventory** (DNS) and a signed-in **security posture** area (port and service scans,
+  CVEs).
+- Python 3.12, FastAPI, Jinja2, SQLite, nmap, Chart.js (vendored). No external CDN, strict Content-Security-Policy.
+
+![Overview](docs/screenshots/overview.png)
+
+**Contents:** [Domain inventory](#domain-inventory) · [Security posture](#security-posture) ·
+[Users and admin](#users-and-admin) · [Screenshots](#screenshots) · [Install](#install) ·
+[Signed-in area](#signed-in-area) · [Run locally](#run-locally) · [Legal disclaimer](#legal-disclaimer) ·
+[Security](SECURITY.md) · [Changes](CHANGES.md)
+
+## Domain inventory
+Public pages. Per domain: host names, addresses, ASNs, prefixes, countries and hosting providers, and how they change
+between scans.
+
 - **Scans:** certificate transparency (crt.sh) plus common names, MX and NS; DNS A/AAAA; RDAP for ASN, prefix,
-  network name and country. amass is used when installed. One scan per domain per day, 10 per hour per visitor.
+  network name and country. amass when installed. One scan per domain per day, 10 per hour per visitor.
+- **Overview:** totals, scans per day, hosting countries, top providers, EU share per day, recent scan jobs,
+  filterable domain table.
+- **Domain page:** footprint over time, host names added and removed per scan, countries, providers, EU share over
+  time, changes since the previous scan, all records (filter, sort, CSV), compare any two scans.
+- **Drilldown (All):** every domain at once (`/all`, also a tab on the overview): host names, addresses, ASNs,
+  countries, EU share, charts of countries, providers and ASNs (a bar click filters). Search host, address, ASN,
+  prefix, network, description or country, in the latest scans or the whole history (first and last seen). Filters
+  narrow figures, charts and table together; CSV download.
+  - Filtering runs in the browser on a dataset fetched once (`/data/drill.json`, gzip, cached); without JavaScript the
+    same filters run on the server on Enter.
+- **Tables:** sort by any column; a filter box per column, the filters add up.
+- **Tools:** registration data (RDAP) and e-mail security (MX, SPF, DMARC, MTA-STS, DNSSEC) for one domain.
 
-Python 3.12, FastAPI, Jinja2, SQLite, Chart.js (vendored). No external CDN, strict Content-Security-Policy.
+## Security posture
+Signed-in pages (`/admin`). Finds services on a domain's addresses and matches them to known CVEs.
 
-## Install on a VPS
+- **Posture scans:** nmap service and version detection (`-sV`, TCP connect; SYN scans with `--raw`), one scan per address of a
+  domain, queued and run by the worker. Progress and raw nmap output per scan.
+- **CVE matching:** fingerprinted products (CPE) are looked up in OSV.dev and NVD; results kept in a
+  local CVE database (own, or a shared read-only one). Each finding: severity, CVSS score and vector, description,
+  fixed versions, NVD/OSV links.
+- **Overview tab (What):** KPIs, CVEs over time (stacked by severity, addresses scanned as a line), fix available or
+  not, CVEs found.
+- **Analysis tab (Where):** attack surface over time, exposed services (the part with CVEs marked), findings by
+  address, hosts and CVEs tables (a CVE id opens its details), changes between scans (ports opened/closed, versions,
+  new, fixed and gone CVEs). A search narrows the domain list by host, address, ASN, provider, country, tag, product
+  or CVE id.
+- **Scans tab:** posture scans and scan activity.
+- **Domain page:** a security posture summary block for signed-in users.
+- **Scan profiles:** ports, version intensity, timing, note.
+- **Routes:** Direct, Tor, Mullvad (WireGuard tunnel, entry country/city), custom proxy (SOCKS5, SOCKS4, HTTP);
+  separate route choice for posture scans, inventory jobs and CVE look-ups; DoH server.
+- **Scope:** posture scope (CIDR allow/deny, country allow/deny from the inventory's countries), never-scan
+  exclusions, network tags, internal domains; domain inventory scope (domain/suffix allow and deny) refused at every
+  entry point.
 
-Debian 12/13 or Ubuntu 24.04, a DNS record for your host name pointing at the server, then as root:
+## Users and admin
+- **Roles:** viewer (reads reports), analyst (also runs scans and tuning), admin (also users and settings).
+- **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role.
+- **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
+  (cancel, stop, retry), tuning without restart.
+
+## Screenshots
+Made-up demo data: documentation domains, addresses and AS numbers (example.com, 192.0.2.0/24, 2001:db8::/32,
+AS64496-64511). Reproduce with `python scripts/screenshots.py`.
+
+| | |
+| --- | --- |
+| ![Domain](docs/screenshots/domain.png) Domain page: footprint, changes, countries, providers, records | ![Compare](docs/screenshots/domain-compare.png) Compare two scans of a domain |
+| ![Drilldown](docs/screenshots/drilldown.png) Drilldown: every domain, filters, charts, table | ![Overview, light](docs/screenshots/overview-light.png) Light theme: overview |
+| ![Posture overview](docs/screenshots/posture-overview.png) Security posture, Overview: KPIs, CVEs over time | ![Posture analysis](docs/screenshots/posture-analysis.png) Security posture, Analysis: attack surface, services, findings |
+| ![Posture, one domain](docs/screenshots/posture-domain.png) Analysis narrowed to one domain | ![CVE details](docs/screenshots/posture-cve.png) A host's services and a CVE opened |
+| ![Posture scans](docs/screenshots/posture-scans.png) Scans tab: posture scans and activity | ![Posture, light](docs/screenshots/posture-overview-light.png) Light theme: security posture |
+| ![Profiles](docs/screenshots/profiles.png) Scan profiles: ports, intensity, timing, route | ![Profiles list](docs/screenshots/profiles-list.png) Scan profiles list |
+| ![Routes](docs/screenshots/routes.png) Routes: Direct, Tor, Mullvad, proxy per job type | ![Settings](docs/screenshots/settings.png) Settings: inventory scope, scan limits, internal domains |
+| ![Posture scope](docs/screenshots/settings-posture.png) Settings: posture scope, never scan, network tags | ![Operations](docs/screenshots/operations.png) Admin dashboard: visits, usage, scan jobs, tuning |
+| ![Users](docs/screenshots/users.png) Users: roles, two-factor | ![Account](docs/screenshots/account.png) Own account: password, two-factor |
+| ![Sign in](docs/screenshots/signin.png) Sign in (password, optional authenticator code) | |
+
+## Install
+Two modes, one script: [deploy/install.sh](deploy/install.sh) (options at its top). Security model:
+[SECURITY.md](SECURITY.md).
+
+### Public (VPS)
+Debian 12/13 or Ubuntu 24.04, a DNS record for the host name, as root:
 
 ```bash
 git clone https://github.com/andlin04/domin_ver2.git && cd domin_ver2
@@ -34,41 +91,26 @@ bash deploy/install.sh --domain domin.example.com --email you@example.com --fire
   --admin-ip 203.0.113.10
 ```
 
-This installs the app in /opt/domin, the database in /var/lib/domin, two sandboxed systemd services (`domin` web,
-`domin-worker` scans), nginx with rate limits, a Let's Encrypt certificate with automatic renewal, and daily
-security updates (`AUTO_UPDATES=off` to skip). Python packages are the tested versions in
-[deploy/requirements.txt](deploy/requirements.txt). Security model: [SECURITY.md](SECURITY.md); changes:
-[CHANGES.md](CHANGES.md).
+- Installs the app in /opt/domin, the database in /var/lib/domin, two sandboxed systemd services (`domin` web,
+  `domin-worker` scans), nginx with rate limits, a Let's Encrypt certificate with renewal, daily security updates
+  (`AUTO_UPDATES=off` to skip). Python packages: [deploy/requirements.txt](deploy/requirements.txt).
+- **Existing history:** `--history /root/domin.db` (once).
+- **Behind Cloudflare:** leave out `--email`, add `--cloudflare` (rate limits see the visitor's address), e.g.
+  `--domain example.com --alias www.example.com --cloudflare`. Origin encryption: save a Cloudflare Origin CA
+  certificate as `origin.crt` and its key as `origin.key` (mode 600) in a root-only directory, add
+  `--origin-cert <dir>`; nginx serves 443 and accepts only Cloudflare's client certificate. In Cloudflare turn on
+  Authenticated Origin Pulls first, then SSL mode Full (strict); then close port 80.
+- **Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (database and
+  certificate kept).
+- **Uninstall:** `bash deploy/uninstall.sh` (database and `/etc/domin.env` kept); `--purge` also deletes the data and
+  the `domin` user.
 
-**Existing history:** copy a database to the server and pass it once:
-
-```bash
-scp domin.db root@your-vps:/root/
-bash deploy/install.sh --domain domin.example.com --email you@example.com --history /root/domin.db
-```
-
-**Behind Cloudflare** (proxied DNS, Cloudflare does HTTPS): leave out `--email`, add `--cloudflare` so rate limits
-see the visitor's address, e.g. `--domain example.com --alias www.example.com --cloudflare`.
-To encrypt Cloudflare → server too, create an Origin CA certificate in Cloudflare, save it as `origin.crt` and its
-key as `origin.key` (mode 600) in a root-only directory and add `--origin-cert <dir>`: nginx then serves HTTPS on 443
-and only accepts Cloudflare's client certificate. In Cloudflare, turn on Authenticated Origin Pulls first, then set
-SSL mode to Full (strict); once traffic arrives on 443, close port 80 in the firewall.
-
-**Update:** `git pull && bash deploy/install.sh --domain domin.example.com --email you@example.com` (keeps the
-database and certificate). Options: see the top of [deploy/install.sh](deploy/install.sh).
-
-**Uninstall:** `bash deploy/uninstall.sh` removes the services, code and nginx config but keeps the database and
-`/etc/domin.env`; `bash deploy/uninstall.sh --purge` also deletes the data and the `domin` user. Reinstall any time
-with `install.sh`.
-
-## Install on-prem (internal network)
-
-The vulnerability and posture platform for your own networks: no public name, no Let's Encrypt. A vanilla
-Debian 13 or Ubuntu 24.04 host (VM or bare metal, 2 CPU / 2 GB / 16 GB), as root; the installer installs every
-dependency (nginx, Python venv with pinned packages, nmap, tor, amass, ...).
+### On-prem (`--internal`)
+No public name, no Let's Encrypt. A vanilla Debian 13 or Ubuntu 24.04 host (2 CPU / 2 GB / 16 GB), as root; the
+installer installs every dependency (nginx, Python venv with pinned packages, nmap, tor, amass).
 
 ```bash
-bash deploy/package.sh                        # on a build machine: dist/domin-VERSION-COMMIT.tar.gz + .sha256
+bash deploy/package.sh                        # build machine: dist/domin-VERSION-COMMIT.tar.gz + .sha256
 # on the target (copy both files there first):
 sha256sum -c domin-*.tar.gz.sha256 && tar -xzf domin-*.tar.gz && cd domin-*/
 bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0.0.0/8 \
@@ -77,58 +119,40 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
 
 - **Web UI:** `https://<name>/` on 443 (80 redirects), only from `--admin-sources` (default: the private ranges;
   `any` = no network limit). `--admin-user` prints a one-time link to set the first admin's password (24 h).
-- **TLS:** self-signed (`/etc/domin/tls.crt`, 825 days) until you replace it: sign `/etc/domin/tls.csr` with your CA,
+- **TLS:** self-signed (`/etc/domin/tls.crt`, 825 days) until replaced: sign `/etc/domin/tls.csr` with your CA,
   write the result to `/etc/domin/tls.crt`, `systemctl reload nginx`. The key never leaves the host.
-- **What scans may reach:** public addresses, plus `--scan-nets` (private networks; this host's own addresses stay
-  refused) and the `--internal-dns` servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
-- **Behind an HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first
-  (with sudo: `sudo -E`); apt, pip and the downloads use it and it is kept for the app.
-- **Tor:** installed but off; an admin turns it on or off under Settings > Routes (the choice survives updates).
-- **Update:** unpack the new package, `bash deploy/install.sh` (options are kept in `/etc/domin.env`; database,
-  users and certificate stay). **Remove:** `bash deploy/uninstall.sh` (data kept) or `--purge`.
+- **Scan reach:** public addresses, `--scan-nets` (this host's own addresses refused) and the `--internal-dns`
+  servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
+- **HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first (sudo:
+  `sudo -E`); apt, pip and the downloads use it, and it is kept for the app.
+- **Tor:** installed but off; an admin switches it under Settings > Routes (kept across updates).
+- **Update:** unpack the new package, `bash deploy/install.sh` (options kept in `/etc/domin.env`; database, users and
+  certificate kept). **Remove:** `bash deploy/uninstall.sh` (data kept) or `--purge`.
 
 ## Signed-in area
+- Everything under `/admin`, HTTPS only.
+- `DOMIN_ADMIN_IPS` (/etc/domin.env, IPs or CIDRs; set by `install.sh --admin-ip`; `systemctl restart domin` after
+  editing): optional network allowlist; when set, every `/admin` path answers 404 to anyone else; when empty, the
+  sign-in alone governs access.
+- Client address: nginx's `$remote_addr` as X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from
+  Cloudflare's ranges); other forwarding headers ignored.
+- **First admin** (prints a one-time link to set the password):
 
-Everything under `/admin`, HTTPS only. `DOMIN_ADMIN_IPS` (/etc/domin.env, comma-separated IPs or CIDRs;
-`install.sh --admin-ip` sets it; `systemctl restart domin` after editing) is an **optional network allowlist** in
-front of the whole area: when it is set, every `/admin` path (including the sign-in page) answers 404 for anyone
-else; when it is **empty, the sign-in alone governs access**. The client address is nginx's `$remote_addr` passed as
-X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from Cloudflare's ranges); other forwarding headers
-from visitors are ignored.
+  ```bash
+  cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin user-add you --role admin
+  ```
 
-**Users and roles.** viewer reads the signed-in reports; analyst also runs scans and tuning; admin also manages
-users and settings. Create the first admin on the server (it prints a one-time link to set the password):
-
-```bash
-cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin user-add you --role admin
-```
-
-Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <role>`, `user-2fa-reset <name>`;
-`admin-password` sets the `admin` user's password. An existing single `admin_password` becomes an `admin` user on
-the first start.
-
-- **Two-factor:** each user can enrol a TOTP authenticator with one-time recovery codes on their Account page; an
-  admin can require it per role on the Settings page, and reset a user's two-factor from the Users page.
-- **Settings / scope:** two separate guardrails, one per engine, each with its own live count:
-  - *Domain inventory scope* — a domain/suffix allow and deny list that governs the domain scanner (crt.sh / DNS /
-    RDAP). A scan or refresh of a domain outside the allow list, or on the deny list, is refused at every entry point
-    (web `/api/scan`, the `scan` CLI, scheduled refreshes and auto-retries). This engine is never limited by IP
-    address or geolocation.
-  - *Security posture scope* — IP range (CIDR) allow/deny lists and a per-country allow/deny pick-list built from the
-    countries actually present in the inventory (DB-IP values). Validated and stored now for the vulnerability /
-    posture engine of a later phase; it never affects the domain scanner.
-- **Security tab:** the signed-in landing page for the planned fingerprinting and CVE reports, with an
-  authorised-use notice. No scanning yet.
-
-- **Usage:** visitors, page views, visit length and pages in order, top pages, domains, CSV downloads, tools,
-  referrers and countries, scans started and refused.
-- **Privacy:** no IP addresses are stored. A visitor is a hash of address + browser with a salt that is replaced
-  every day; scan rate limits use a salted hash too. Bots are counted apart. Statistics are kept 180 days.
-- **Countries:** from [DB-IP](https://db-ip.com) IP to Country Lite (CC BY 4.0), downloaded by the installer;
-  re-run the installer monthly to refresh it.
-- **Jobs:** cancel queued scans, stop a running one, retry failed ones.
-- **Tuning** (applies at once, no restart): pause the worker, once-per-day limit, scans per hour, queue length,
-  lookups per minute, max host names per scan, scheduled re-scans, statistics retention.
+  Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <role>`, `user-2fa-reset <name>`,
+  `admin-password` (the `admin` user's password). An existing single `admin_password` becomes an `admin` user on
+  first start.
+- **Usage statistics:** visitors, page views, visit length and page order, top pages, domains, CSV downloads, tools,
+  referrers, countries, scans started and refused; bots counted apart; kept 180 days.
+- **Privacy:** no IP addresses stored; a visitor is a hash of address + browser with a daily salt; scan rate limits
+  use a salted hash.
+- **Countries:** [DB-IP](https://db-ip.com) IP to Country Lite (CC BY 4.0), downloaded by the installer; re-run the
+  installer monthly to refresh.
+- **Tuning** (no restart): pause the worker, once-per-day limit, scans per hour, queue length, lookups per minute, max
+  host names per scan, scheduled re-scans, statistics retention.
 
 ## Run locally
 
@@ -140,10 +164,15 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest
 ```
 
-Settings (environment): `DOMIN_DB`, `DOMIN_REFRESH_DAYS` (re-scan domains older than N days, 0 = off),
-`DOMIN_SCAN_WORKERS`, `DOMIN_MAX_HOSTS`, `DOMIN_SCANS_PER_HOUR`, `DOMIN_SCANS_PER_DAY` (200),
-`DOMIN_SCANS_PER_DAY_TOTAL` (500 visitor scans in 24 h from all clients together),
-`DOMIN_USER_WORKERS` (3 parallel visitor scans), `DOMIN_REFRESH_WORKERS` (2 parallel refreshes, a separate queue),
-`DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin), `DOMIN_INTERNAL_IPS`
-(private API clients, e.g. over a VPN: `POST /api/scan` without the per-client, once-a-day and queue limits; empty
-by default).
+Environment: `DOMIN_DB`, `DOMIN_REFRESH_DAYS` (re-scan domains older than N days, 0 = off), `DOMIN_SCAN_WORKERS`,
+`DOMIN_MAX_HOSTS`, `DOMIN_SCANS_PER_HOUR`, `DOMIN_SCANS_PER_DAY` (200), `DOMIN_SCANS_PER_DAY_TOTAL` (500 visitor scans
+in 24 h, all clients), `DOMIN_USER_WORKERS` (3 parallel visitor scans), `DOMIN_REFRESH_WORKERS` (2 parallel
+refreshes, separate queue), `DOMIN_SCAN_TIMEOUT_HOURS` (3), `DOMIN_AMASS`, `DOMIN_ADMIN_IPS` (who gets /admin),
+`DOMIN_INTERNAL_IPS` (private API clients, e.g. over a VPN: `POST /api/scan` without the per-client, once-a-day and
+queue limits; empty by default).
+
+## Legal disclaimer
+- This tool is intended for internal use.
+- Scan only systems and networks you own or are explicitly authorised in writing to test.
+- Unauthorised scanning may be illegal.
+- Provided as is, without warranty of any kind. You are responsible for compliance with applicable law and policy.

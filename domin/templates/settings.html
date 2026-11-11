@@ -47,7 +47,7 @@
         <textarea name="internal_zones" rows="4" spellcheck="false" autocapitalize="off">{{ internal_zones|join('\n') }}</textarea></label>
       <label class="field">Internal DNS servers <small>IP addresses, one per line</small>
         <textarea name="internal_dns" rows="4" spellcheck="false" autocapitalize="off">{{ internal_dns|join('\n') }}</textarea></label>
-      <label class="field">Internal networks <small>CIDR, one per line, e.g. 172.20.0.0/24; at most 8192 addresses</small>
+      <label class="field">Internal networks <small>CIDR, one per line, e.g. 10.0.0.0/24; at most 8192 addresses</small>
         <textarea name="internal_nets" rows="4" spellcheck="false" autocapitalize="off">{{ internal_nets|join('\n') }}</textarea></label>
     </div>
     <p class="muted small-print">Host names are found by DNS queries to the servers above: a zone transfer when the server
@@ -98,7 +98,7 @@
       <thead><tr><th>Address or network (CIDR)</th><th>Tag</th><th>Note</th></tr></thead>
       <tbody>{% for r in scope.net_tags + [{'net': '', 'tag': '', 'note': ''}] * 3 %}<tr>
         <td><input name="nt_net_{{ loop.index0 }}" value="{{ r.net }}" spellcheck="false" autocapitalize="off"
-          placeholder="172.20.0.0/24" aria-label="Network, tag rule {{ loop.index }}"></td>
+          placeholder="10.0.0.0/24" aria-label="Network, tag rule {{ loop.index }}"></td>
         <td><input name="nt_tag_{{ loop.index0 }}" value="{{ r.tag }}" spellcheck="false" autocapitalize="off"
           placeholder="office-lan" aria-label="Tag, tag rule {{ loop.index }}"></td>
         <td><input name="nt_note_{{ loop.index0 }}" value="{{ r.note }}" aria-label="Note, tag rule {{ loop.index }}"></td>
