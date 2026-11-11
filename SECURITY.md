@@ -13,7 +13,11 @@ a public issue for it.
 | amass | child of the worker | Gets only `PATH` and a temporary `HOME`, none of the app's settings |
 
 - **No root at run time.** install.sh runs as root once; both services run as the unprivileged `domin` user. The
-  code in `/opt/domin` belongs to root and is read-only for the services.
+  code in `/opt/domin` belongs to root and is read-only for the services. install.sh and update.sh set that
+  (`chown -R root:root`, `chmod -R go-w`) after every copy; update.sh refuses archives with links, devices or paths
+  outside `domin/` and `deploy/`, checks a `.sha256` next to a file (or `--sha256 HEX`), reads only proxy
+  `KEY=VALUE` lines from `/etc/domin.env` (never runs it as shell code) and removes bytecode caches; CLI commands run
+  as `domin` with `PYTHONDONTWRITEBYTECODE=1`.
 - **Sandbox** (both services): `NoNewPrivileges`, no capabilities, `ProtectSystem=strict` (writes only to
   `/var/lib/domin`), private `/tmp` and `/dev`, no home directories, kernel tunables/modules/logs protected, no
   namespaces, a `@system-service` system call filter without `@privileged` and `@resources`, only IP, Unix and netlink
@@ -22,14 +26,27 @@ a public issue for it.
   every non-public address for both services and all their child processes (`IPAddressDeny`), plus this server's own
   addresses and the `--deny` list. Outbound HTTP requests also refuse non-HTTPS URLs and non-public targets on every
   redirect, and cap the response size.
+- **The app checks scan targets itself** (the kernel filter has exceptions: the web unit allows localhost for nginx,
+  the Mullvad tunnel adds 127.0.0.1 and its relay network, and an empty posture allow-list allows everything). Before
+  a fingerprint (in the web process) or a posture scan is queued, and again when the worker starts it, every address
+  is checked, for a host name every address it resolves to: a public install accepts global addresses only
+  (loopback, RFC 1918, link-local, CGNAT 100.64/10, unique-local, documentation and other special-use ranges are
+  refused); an on-prem install (`--internal`) also its `--scan-nets` and Settings · Internal networks, never
+  loopback, unspecified or multicast.
 - **Settings:** `/etc/domin.env` (root, group `domin`, mode 640). The admin password is a scrypt hash in the database.
 
 ## Web
 - **Admin page:** served only to `DOMIN_ADMIN_IPS` (empty by default: no admin page); everyone else gets the same 404
   as an unknown path. The client address comes from nginx (`X-Real-IP`, trusted from localhost only; behind Cloudflare
   `CF-Connecting-IP` from Cloudflare's published ranges only). Password (scrypt, N=2^15, constant-time comparison),
-  5 failed sign-ins in 15 minutes block the client (30 in total block everyone), session cookie `__Host-`, Secure,
-  HttpOnly, SameSite=Strict, CSRF token on every form, `Cache-Control: no-store`.
+  5 failed sign-ins in 15 minutes block the client (30 in total block everyone; a wrong current password or code on
+  My account counts too), session and second-factor cookies `__Host-` (Path=/), Secure, HttpOnly, SameSite=Strict,
+  CSRF token on every form, `Cache-Control: no-store`. Changing the password needs the current one; turning
+  two-factor off needs the current password or a code. A new set-password link is shown once to the admin who made
+  it, kept server-side for that session (never in a redirect URL).
+- **`DOMIN_ALLOW_NO_LOGIN`** (dev/lab only): refused at start-up (sign-in stays on, an error is logged) unless
+  `DOMIN_ADMIN_IPS` is set, and on a public install it may list private networks only; while accepted a warning is
+  logged at every start and the stand-in session counts only for requests from `DOMIN_ADMIN_IPS`.
 - **Scan requests:** JSON only (a cross-site form can't send one), per-client limits per hour and day, a daily limit
   for all visitors together, one scan per domain per day, a bounded queue.
 - **Load:** nginx limits requests and connections per client and request sizes; filtered searches and CSV downloads
@@ -44,7 +61,8 @@ a public issue for it.
 
 ## Supply chain
 - Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time"), the full
-  dependency set. Check them for known vulnerabilities (PyPI advisory database / OSV) before each release:
+  dependency set, each with PyPI's SHA-256 hashes; install.sh and update.sh install with `--require-hashes`, so a
+  changed or substituted file is refused (`scripts/hash_requirements.py` writes the hashes after a version raise). Check them for known vulnerabilities (PyPI advisory database / OSV) before each release:
   `pip-audit -r deploy/requirements.txt --disable-pip --no-deps`; 2026-11-11 (with segno 1.6.6): none found.
 - amass: a pinned release, checked against its SHA-256 before it is installed.
 - System packages come from the distribution; install.sh turns on daily security updates (unattended-upgrades, no

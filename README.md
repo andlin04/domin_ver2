@@ -148,7 +148,7 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   pre-mapped, so you only press Import. Only mapped fields are imported; a host without a domain gets its domain
   from the inventory or the host name. The worker imports it in the background; an upload left unmapped is deleted
   after an hour. Or, as root, `cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin
-  -- /opt/domin/venv/bin/python -m domin import-csv <file> [--map field=column ...] [--delimiter ,|;|tab]` (without
+  -- env PYTHONDONTWRITEBYTECODE=1 /opt/domin/venv/bin/python -m domin import-csv <file> [--map field=column ...] [--delimiter ,|;|tab]` (without
   --map the guessed mapping; --map overrides it per field by header name or 1-based number). One imported scan per
   domain, timed by the file's newest "last seen"; existing scans are kept and importing the same file again adds
   nothing.
@@ -170,7 +170,7 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
 - **First admin** (prints a one-time link to set the password):
 
   ```bash
-  cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin user-add you --role admin
+  cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 /opt/domin/venv/bin/python -m domin user-add you --role admin
   ```
 
   Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <admin|power>`,

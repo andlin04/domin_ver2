@@ -1,6 +1,7 @@
 """Settings from the environment (DOMIN_*); defaults suit a local run."""
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,30 @@ class Settings:
     cve_ttl_days: int = 7         # own mode: re-query a target whose cached result is older than this
     nvd_api_key: str = ""         # optional, raises the NVD rate limit
     allow_no_login: bool = False  # dev/lab only: Settings may turn sign-in off (every visitor acts as that admin)
+    install_mode: str = "public"  # install.sh: "internal" (on-prem, --internal) or "public"
+    scan_nets: tuple[str, ...] = ()   # on-prem: private networks the scans may reach (install --scan-nets)
+
+    @property
+    def internal_mode(self) -> bool:
+        return self.install_mode == "internal"
+
+    def no_login_refusal(self) -> str:
+        """Why DOMIN_ALLOW_NO_LOGIN is refused here ('' = accepted). It needs the DOMIN_ADMIN_IPS allowlist (the
+        stand-in session then counts only for those addresses); a public install accepts private networks only
+        there, so the stand-in is never reachable from the internet."""
+        if not self.allow_no_login:
+            return ""
+        if not self.admin_ips:
+            return "DOMIN_ADMIN_IPS is empty"
+        if not self.internal_mode:
+            for n in self.admin_ips:
+                try:
+                    private = ipaddress.ip_network(n, strict=False).is_private
+                except ValueError:
+                    private = False
+                if not private:
+                    return f"public install: DOMIN_ADMIN_IPS holds a non-private network ({n})"
+        return ""
 
     @property
     def cve_db_file(self) -> Path:
@@ -71,4 +96,6 @@ class Settings:
             cve_ttl_days=int(env("DOMIN_CVE_TTL_DAYS", "7")),
             nvd_api_key=env("DOMIN_NVD_API_KEY", "").strip(),
             allow_no_login=env("DOMIN_ALLOW_NO_LOGIN", "").strip().lower() in ("1", "true", "yes", "on"),
+            install_mode="internal" if env("DOMIN_INSTALL_MODE", "").strip().lower() == "internal" else "public",
+            scan_nets=tuple(x.strip() for x in env("DOMIN_SCAN_NETS", "").split(",") if x.strip()),
         )

@@ -91,7 +91,10 @@ def test_admin_adds_a_user_who_sets_a_password_from_the_link(settings):
         token = csrf_of(h, BASE + "/users")
         r = h.post(BASE + "/users/add", data={"csrf": token, "name": "newbie", "role": "analyst"},
                    follow_redirects=False)
-        link = re.search(r"set-password\?token=([^&\"]+)", r.headers["location"]).group(1)
+        assert "token" not in r.headers["location"]   # never in a URL: shown once on the next page from the session
+        page = h.get(r.headers["location"]).text
+        link = re.search(r"set-password\?token=([^&\"<]+)", page).group(1)
+        assert "set-password?token=" not in h.get(BASE + "/users").text   # once only
     with client(settings) as h2:   # a fresh client (no session) opens the one-time link
         assert "newbie" in h2.get(BASE + "/set-password", params={"token": link}).text
         assert h2.post(BASE + "/set-password",

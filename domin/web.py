@@ -15,6 +15,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -43,6 +44,7 @@ from . import (
     fingerprint,
     jobs,
     mullvad,
+    netscope,
     posture,
     proxy,
     reports,
@@ -90,8 +92,8 @@ def session_for(c, request: Request, settings: Settings) -> dict | None:
     """The request's session; with sign-in turned off (DOMIN_ALLOW_NO_LOGIN + Settings) the stand-in one, which counts
     in the admin area always and in the inventory and posture areas unless Settings requires sign-in there."""
     s = admin.session(c, request.cookies.get(COOKIE))
-    if s or not settings.allow_no_login:
-        return s
+    if s or not settings.allow_no_login or not getattr(request.state, "no_login_peer", False):
+        return s   # the stand-in only for DOMIN_ADMIN_IPS (set per request by the middleware)
     where = access.area(request.url.path)
     if where != "admin" and users.signin_required(c)[where]:
         return None
@@ -108,6 +110,13 @@ def safe_next(target: str | None) -> str:
 
 def create_app(settings: Settings | None = None, http: httpx.Client | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if settings.allow_no_login:   # dev/lab only: refused without a private admin allowlist; loud when active
+        if why := settings.no_login_refusal():
+            log.error("DOMIN_ALLOW_NO_LOGIN refused (%s): sign-in stays on", why)
+            settings = replace(settings, allow_no_login=False)
+        else:
+            log.warning("DOMIN_ALLOW_NO_LOGIN is active: sign-in can be turned off for DOMIN_ADMIN_IPS (%d "
+                        "network(s)); never on a production install", len(settings.admin_ips))
     db.init(settings.db_path)
     app = FastAPI(title="domin", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -256,7 +265,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             u = users.get(c, s["user_id"]) if s and s["user_id"] else None
             u = u if u and not u["disabled"] else None
             if u is None:
-                stand_in = settings.allow_no_login and admin.no_login_session(c)
+                stand_in = (settings.allow_no_login and request.state.no_login_peer
+                            and admin.no_login_session(c))
                 if not required or (where == "posture" and not stand_in):
                     return None   # a public page, or the handler's own answer (the sign-in page)
                 if machine:
@@ -285,6 +295,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     @app.middleware("http")
     async def headers(request: Request, call_next):
         path = request.url.path
+        request.state.no_login_peer = settings.allow_no_login and peer_in(request, admin_nets)
         if (path == ADMIN or path.startswith(ADMIN + "/")) and not net_ok(request):
             resp = await run_in_threadpool(not_found, request)   # the same answer as a path that doesn't exist
         else:
@@ -860,7 +871,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 admin.kv_set(c, f"login2fa:{admin._token_hash(token)}",
                              json.dumps({"user_id": u["id"], "expires": expires, "next": nxt}))
                 resp = priv(page(request, "totp.html", base=base, error=""))
-                resp.set_cookie(PENDING, token, max_age=PENDING_MIN * 60, path=base, secure=True, httponly=True,
+                # a __Host- cookie needs Path=/ (browsers drop it otherwise); only the /login/totp handler reads it
+                resp.set_cookie(PENDING, token, max_age=PENDING_MIN * 60, path="/", secure=True, httponly=True,
                                 samesite="strict")
                 return resp
             return signed_in(c, u, nxt)
@@ -890,7 +902,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
             conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
             resp = signed_in(c, u, safe_next(pend.get("next")))
-            resp.delete_cookie(PENDING, path=base, secure=True, httponly=True, samesite="strict")
+            resp.delete_cookie(PENDING, path="/", secure=True, httponly=True, samesite="strict")
             return resp
 
     @app.post(base + "/logout", include_in_schema=False)
@@ -950,7 +962,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
+            who = admin.client_key(c, client_ip(request))   # the sign-in failure counter and lockout apply here too
+            if admin.login_blocked(c, who):
+                return shell(request, "account.html", u, s, 429, enrol=None, otpauth="", must_setup=False,
+                             error="Too many failed tries; wait 15 minutes.")
             if not users.verify_password(c, u["name"], data.get("current", "")):
+                admin.login_failed(c, who)
                 return shell(request, "account.html", u, s, 401, enrol=None, otpauth="", must_setup=False,
                              error="The current password is wrong.")
             new = data.get("new", "")
@@ -997,6 +1014,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if users.totp_required(c, u):
                 return shell(request, "account.html", u, s, 403, enrol=None, otpauth="", must_setup=False,
                              error="Two-factor is required for your account and cannot be turned off.")
+            who = admin.client_key(c, client_ip(request))   # re-authentication: current password or a code
+            if admin.login_blocked(c, who):
+                return shell(request, "account.html", u, s, 429, enrol=None, otpauth="", must_setup=False,
+                             error="Too many failed tries; wait 15 minutes.")
+            proof = data.get("proof", "")
+            if not (users.verify_password(c, u["name"], proof) or users.verify_second_factor(c, u["id"], proof)):
+                admin.login_failed(c, who)
+                return shell(request, "account.html", u, s, 401, enrol=None, otpauth="", must_setup=False,
+                             error="Enter your current password or a code from your authenticator to turn it off.")
             users.disable_totp(c, u["id"])
         return back(base + "/account", "2fa-off")
 
@@ -1010,13 +1036,34 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             raise HTTPException(404, "Not Found")
         return s, u, None
 
+    # A new set-password link is shown once to the admin who made it: kept server-side (kv) under this session, never
+    # in a redirect URL (browser history, logs, Referer).
+    LINK_MIN = 10
+
+    def link_key(s: dict) -> str:
+        return "setpw-link:" + admin._token_hash(s["csrf"])
+
+    def link_keep(c, s: dict, token: str) -> None:
+        c.execute("DELETE FROM kv WHERE key LIKE 'setpw-link:%' AND json_extract(value, '$.expires') < ?",
+                  (db.now(),))
+        expires = (datetime.now() + timedelta(minutes=LINK_MIN)).isoformat(timespec="seconds")
+        admin.kv_set(c, link_key(s), json.dumps({"link": f"{base}/set-password?token={token}", "expires": expires}))
+
+    def link_take(c, s: dict) -> str:
+        raw = admin.kv_get(c, link_key(s))
+        if not raw:
+            return ""
+        conn_del(c, link_key(s))   # once
+        data = json.loads(raw)
+        return data["link"] if data["expires"] >= db.now() else ""
+
     def users_view(request, c, u, s, status: int = 200, error: str = "", link: str = ""):
         rows = users.listing(c)
         return shell(request, "users.html", u, s, status, users=rows, roles=users.ROLES,
                      must_2fa={r["id"]: users.totp_required(c, r) for r in rows},
                      last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows},
                      grants=access.all_grants(c), levels=access.LEVEL_LABELS, audit=access.audit_recent(c),
-                     link=link or request.query_params.get("link", ""), error=error)
+                     link=link, error=error)
 
     @app.get(base + "/users", response_class=HTMLResponse, include_in_schema=False)
     def users_page(request: Request):
@@ -1024,10 +1071,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            return users_view(request, c, u, s)
+            return users_view(request, c, u, s, link=link_take(c, s))
 
     def user_edit_view(request, c, u, s, target: dict, status: int = 200, error: str = "",
-                       rows: list[dict] | None = None):
+                       rows: list[dict] | None = None, link: str = ""):
         """One user's role and per-domain grants; rows: a refused form's grant rows, else the saved grants."""
         rows = rows if rows is not None else access.grants(c, target["id"])
         domains = [r["name"] for r in c.execute("SELECT name FROM domains ORDER BY name")]
@@ -1036,7 +1083,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
                      role_2fa=users.required_for(c, target["role"]), error=error,
                      features=access.FEATURES, admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
-                     right_labels=access.RIGHT_LABELS)
+                     right_labels=access.RIGHT_LABELS, link=link)
 
     @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
     def user_edit_page(request: Request, user_id: PathId):
@@ -1047,7 +1094,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             target = users.get(c, user_id)
             if not target:
                 raise HTTPException(404, "No such user")
-            return user_edit_view(request, c, u, s, target)
+            return user_edit_view(request, c, u, s, target, link=link_take(c, s))
 
     @app.post(base + "/users/add", include_in_schema=False)
     async def users_add(request: Request):
@@ -1061,10 +1108,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             except ValueError as exc:
                 return users_view(request, c, u, s, 422, str(exc))
             access.audit(c, u["name"], "user-add", data.get("name", "").strip(), f"role {data.get('role')}")
-            token = users.new_setpw_token(c, uid)
+            link_keep(c, s, users.new_setpw_token(c, uid))
         if data.get("role") == "power":   # next: pick its domains
-            return back(f"{base}/users/{uid}?link={base}/set-password?token={token}", "user-added")
-        return back(f"{base}/users?link={base}/set-password?token={token}", "user-added")
+            return back(f"{base}/users/{uid}", "user-added")
+        return back(f"{base}/users", "user-added")
 
     @app.post(base + "/users/{user_id}/{action}", include_in_schema=False)
     async def users_action(request: Request, user_id: PathId, action: str):
@@ -1126,9 +1173,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                     access.audit(c, u["name"], "require-2fa", target["name"], "on" if want else "off")
                 return back(after, "user-saved")
             if action == "reset-password":
-                token = users.new_setpw_token(c, user_id)
+                link_keep(c, s, users.new_setpw_token(c, user_id))
                 access.audit(c, u["name"], "reset-password", target["name"])
-                return back(f"{after}?link={base}/set-password?token={token}", "user-saved")
+                return back(after, "user-saved")
             if action == "delete":
                 if users.is_last_admin(c, user_id):
                     raise HTTPException(409, "This is the last admin; cannot delete it")
@@ -1548,7 +1595,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 picked = {h.strip().lower() for h in (data.get("hosts") or "").split(",") if h.strip()}
                 if not picked:
                     return refuse(422, "Tick at least one host name to scan.")
-            found, skipped = posture.targets(c, dom, host=host, ip=ip, names=picked)
+            found, skipped = posture.targets(c, dom, host=host, ip=ip, names=picked,
+                                             ok=netscope.checker(c, settings))
             if not found:
                 what = host or ip or (f"the {len(picked)} ticked host name(s)" if picked else dom)
                 why = (f" ({skipped} address(es) outside the posture scope or on its Never scan list; see Settings)"
@@ -2101,6 +2149,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 if not ips:
                     return lookup_view(request, u, s, security_ctx(
                         422, form=data, error=f"Could not resolve {tgt}."))
+                if bad := netscope.refused(ips, netscope.checker(c, settings)):   # every address the name has
+                    return lookup_view(request, u, s, security_ctx(
+                        403, form=data, error=f"{name} ({', '.join(bad)}) is not a scannable address on this install "
+                                              "(loopback, private, link-local and other non-public ranges)."))
                 if not all(users.posture_ip_in_scope(c, ip) for ip in ips):
                     return lookup_view(request, u, s, security_ctx(
                         403, form=data,

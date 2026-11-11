@@ -458,7 +458,8 @@ def test_no_admin_page_without_admin_ips(monkeypatch):
 def test_install_pins_dependencies_and_denies_own_addresses():
     root = Path(__file__).parent.parent
     install = (root / "deploy" / "install.sh").read_text()
-    pins = [x for x in (root / "deploy" / "requirements.txt").read_text().splitlines() if x and not x.startswith("#")]
+    lines = (root / "deploy" / "requirements.txt").read_text().splitlines()
+    pins = [x for x in lines if x and not x.startswith(("#", " "))]   # indented lines: the pins' --hash entries
     assert pins and all("==" in x for x in pins)
     assert "deploy/requirements.txt" in install and "--upgrade pip" not in install
     assert "${DENY_MORE:+IPAddressDeny=$DENY_MORE}" in install   # never an empty IPAddressDeny= (it clears the list)

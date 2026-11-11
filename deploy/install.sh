@@ -145,11 +145,12 @@ id -u domin >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/
 [ -d "$APP" ] || install -d -m 755 "$APP"
 rsync -a --delete --exclude .git/ --exclude tests/ --exclude '*.db' "$SRC/" "$APP/app/"
 chown -R root:root "$APP/app"
+chmod -R go-w "$APP/app"
 chmod 755 "$APP/app"
 
 [ -x "$APP/venv/bin/python" ] || python3 -m venv "$APP/venv"
 # The tested versions (deploy/requirements.txt), not whatever is newest on PyPI at install time.
-"$APP/venv/bin/pip" install -q --no-input -r "$APP/app/deploy/requirements.txt"
+"$APP/venv/bin/pip" install -q --no-input --require-hashes -r "$APP/app/deploy/requirements.txt"
 rm -f "$APP/requirements.txt"   # older installs wrote the unpinned list here
 
 if [ ! -f /etc/domin.env ]; then
@@ -202,7 +203,7 @@ fi
 GEO=$(mktemp --suffix=.csv.gz)
 if curl -fsS -o "$GEO" "https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).csv.gz"; then
   chmod 644 "$GEO"
-  ( set -a; . /etc/domin.env; cd "$APP/app"; runuser -u domin -- "$APP/venv/bin/python" -m domin geoip "$GEO" )
+  ( set -a; . /etc/domin.env; cd "$APP/app"; runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 "$APP/venv/bin/python" -m domin geoip "$GEO" )
 else
   echo "geoip: download failed, admin statistics show no countries"
 fi
@@ -536,7 +537,7 @@ if [ "$FIREWALL" = 1 ]; then
 fi
 
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
-CLI="cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- $APP/venv/bin/python -m domin"
+CLI="cd $APP/app && set -a && . /etc/domin.env && runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 $APP/venv/bin/python -m domin"
 if [ "$INTERNAL" = 1 ]; then
   for _ in $(seq 10); do   # nginx reloads its workers in the background
     CODE=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/" || true)

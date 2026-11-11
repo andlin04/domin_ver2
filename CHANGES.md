@@ -2,6 +2,35 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: security audit fixes (sign-in, scan targets, deploy scripts)
+
+- Two-factor sign-in: the `__Host-domin_2fa` cookie between the password and the code was set with Path=/admin;
+  browsers drop a `__Host-` cookie whose Path is not `/`, so the code step always started over. Now Path=/ (set and
+  delete); the session cookie already was.
+- Scan targets: a fingerprint (run in the web process) and posture scans (queued, and again in the worker) refuse
+  non-global addresses on a public install: loopback, RFC 1918, link-local, CGNAT, unique-local and other
+  special-use ranges, for a host name every address it resolves to. On-prem (`DOMIN_INSTALL_MODE=internal`) keeps
+  its `DOMIN_SCAN_NETS` and Settings · Internal networks; loopback never. New module `domin/netscope.py`.
+- My account: turning two-factor off needs the current password or a code; a wrong current password (password
+  change) or proof counts as a failed sign-in and the 15-minute lockout applies.
+- Users: a new set-password link (invite, reset) is no longer put in the redirect URL (`?link=`); it is kept
+  server-side for the admin's session and shown once on the next page (expires after 10 minutes unseen). The link
+  the user receives is unchanged.
+- `DOMIN_ALLOW_NO_LOGIN`: refused at start-up (logged; sign-in stays on) when `DOMIN_ADMIN_IPS` is empty, or on a
+  public install when it lists a non-private network; a warning at every start while it is active; the stand-in
+  session counts only for requests from `DOMIN_ADMIN_IPS`. A lab with the flag needs `DOMIN_ADMIN_IPS` set to its
+  admins' LAN range in /etc/domin.env.
+- update.sh: refuses archives with links, devices or entries outside `domin/` and `deploy/` (checked with
+  `tar -tv` before extracting); checks `FILE.sha256` next to a file argument or `--sha256 HEX`; parses the proxy
+  lines of /etc/domin.env as KEY=VALUE instead of `eval`; removes bytecode caches; `chown -R root:root` and
+  `chmod -R go-w` on the app after every run (install.sh too).
+- deploy/requirements.txt carries PyPI's SHA-256 hashes for the same pinned versions; install.sh and update.sh
+  install with `--require-hashes`. `scripts/hash_requirements.py` regenerates them (`--check` compares).
+- CLI commands run as `domin` with `PYTHONDONTWRITEBYTECODE=1` (install.sh, mullvad-tunnel.sh, README).
+- Rollback: `git revert` this commit and deploy with update.sh (the reverted update.sh runs from the next update
+  on). The kv keys `setpw-link:*` can be removed with `DELETE FROM kv WHERE key LIKE 'setpw-link:%'`. A lab that
+  got `DOMIN_ADMIN_IPS` for this keeps it (harmless) or drops the line and restarts domin.
+
 ## 2026-11-11: CSV import of any CSV, with a column mapping
 
 - Settings > CSV import accepts any CSV with the inventory's data, not only domin's export. The upload (streamed,

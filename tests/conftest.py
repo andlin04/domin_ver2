@@ -19,3 +19,15 @@ def no_proxy_connect(monkeypatch):
         raise ConnectionRefusedError(111, "Connection refused (tests)")
     monkeypatch.setattr(proxy.socket, "create_connection", refused)
     proxy._probes.clear()   # cached probe results must not leak from one test into the next
+
+
+# Test data uses private and documentation addresses only (never someone's real host). The posture and fingerprint
+# engines refuse every non-global address on a public install (domin.netscope), so the suite runs as an on-prem
+# install whose scan networks are those ranges; tests of the address check itself set the mode they need.
+TEST_SCAN_NETS = "10.0.0.0/8,172.16.0.0/12,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
+
+
+@pytest.fixture(autouse=True)
+def on_prem_test_networks(monkeypatch):
+    monkeypatch.setenv("DOMIN_INSTALL_MODE", "internal")
+    monkeypatch.setenv("DOMIN_SCAN_NETS", TEST_SCAN_NETS)

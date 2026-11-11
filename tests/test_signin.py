@@ -139,7 +139,7 @@ def test_admin_saves_the_setting_and_it_is_audited(settings):
 # --- the lab stand-in (sign-in off) ------------------------------------------------------------------------------
 
 def test_lab_stand_in_counts_only_where_sign_in_is_not_required(settings):
-    lab = replace(settings, allow_no_login=True)
+    lab = replace(settings, allow_no_login=True, admin_ips=("203.0.113.0/24",))   # the stand-in: admin networks only
     with db.connect(settings.db_path) as c:
         admin.set_no_login(c, uid(settings, "boss"))
     require(settings, inventory=False, posture=False)

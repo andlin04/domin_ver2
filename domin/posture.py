@@ -20,17 +20,19 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import admin, cve, db, fingerprint, proxy, tags, users
+from . import admin, cve, db, fingerprint, netscope, proxy, tags, users
 
 log = logging.getLogger("domin.posture")
 
 
 def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "",
-            names: set[str] | None = None) -> tuple[list[dict], int]:
+            names: set[str] | None = None, ok: netscope.Check | None = None) -> tuple[list[dict], int]:
     """Addresses of the domain's latest inventory scan inside the posture scope, as [{ip, hosts, country}], and how
-    many addresses the scope or the "Never scan" exclusions left out. host, ip or names (a set of host names) narrow
-    the set. An address is skipped when every host name on it is excluded."""
+    many addresses the scope, the "Never scan" exclusions or the install's address check (netscope: a public install
+    probes global addresses only) left out. host, ip or names (a set of host names) narrow the set. An address is
+    skipped when every host name on it is excluded."""
     scope = users.get_scope(conn)
+    ok = ok or netscope.checker(conn)
     rows = conn.execute(f"""SELECT r.host, r.ip, r.country, r.asn, r.netname, r.descr FROM records r
                             JOIN ({db.LATEST}) s ON s.id = r.scan_id
                             JOIN domains d ON d.id = s.domain_id WHERE d.name = ? AND r.ip != ''""", (domain,))
@@ -42,7 +44,7 @@ def targets(conn: sqlite3.Connection, domain: str, host: str = "", ip: str = "",
         if not users.excluded(scope["posture_exclude"], r["host"], users.owner_text(r)):
             e["hosts"].add(r["host"])
     keep = [{**e, "hosts": sorted(e["hosts"])} for e in by_ip.values()
-            if e["hosts"] and users.posture_ok(scope, e["ip"], e["country"])]
+            if e["hosts"] and ok(e["ip"]) and users.posture_ok(scope, e["ip"], e["country"])]
     keep.sort(key=lambda e: e["ip"])
     return keep, len(by_ip) - len(keep)
 
@@ -214,6 +216,9 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
     scope = users.get_scope(conn)
     if not users.posture_ok(scope, row["ip"], row["country"]):
         _finish(conn, row["id"], "failed", {"error": "outside the posture scope (Settings changed after queueing)"})
+        return
+    if not netscope.checker(conn)(row["ip"]):   # never a loopback, private or link-local probe on a public install
+        _finish(conn, row["id"], "failed", {"error": "not a scannable address on this install"})
         return
     able = fingerprint.raw_capable()
     admin.kv_set(conn, RAW_KEY, "1" if able else "0")   # Settings shows whether the worker can send raw packets

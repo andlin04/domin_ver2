@@ -795,7 +795,7 @@ def test_sign_in_can_be_turned_off_only_where_the_environment_allows_it(settings
         csrf = sign_in(h, "adm")
         assert "Turn sign-in off" not in h.get("/admin/settings").text
         assert h.post("/admin/settings/no-login", data={"csrf": csrf, "off": "1"}).status_code == 403
-    dev = replace(settings, allow_no_login=True)
+    dev = replace(settings, allow_no_login=True, admin_ips=("127.0.0.0/8",))   # the stand-in: admin networks only
     with app_client(dev) as h:
         assert h.get("/admin/security", follow_redirects=False).status_code == 303   # allowed, but still on
         csrf = sign_in(h, "adm")

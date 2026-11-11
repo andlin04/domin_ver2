@@ -110,7 +110,7 @@ load_credentials() {  # sets ACCOUNT, PRIV, ADDRESS, ENTRY; prints nothing
   ACCOUNT= PRIV= ADDRESS= ENTRY=
   if [ -f "$DB" ] && [ -x "$APP/venv/bin/python" ]; then
     # as the service user: a WAL database's -shm/-wal files must stay owned by domin; SELECT only
-    mapfile -t CREDS < <(runuser -u domin -- "$APP/venv/bin/python" - "$DB" <<'EOF'
+    mapfile -t CREDS < <(runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 "$APP/venv/bin/python" - "$DB" <<'EOF'
 import json, sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
 row = c.execute("SELECT value FROM kv WHERE key = 'mullvad_tunnel'").fetchone()

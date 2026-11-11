@@ -46,6 +46,8 @@
     <form method="post" action="{{ base }}/account/2fa/disable" class="inline"
           data-confirm="Turn two-factor off?">
       <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="password" name="proof" placeholder="Current password or code" autocomplete="current-password"
+             required aria-label="Current password or authentication code">
       <button class="btn" type="submit">Turn off</button></form>
     {% elif enrol %}
     <p class="muted">Scan this code or add the secret to your authenticator app, then enter a code to confirm.</p>

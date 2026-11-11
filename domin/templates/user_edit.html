@@ -7,8 +7,8 @@
     {{ 'disabled' if target.disabled else 'active' }} · two-factor {{ 'on' if target.has_totp else 'off' }}</p></div></section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-{% if request.query_params.get('link') %}<p class="note ok">One-time set-password link (valid 24 h):
-  <code class="mono">{{ request.query_params.get('link') }}</code></p>{% endif %}
+{% if link %}<p class="note ok">One-time set-password link (valid 24 h, shown only this once):
+  <code class="mono">{{ link }}</code></p>{% endif %}
 
 <section class="card">
   <h2>Role</h2>
