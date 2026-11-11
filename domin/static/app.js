@@ -7,7 +7,7 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const pageData = () => { const el = $("#page-data"); return el ? JSON.parse(el.textContent) : {}; };
 
-// --- backdrop: the signed-in pages' decorative layer moves at 15 % of the scroll speed (depth); still for reduced motion
+// --- backdrop: the decorative layer (every page) moves at 15 % of the scroll speed (depth); still for reduced motion
 if (document.body.classList.contains("backdrop") && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
   let queued = false;
   const move = () => { queued = false; document.body.style.setProperty("--backdrop-y", `${Math.round(-scrollY * 0.15)}px`); };

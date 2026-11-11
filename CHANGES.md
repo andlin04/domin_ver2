@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Backdrop on every page
+
+- The faint network-graph backdrop now shows on public pages too, not only after sign-in.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Posture tick tables: filters drop hidden ticks
 
 - Posture host and domain tables: a filter (Filter box, column boxes, chips, the page search) unticks the rows it

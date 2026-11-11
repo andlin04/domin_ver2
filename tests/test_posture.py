@@ -1050,7 +1050,7 @@ def test_country_map_counts_addresses_and_names_per_country():
 
 def test_posture_map_and_backdrop(settings, nmap):
     with app_client(settings) as h:
-        assert 'class="backdrop"' not in h.get("/").text          # public pages: no backdrop
+        assert 'class="backdrop"' in h.get("/").text              # public pages too (owner 2026-11-11)
         csrf = sign_in(h, "ana")
         h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
         run_queue(settings)

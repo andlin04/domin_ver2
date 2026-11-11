@@ -37,7 +37,7 @@ body {
   margin: 0; background: var(--bg); color: var(--text); line-height: 1.5;
   font: 14px/1.5 var(--font);
 }
-/* signed-in pages: a decorative backdrop (backdrop.svg as a mask, so it takes the theme's text colour) far below
+/* every page (public too, owner 2026-11-11): a decorative backdrop (backdrop.svg as a mask, so it takes the theme's text colour) far below
    the panels; app.js moves it at a fraction of the scroll speed for depth (none with reduced motion) */
 body.backdrop { position: relative; }
 body.backdrop::before {

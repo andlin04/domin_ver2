@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='app.css').path }}">
   <script src="{{ url_for('static', path='theme.js').path }}"></script>
 </head>
-<body data-page="{% block page %}{% endblock %}"{% if user %} class="backdrop"{% endif %}>
+<body data-page="{% block page %}{% endblock %}" class="backdrop">
   {# inventory off (Settings > Components): no inventory links; the brand goes to Posture #}
   {% set inv_on = comps is not defined or 'inventory' in comps %}
   <header class="topbar"><div class="topbar-in">
