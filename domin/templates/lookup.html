@@ -68,14 +68,14 @@
   {% if result.note %}<p class="note" role="status">{{ result.note }}</p>{% endif %}
   {% if result.findings %}
   <div class="table-wrap"><table>
-    <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
+    <thead><tr><th class="fit">Severity</th><th class="num fit">CVSS</th><th class="fit">CVE</th><th class="fit">Fixed in</th><th>Summary</th>
       <th>Source</th></tr></thead>
     <tbody>{% for f in result.findings %}<tr>
       <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
       <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
       <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
       <td>{{ f.fixed or '—' }}</td>
-      <td>{{ f.summary }}</td>
+      <td class="long">{{ f.summary }}</td>
       <td>{{ f.source }}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
@@ -100,14 +100,14 @@
       {% else %}<span class="pill sev-unknown">no CPE to match</span>{% endif %}</h3>
     {% if svc.findings %}
     <div class="table-wrap"><table>
-      <thead><tr><th>Severity</th><th class="num">CVSS</th><th>CVE</th><th>Fixed in</th><th>Summary</th>
+      <thead><tr><th class="fit">Severity</th><th class="num fit">CVSS</th><th class="fit">CVE</th><th class="fit">Fixed in</th><th>Summary</th>
         <th>Source</th></tr></thead>
       <tbody>{% for f in svc.findings %}<tr>
         <td><span class="pill sev-{{ f.severity }}">{{ f.severity }}</span></td>
         <td class="num">{{ '%.1f'|format(f.score) if f.score is not none else '—' }}</td>
         <td><a href="{{ f.url }}" rel="noopener noreferrer" target="_blank">{{ f.cve }}</a></td>
         <td>{{ f.fixed or '—' }}</td>
-        <td>{{ f.summary }}</td>
+        <td class="long">{{ f.summary }}</td>
         <td>{{ f.source }}</td>
       </tr>{% endfor %}</tbody>
     </table></div>

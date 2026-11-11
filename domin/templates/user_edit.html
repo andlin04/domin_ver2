@@ -30,7 +30,7 @@
   <form method="post" action="{{ base }}/users/{{ target.id }}/rights">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="table-wrap short"><table class="rights">
-      <thead><tr><th>Feature</th>{% for k, label in right_labels.items() %}<th class="pick">{{ label }}</th>{% endfor %}<th>Read · read-write adds</th></tr></thead>
+      <thead><tr><th>Feature</th>{% for k, label in right_labels.items() %}<th class="pick fit">{{ label }}</th>{% endfor %}<th>Read · read-write adds</th></tr></thead>
       <tbody>{% for f, (label, read, write) in features.items() %}<tr>
         <td><b>{{ label }}</b></td>
         {% for k in right_labels %}<td class="pick">{% if k != 'write' or write %}<input type="radio" name="r_{{ f }}" value="{{ k }}"
@@ -72,7 +72,7 @@
   <form method="post" action="{{ base }}/users/{{ target.id }}/grants">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="table-wrap short"><table id="grants">
-      <thead><tr><th>Domain <small class="muted">and the domains under it</small></th><th>Level</th></tr></thead>
+      <thead><tr><th>Domain <small class="muted">and the domains under it</small></th><th class="fit">Level</th></tr></thead>
       <tbody>{% for g in grant_rows %}<tr>
         <td><select name="g_domain_{{ loop.index0 }}" aria-label="Domain, row {{ loop.index }}">
           <option value="">{{ '— remove —' if g.domain else '— add a domain —' }}</option>

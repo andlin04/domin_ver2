@@ -68,7 +68,7 @@
   <h2>Profiles <small>{{ profiles|length }}</small></h2>
   {# fits the card: long cells wrap, Updated is date and time with the user under it; still scrolls when it can't #}
   <div class="table-wrap"><table class="fit-table">
-    <thead><tr><th>Name</th><th>Command line</th><th>Route</th><th>Used by</th><th>Note</th><th>Updated</th><th></th></tr></thead>
+    <thead><tr><th class="fit">Name</th><th>Command line</th><th>Route</th><th>Used by</th><th>Note</th><th class="fit">Updated</th><th class="fit"></th></tr></thead>
     <tbody>{% for p in profiles %}<tr>
       <td><b>{{ p.name }}</b>{% if p.name == default %} <span class="pill">default</span>{% endif %}</td>
       <td class="mono cmd-cell">{{ p.command }}</td>

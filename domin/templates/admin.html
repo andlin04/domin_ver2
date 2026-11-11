@@ -7,7 +7,7 @@
   <h2>{{ title }} <small>{{ note }}</small></h2>
   {% if rows %}
   <div class="table-wrap short"><table>
-    <thead><tr><th></th><th class="num">Hits</th><th class="num">Visitors</th></tr></thead>
+    <thead><tr><th></th><th class="num fit">Hits</th><th class="num fit">Visitors</th></tr></thead>
     <tbody>{% for r in rows %}<tr>
       <td class="clip">{% if link %}<a href="/d/{{ r.label }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
       <td class="num">{{ r.hits }}</td><td class="num">{{ r.visitors }}</td></tr>{% endfor %}</tbody>
@@ -56,7 +56,7 @@
   <h2>Recent visits <small>pages in order, time spent on each</small></h2>
   {% if stats.sessions %}
   <div class="table-wrap"><table>
-    <thead><tr><th>Start</th><th>Visitor</th><th>Country</th><th>From</th><th class="num">Length</th><th>Path</th></tr></thead>
+    <thead><tr><th class="fit">Start</th><th class="fit">Visitor</th><th class="fit">Country</th><th>From</th><th class="num fit">Length</th><th>Path</th></tr></thead>
     <tbody>{% for s in stats.sessions %}<tr>
       <td>{{ s.start[5:16].replace('T', ' ') }}</td><td class="mono">{{ s.visitor }}</td><td>{{ s.country }}</td>
       <td class="clip">{{ s.ref }}</td><td class="num">{{ dur(s.seconds) }}</td>
@@ -88,8 +88,8 @@
   </ul>
   {% if jobs.per_day %}
   <div class="table-wrap short"><table>
-    <thead><tr><th>Day</th><th class="num">Jobs</th><th class="num">Done</th><th class="num">Failed</th>
-      <th class="num">Cancelled</th><th class="num">Clients</th></tr></thead>
+    <thead><tr><th>Day</th><th class="num fit">Jobs</th><th class="num fit">Done</th><th class="num fit">Failed</th>
+      <th class="num fit">Cancelled</th><th class="num fit">Clients</th></tr></thead>
     <tbody>{% for d in jobs.per_day %}<tr><td>{{ d.day }}</td><td class="num">{{ d.jobs }}</td><td class="num">{{ d.done }}</td>
       <td class="num">{{ d.failed }}</td><td class="num">{{ d.cancelled }}</td><td class="num">{{ d.clients }}</td></tr>{% endfor %}</tbody>
   </table></div>

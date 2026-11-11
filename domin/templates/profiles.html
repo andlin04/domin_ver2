@@ -43,12 +43,12 @@
 <section class="card">
   <h2>Profiles <small>{{ profiles|length }}</small></h2>
   <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Ports</th><th class="num">Version intensity</th><th class="num">Timing</th>
-      <th class="num">Timeout (s)</th><th>Route</th><th>Note</th><th>Updated</th><th></th></tr></thead>
+    <thead><tr><th class="fit">Name</th><th>Ports</th><th class="num fit" title="Version intensity (0-9)">Intensity</th><th class="num fit">Timing</th>
+      <th class="num fit" title="Timeout in seconds">Timeout</th><th>Route</th><th>Note</th><th class="fit">Updated</th><th class="fit"></th></tr></thead>
     <tbody>{% for p in profiles %}<tr>
       <td><b>{{ p.name }}</b></td><td class="mono"><div class="lines2" title="{{ p.ports }}">{{ p.ports }}</div></td>
       <td class="num">{{ p.intensity }}</td><td class="num">T{{ p.timing }}</td><td class="num">{{ p.timeout }}</td>
-      <td>{{ route_names.get(p.route, 'a deleted route') }}</td><td>{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
+      <td class="long">{{ route_names.get(p.route, 'a deleted route') }}</td><td class="long">{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
       <td><div class="row-actions">{% if access.can('profiles', 'write') %}
         <a class="btn small" href="?edit={{ p.name|urlencode }}#profile-form">Edit</a>{% endif %}
         {% if access.can('profiles', 'write') and p.name != 'default' %}

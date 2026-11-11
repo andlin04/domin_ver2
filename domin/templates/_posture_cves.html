@@ -18,17 +18,17 @@
     <button type="button" class="chip" data-attr="fix" data-val="no" aria-pressed="false">No fix yet <small>{{ nofix }}</small></button>{% endif %}
   </div>
   <div class="table-wrap"><table id="overview-cves" class="sortable" data-colfilters>
-    <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
-      <th data-sort="num" class="num">CVSS</th><th data-sort="text">Product</th><th data-sort="text">Fixed in</th>
+    <thead><tr><th data-sort="text" class="fit">CVE</th><th data-sort="text" data-match="start" class="fit">Severity</th>
+      <th data-sort="num" class="num fit">CVSS</th><th data-sort="text">Product</th><th data-sort="text">Fixed in</th>
       <th data-sort="num">Addresses</th></tr></thead>
     <tbody>{% for v in cves %}<tr data-sev="{{ v.severity }}" data-fix="{{ 'yes' if v.fixable else 'no' }}">
-      <td class="mono"><a href="{{ 'https://nvd.nist.gov/vuln/detail/' ~ v.cve if v.cve.startswith('CVE-') else 'https://osv.dev/vulnerability/' ~ v.cve }}"
+      <td class="mono fit"><a href="{{ 'https://nvd.nist.gov/vuln/detail/' ~ v.cve if v.cve.startswith('CVE-') else 'https://osv.dev/vulnerability/' ~ v.cve }}"
         rel="noopener noreferrer" target="_blank" title="{{ v.summary or '' }}">{{ v.cve }}</a></td>
-      <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
-      <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
-      <td>{{ v.products|join(', ') }}</td>
-      <td>{% if v.fixes %}{{ v.fixes|join(', ') }}{% else %}<span class="muted">no fix yet</span>{% endif %}</td>
-      <td class="cve-where" data-key="{{ v.addresses|length }}"><b>{{ v.addresses|length }}</b>
+      <td class="fit"><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
+      <td class="num fit">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+      <td class="long">{{ v.products|join(', ') }}</td>
+      <td class="long">{% if v.fixes %}{{ v.fixes|join(', ') }}{% else %}<span class="muted">no fix yet</span>{% endif %}</td>
+      <td class="cve-where long" data-key="{{ v.addresses|length }}"><b>{{ v.addresses|length }}</b>
         <small class="muted">{% for ip, name in v.addresses[:3] %}{{ name or ip }}{% if not loop.last %}, {% endif %}{% endfor %}{% if v.addresses|length > 3 %} +{{ v.addresses|length - 3 }}{% endif %}</small></td>
     </tr>{% endfor %}</tbody>
   </table></div>

@@ -54,7 +54,7 @@
     <summary>Chosen hosts <small>{{ chosen|length }} ticked · latest inventory, {{ sched_opts.hosts|length }} host names</small></summary>
     <input class="filter" placeholder="Filter host names…" data-filter="#sched-hosts-{{ sf_id or 'new' }}" aria-label="Filter host names">
     <div class="table-wrap short"><table id="sched-hosts-{{ sf_id or 'new' }}">
-      <thead><tr><th></th><th>Host</th><th>Addresses</th><th>Tags</th></tr></thead>
+      <thead><tr><th class="fit"></th><th>Host</th><th>Addresses</th><th>Tags</th></tr></thead>
       <tbody>{% for h in sched_opts.hosts %}<tr>
         <td><input type="checkbox" name="h:{{ h.host }}" aria-label="Scan {{ h.host }}" {% if h.host in chosen %}checked{% endif %}></td>
         <td class="host">{{ h.host }}{% if h.skip %} <small class="muted">{{ h.skip }}</small>{% endif %}</td>

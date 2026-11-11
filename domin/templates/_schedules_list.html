@@ -1,8 +1,8 @@
 {# Schedules table: Posture · Scans (show_domain) and the schedule page. Needs sched_rows (domin.schedules views, with
    route_warn), show_domain; sched_view: the Scans tab's domain filter ('*' = all domains), where the actions return. #}
 <div class="table-wrap"><table class="schedules">
-  <thead><tr>{% if show_domain %}<th>Domain</th>{% endif %}<th>Name</th><th>When</th><th>Runs</th><th>Next run</th>
-    <th>Last run</th><th></th></tr></thead>
+  <thead><tr>{% if show_domain %}<th>Domain</th>{% endif %}<th>Name</th><th>When</th><th>Runs</th><th class="fit">Next run</th>
+    <th>Last run</th><th class="fit"></th></tr></thead>
   <tbody>{% for s in sched_rows %}{% set mine = access.acts('scans', s.domain) %}<tr>
     {% if show_domain %}<td><a href="/d/{{ s.domain }}">{{ s.domain }}</a></td>{% endif %}
     <td class="name"><b>{{ s.name }}</b><br><span class="pill {{ 'done' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>

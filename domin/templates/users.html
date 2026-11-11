@@ -25,7 +25,7 @@
 <section class="card">
   <h2>All users <small>{{ users|length }}</small></h2>
   <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Role</th><th>Domains</th><th>2FA</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead>
+    <thead><tr><th class="fit">Name</th><th class="fit">Role</th><th>Domains</th><th class="fit">2FA</th><th class="fit">Status</th><th class="fit" title="Last sign-in">Last login</th><th class="fit">Actions</th></tr></thead>
     <tbody>{% for us in users %}<tr>
       <td><a href="{{ base }}/users/{{ us.id }}">{{ us.name }}</a></td>
       <td>
@@ -36,7 +36,7 @@
             {% for r in roles %}<option value="{{ r }}"{% if r == us.role %} selected{% endif %}>{{ role_labels[r] }}</option>{% endfor %}
           </select></form>
       </td>
-      <td>{% if us.role == 'admin' %}<span class="muted">every domain</span>
+      <td class="long">{% if us.role == 'admin' %}<span class="muted">every domain</span>
         {% else %}{% for g in grants.get(us.id, []) %}<span class="grant">{{ 'every domain' if g.domain == '*' else g.domain }}
           <span class="pill {{ 'ok' if g.level == 'admin' }}">{{ levels[g.level] }}</span></span>{% if not loop.last %} {% endif %}
         {% else %}<span class="muted">none</span>{% endfor %}{% endif %}</td>
@@ -69,7 +69,7 @@
 <section class="card">
   <h2>Changes <small>users, roles and grants · newest first</small></h2>
   {% if audit %}<div class="table-wrap short"><table>
-    <thead><tr><th>When</th><th>By</th><th>Change</th><th>User</th><th>Detail</th></tr></thead>
+    <thead><tr><th class="fit">When</th><th class="fit">By</th><th class="fit">Change</th><th class="fit">User</th><th>Detail</th></tr></thead>
     <tbody>{% for a in audit %}<tr>
       <td class="muted">{{ a.at[:16].replace('T', ' ') }}</td><td>{{ a.actor }}</td><td>{{ a.action }}</td>
       <td>{{ a.target }}</td><td class="text">{{ a.detail }}</td>

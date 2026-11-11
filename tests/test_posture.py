@@ -94,7 +94,7 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
         # one row per address: www and mail share 172.20.4.50, so 3 rows; ticking it picks both names
         assert page.count(">Never<") == 3
         assert 'value="mail.corp.example,www.corp.example"' in page and "+ www.corp.example</small>" in page
-        assert page.count("· out of scope") == 1   # cdn: 203.0.113.9 is outside the IP allow range
+        assert page.count('<small class="muted">out of scope') == 1   # cdn: 203.0.113.9 is outside the IP allow range
         # a tag on that row lands on both names
         h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "mail.corp.example,www.corp.example",
                                     "tag": "web", "from": "posture"})
@@ -118,7 +118,8 @@ def test_host_list_shows_last_scan_and_scan_now_queues_ticked_names(settings, nm
     # one table: results sit on the host rows; the address details wait in the hidden pool for the dialog
     assert 'data-host-details="pa-172-20-4-60"' in page and 'id="pa-pool" hidden' in page
     assert "Findings by address <small>" not in page and 'class="host-toggle"' in page
-    assert "data-resizable" in page and '<col style="width:17ch">' in page   # resizable; address column fits one IPv4
+    assert "data-resizable" in page and "<colgroup><col><col>" in page   # resizable; automatic widths until dragged
+    assert 'class="fit" title="Open ports">Ports</th>' in page and 'title="Fixable CVEs">Fix</th>' in page   # short columns
     with db.connect(settings.db_path) as c:
         rows = posture.report(posture.current(c, DOM))["rows"]
         merged = {m["host"]: m for m in posture.with_results(posture.host_list(c, DOM), rows)}
@@ -615,7 +616,7 @@ def test_posture_host_names_table_shows_and_edits_tags(settings, nmap):
         csrf = sign_in(h, "ana")
         page = h.get(f"/admin/security/analysis?domain={DOM}").text
         assert ">Tags</th>" in page and 'aria-label="New tag for nas.corp.example"' in page
-        assert '"ip">Addr</th>' in page and '"num">Severity</th>' in page and ">Worst</th>" not in page
+        assert '"ip" class="fit" title="Addresses">Addr</th>' in page and '"num" class="fit">Severity</th>' in page and ">Worst</th>" not in page
         r = h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
                                         "from": "posture"}, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].startswith(f"/admin/security/analysis?domain={DOM}")

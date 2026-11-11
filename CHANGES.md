@@ -2,6 +2,17 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Table columns sized to their content
+
+- Every table: short columns (counts, dates, flags, severity, buttons) take only the width they need (`fit` class);
+  long text (descriptions, products, fixes, notes) wraps in the rest (`long` class). No fixed pixel widths.
+- Shorter headers, the full wording as a tooltip: Open ports -> Ports, Fixable -> Fix, Addresses with high+ ->
+  High+, Reverse names -> rDNS, Version intensity -> Intensity, Timeout (s) -> Timeout, Kind and settings -> Kind,
+  Preferred -> Default, Last sign-in -> Last login, Address or network (CIDR) -> Network.
+- Posture host table: automatic widths until a column is dragged (then fixed widths, kept per browser under a new
+  key, so old saved widths no longer apply); host names no longer cut off; the skip reason sits under the date.
+- Rollback: `git revert` this commit and re-run install.sh (templates and static files only).
+
 ## 2026-11-11: Feature rights per power user, viewers granted by domain admins
 
 - Users, edit page, "Feature rights": none / read / read-write per feature for a power user: Inventory, Posture &

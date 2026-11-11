@@ -333,9 +333,12 @@ def seed_settings(c) -> str:
     bob = users.create(c, "bob", "power", DEMO_PASSWORD)
     carol = users.create(c, "carol", "power", DEMO_PASSWORD)
     dave = users.create(c, "dave", "power", DEMO_PASSWORD)
+    frank = users.create(c, "frank", "power", DEMO_PASSWORD)
     access.set_grants(c, bob, {"*": "admin"}, "alice")
     access.set_grants(c, carol, {"example.com": "admin", "example.org": "viewer"}, "alice")
     access.set_grants(c, dave, {"example.net": "viewer"}, "alice")
+    access.grant_viewer(c, "example.com", frank, {"id": carol, "name": "carol"})   # carol's Viewers panel
+    access.set_rights(c, carol, {**access.DEFAULT_RIGHTS, "profiles": "write", "discovery": "none"})
     for actor, action, target, detail in (("alice", "user-add", "carol", "role power"),
                                           ("alice", "grants", "carol", "added example.com=admin, example.org=viewer"),
                                           ("alice", "user-add", "erin", "role admin"),
@@ -531,7 +534,7 @@ SHOTS = {
     "settings": ("/admin/settings", True, 1000, ""),
     "settings-posture": ("/admin/settings", True, 1250, from_card("Security posture scope")),
     "users": ("/admin/users", True, 1100, ""),
-    "user-edit": ("/admin/users/4", True, 760, ""),   # carol (4th user): two domain grants
+    "user-edit": ("/admin/users/4", True, 1900, ""),   # carol (4th user): two domain grants
     "posture-power": ("/admin/security/analysis", "carol", 1500, ""),
     "account": ("/admin/account", True, 900, ""),
     "discovery-profiles": ("/admin/security/discovery-profiles", True, 1300, ""),
@@ -542,6 +545,13 @@ SHOTS = {
     "posture-schedules-power": ("/admin/security/scans", "carol", 1300,
                                 OPEN_SCHEDULE + from_card("Scheduled rescans")),
     "operations-schedules": ("/admin", True, 300, from_card("Scheduled rescans")),
+    "settings-signin": ("/admin/settings", True, 520, from_card("Sign-in required for")),
+    "domain-viewers": ("/d/example.com", "carol", 560, from_card("Viewers")),
+    "table-cves": ("/admin/security/analysis?domain=example.com", True, 1000,
+                   "document.querySelector('[data-tab=cves]')?.click();" + show_from("section.host-list")),
+    "table-hosts": ("/d/example.com", True, 1000, show_from("#records")),
+    "table-posture-hosts": ("/admin/security/analysis?domain=example.com", True, 1000, show_from("section.host-list")),
+    "table-schedules": ("/admin/security/scans", True, 900, from_card("Scheduled rescans")),
     "schedule-route-warning":("/admin/security/scans?domain=lab.example.test", True, 1000, SUBMIT_LAB),
 }
 LIGHT = ("overview", "posture-overview", "header")   # also shot in the light theme: NAME-light.png
@@ -592,6 +602,7 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--wait", type=int, default=6000, help="ms the page gets to render (charts)")
     ap.add_argument("--only", default="", help="comma-separated shot names")
+    ap.add_argument("--phone", default=",".join(PHONE), help=f"comma-separated views also shot {PHONE_WIDTH} px wide")
     args = ap.parse_args()
     browser = find_browser(args.edge)
     out = args.out.resolve()
@@ -640,7 +651,7 @@ def main() -> int:
             time.sleep(0.1)
         shots = [(n, "dark", n, 0) for n in SHOTS] + [(n, "light", f"{n}-light", 0) for n in LIGHT]
         shots += [(n, t, f"{n}-{PHONE_WIDTH}" + ("-light" if t == "light" else ""), PHONE_WIDTH)
-                  for n in PHONE for t in ("dark", "light")]
+                  for n in args.phone.split(",") if n in SHOTS for t in ("dark", "light")]
         for view, theme, name, phone in shots:
             if only and name not in only:
                 continue

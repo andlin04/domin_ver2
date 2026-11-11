@@ -23,10 +23,10 @@
   <div class="table-wrap">
     <table id="results" class="sortable">
       <thead><tr>{{ th('Host', 'host') }}{{ th('Domain', 'domain') }}{{ th('Address', 'ip', 'ip') }}
-        {{ th('ASN', 'asn', 'num', 'num') }}{{ th('Prefix', 'prefix') }}{{ th('Network', 'netname') }}
-        {{ th('Description', 'descr') }}{{ th('EU', 'eu') }}{{ th('Country', 'country') }}
-        {% if history %}{{ th('First seen') }}{% endif %}{{ th('Last seen') }}
-        {% if history %}{{ th('Scans', '', 'num', 'num') }}{% endif %}</tr></thead>
+        {{ th('ASN', 'asn', 'num', 'num fit') }}{{ th('Prefix', 'prefix', 'text', 'fit') }}{{ th('Network', 'netname') }}
+        {{ th('Description', 'descr') }}{{ th('EU', 'eu', 'text', 'fit') }}{{ th('Country', 'country', 'text', 'fit') }}
+        {% if history %}{{ th('First seen', '', 'text', 'fit') }}{% endif %}{{ th('Last seen', '', 'text', 'fit') }}
+        {% if history %}{{ th('Scans', '', 'num', 'num fit') }}{% endif %}</tr></thead>
       <tbody>
       {% if not rows %}<tr><td class="muted" colspan="12">No matches.</td></tr>{% endif %}
       {% for r in rows %}

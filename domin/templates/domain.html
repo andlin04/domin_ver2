@@ -92,9 +92,9 @@
   <h2>nmap discovery <small>profile {{ current.discovery }} · {{ discovered|length }} live address(es)</small></h2>
   <p class="mono small">{{ current.discovery_params or 'not run' }}</p>
   {% if discovered %}<div class="table-wrap short"><table>
-    <thead><tr><th>Address</th><th>Reverse names</th><th>Open ports</th><th>Reason</th></tr></thead>
-    <tbody>{% for f in discovered %}<tr><td class="mono">{{ f.ip }}</td><td>{{ f.names }}</td><td class="mono">{{ f.ports }}</td>
-      <td>{{ f.reason }}</td></tr>{% endfor %}</tbody>
+    <thead><tr><th class="fit">Address</th><th title="Reverse DNS names">rDNS</th><th title="Open ports">Ports</th><th>Reason</th></tr></thead>
+    <tbody>{% for f in discovered %}<tr><td class="mono fit">{{ f.ip }}</td><td class="long">{{ f.names }}</td><td class="mono long">{{ f.ports }}</td>
+      <td class="long">{{ f.reason }}</td></tr>{% endfor %}</tbody>
   </table></div>{% endif %}
 </section>
 {% endif %}
@@ -168,9 +168,9 @@
     {% if tag %}<a href="?#records">show all</a>{% endif %}</p>{% endif %}
   <div class="table-wrap">
     <table id="records" class="sortable" data-colfilters>
-      <thead><tr><th data-sort="text">Host</th><th data-sort="ip">Address</th><th data-sort="num" class="num">ASN</th>
-        <th data-sort="text">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
-        <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th>
+      <thead><tr><th data-sort="text">Host</th><th data-sort="ip" class="fit">Address</th><th data-sort="num" class="num fit">ASN</th>
+        <th data-sort="text" class="fit">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
+        <th data-sort="text" data-match="start" class="fit">EU</th><th data-sort="text" class="fit">Country</th>
         {% if user and access.can('tags') %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
       <tbody>
       {% set tagger = user and access.acts('tags', domain.name) %}

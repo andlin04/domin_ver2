@@ -68,7 +68,7 @@
     <h3>Geolocation <small>countries present in the inventory</small></h3>
     {% if countries %}
     <div class="table-wrap short"><table>
-      <thead><tr><th>Country</th><th class="num">Allow</th><th class="num">Deny</th></tr></thead>
+      <thead><tr><th>Country</th><th class="num fit">Allow</th><th class="num fit">Deny</th></tr></thead>
       <tbody>{% for c in countries %}<tr>
         <td>{{ c }}</td>
         <td class="num"><input type="checkbox" name="ca:{{ c }}" {% if c in scope.countries_allow %}checked{% endif %}
@@ -95,7 +95,7 @@
       matter. Clear both boxes to remove a rule; save to add more empty rows.</p>
     <h3 id="net-tags">Network tags <small>a tag on every host name with an address in the network</small></h3>
     <div class="table-wrap short"><table id="net-tags-table">
-      <thead><tr><th>Address or network (CIDR)</th><th>Tag</th><th>Note</th></tr></thead>
+      <thead><tr><th title="Address or network (CIDR)">Network</th><th>Tag</th><th>Note</th></tr></thead>
       <tbody>{% for r in scope.net_tags + [{'net': '', 'tag': '', 'note': ''}] * 3 %}<tr>
         <td><input name="nt_net_{{ loop.index0 }}" value="{{ r.net }}" spellcheck="false" autocapitalize="off"
           placeholder="10.0.0.0/24" aria-label="Network, tag rule {{ loop.index }}"></td>

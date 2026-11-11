@@ -23,28 +23,27 @@
     <input class="filter" placeholder="Filter all columns…" data-filter="#posture-hosts" aria-label="Filter host names">
   </div>
   <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable data-picker>
-    {# start widths; drag a header's right edge to change one (kept per browser). Addresses: one IPv4 address #}
-    <colgroup><col style="width:2.6rem"><col style="width:20rem"><col style="width:17ch"><col style="width:12rem">
-      <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem">{% if access.can('tags') %}<col style="width:14rem">{% endif %}</colgroup>
+    {# automatic widths; drag a header's right edge to fix them (kept per browser) #}
+    <colgroup><col><col><col><col><col><col><col><col>{% if access.can('tags') %}<col>{% endif %}</colgroup>
     <thead><tr>
       <th class="tick" data-nofilter><input type="checkbox" data-pick-all aria-label="Tick every visible host name"></th>
-      <th data-sort="text">Host name</th><th data-sort="ip">Addr</th><th data-sort="num">Severity</th>
-      <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
-      <th data-sort="text">Last scan</th>{% if access.can('tags') %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
+      <th data-sort="text">Host name</th><th data-sort="ip" class="fit" title="Addresses">Addr</th><th data-sort="num" class="fit">Severity</th>
+      <th data-sort="num">CVEs</th><th data-sort="num" class="fit" title="Fixable CVEs">Fix</th><th data-sort="num" class="fit" title="Open ports">Ports</th>
+      <th data-sort="text" class="fit">Last scan</th>{% if access.can('tags') %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
     {% set tagger = access.acts('tags', posture_domain) %}
     <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}" data-quiet="{{ 'yes' if h.quiet else 'no' }}">
       <td class="tick"><input type="checkbox" data-pick value="{{ h.pick }}" aria-label="Tick {{ h.host }}"></td>
-      <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
+      <td class="host">{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
         aria-label="{{ h.host }}: show or hide its findings">{{ h.host }}</a>{% else %}{{ h.host }}{% endif %}
         {% if h.names|length > 1 %}<small class="muted host-aka" title="{{ h.names[1:]|join(', ') }}">+ {{ h.names[1:]|join(', ') }}</small>{% endif %}</td>
-      <td class="mono clip" title="{{ h.ips|join(', ') }}">{{ h.ips|join(', ') }}</td>
-      <td data-key="{{ h.rank }}">{% if h.worst == 'none' %}<span class="muted">—</span>{% elif h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
+      <td class="mono clip fit" title="{{ h.ips|join(', ') }}">{{ h.ips|join(', ') }}</td>
+      <td data-key="{{ h.rank }}" class="fit">{% if h.worst == 'none' %}<span class="muted">—</span>{% elif h.worst %}<span class="pill sev-{{ h.worst if h.worst in ('critical','high','medium','low') else 'unknown' }}">{{ h.worst }}</span>{% endif %}
         {% if h.blocked %}<span class="pill blocked" title="{{ h.blocked }} of {{ h.results }} address(es): no scanned port answered">potentially blocked</span>{% endif %}
         {% if h.errors %}<span class="pill fix-no">{{ h.errors }} failed</span>{% endif %}</td>
       <td data-key="{{ h.cves if h.results else -1 }}">{% if h.results %}{{ h.cves }}{% for s, n in h.sev_n.items() %} <span class="pill sev-{{ s }}">{{ n }} {{ s }}</span>{% endfor %}{% endif %}</td>
-      <td data-key="{{ h.fixable if h.results else -1 }}">{% if h.cves %}{{ h.fixable }} of {{ h.cves }}{% endif %}</td>
-      <td data-key="{{ h.open_ports if h.results else -1 }}">{% if h.results %}{{ h.open_ports }}{% endif %}</td>
-      <td>{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %} <small class="muted">· {{ h.skip }}</small>{% endif %}</td>
+      <td data-key="{{ h.fixable if h.results else -1 }}" class="fit">{% if h.cves %}{{ h.fixable }} of {{ h.cves }}{% endif %}</td>
+      <td data-key="{{ h.open_ports if h.results else -1 }}" class="fit num">{% if h.results %}{{ h.open_ports }}{% endif %}</td>
+      <td class="fit">{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %}<br><small class="muted">{{ h.skip }}</small>{% endif %}</td>
       {% if access.can('tags') %}<td class="tags">{% for t in h.net_tags %}<span class="pill" title="Network tag (Settings)">{{ t }}</span> {% endfor %}
         {% for t in h.tags %}<form method="post" action="{{ base }}/tags" class="inline tag">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
@@ -65,8 +64,8 @@
       <input class="filter" placeholder="Filter all columns…" data-filter="#posture-cves" aria-label="Filter CVEs">
     </div>
     <div class="table-wrap"><table id="posture-cves" class="sortable" data-colfilters>
-      <thead><tr><th data-sort="text">CVE</th><th data-sort="text" data-match="start">Severity</th>
-        <th data-sort="num" class="num">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
+      <thead><tr><th data-sort="text" class="fit">CVE</th><th data-sort="text" data-match="start" class="fit">Severity</th>
+        <th data-sort="num" class="num fit">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
         <th data-sort="num">Addresses</th></tr></thead>
       <tbody>{% for v in cves %}<tr data-text="{{ v.text }}">
         <td class="mono"><a href="#" class="cve-toggle" data-cve-more aria-expanded="false"
@@ -86,19 +85,19 @@
               <dt>Source</dt><dd>{{ v.source or '' }}</dd>
             </dl>
             <h4>Affected here <small class="muted">{{ v.affected|length }}</small></h4>
-            <table class="cve-affected"><thead><tr><th>Host name</th><th>Address</th><th>Port</th><th>Product / version</th></tr></thead>
+            <table class="cve-affected"><thead><tr><th>Host name</th><th class="fit">Address</th><th class="fit">Port</th><th>Product / version</th></tr></thead>
               <tbody>{% for a in v.affected %}<tr><td>{{ a.name or '' }}</td>
-                <td class="mono"><a href="#pa-{{ a.ip|replace(':', '-')|replace('.', '-') }}" data-open-details>{{ a.ip }}</a></td>
-                <td>{{ a.port }}/{{ a.proto }}</td><td>{{ a.product }}</td></tr>{% endfor %}</tbody></table>
+                <td class="mono fit"><a href="#pa-{{ a.ip|replace(':', '-')|replace('.', '-') }}" data-open-details>{{ a.ip }}</a></td>
+                <td class="fit">{{ a.port }}/{{ a.proto }}</td><td class="long">{{ a.product }}</td></tr>{% endfor %}</tbody></table>
             <h4>References</h4>
             <ul class="cve-refs">{% for name, url in v.links %}<li><a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ name }}</a></li>{% endfor %}
               {% for url in v.refs or [] %}{% if url not in v.links|map(attribute=1) %}<li><a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ url|replace('https://', '')|truncate(70, True, '…') }}</a></li>{% endif %}{% endfor %}</ul>
           </div></template></td>
-        <td><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
-        <td class="num">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
-        <td>{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
-        <td>{{ v.products|join(', ') }}</td>
-        <td data-key="{{ v.addresses|length }}">{% for ip, name in v.addresses %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}" data-open-details title="{{ ip }}">{{ name or ip }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        <td class="fit"><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
+        <td class="num fit">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+        <td class="long">{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
+        <td class="long">{{ v.products|join(', ') }}</td>
+        <td data-key="{{ v.addresses|length }}" class="long">{% for ip, name in v.addresses %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}" data-open-details title="{{ ip }}">{{ name or ip }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
       </tr>{% endfor %}</tbody>
     </table></div>
   </div>{% endif %}

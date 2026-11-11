@@ -143,12 +143,27 @@ $$("[data-filter]").forEach((input) => input.addEventListener("input", () => app
 // resizable columns (table[data-resizable] with a <colgroup>): drag a header's right edge; widths kept per browser
 $$("table[data-resizable]").forEach((table) => {
   const cols = $$("colgroup col", table);
-  const store = `colw:${table.id}`;
+  const store = `colw2:${table.id}`;
+  const heads = $$("thead th", table);
   let saved = [];
   try { saved = JSON.parse(localStorage.getItem(store) || "[]"); } catch (e) { saved = []; }
-  if (saved.length === cols.length) cols.forEach((c, i) => { c.style.width = saved[i]; });
-  const fit = () => { table.style.width = `${cols.reduce((s, c) => s + c.getBoundingClientRect().width, 0)}px`; };
-  $$("thead th", table).forEach((th, i) => {
+  if (saved.length === cols.length && saved.every(Boolean)) {
+    cols.forEach((c, i) => { c.style.width = saved[i]; });
+    table.classList.add("sized");
+  }
+  const fit = () => {
+    if (table.classList.contains("sized")) {
+      table.style.width = `${cols.reduce((s, c) => s + c.getBoundingClientRect().width, 0)}px`;
+    }
+  };
+  // first drag: freeze the automatic widths into the <col>s, then switch to fixed layout
+  const freeze = () => {
+    if (table.classList.contains("sized")) return;
+    const widths = heads.map((h) => h.getBoundingClientRect().width);
+    cols.forEach((c, i) => { c.style.width = `${Math.round(widths[i] || 40)}px`; });
+    table.classList.add("sized");
+  };
+  heads.forEach((th, i) => {
     if (!cols[i]) return;
     const grip = document.createElement("span");
     grip.className = "col-resize";
@@ -157,6 +172,7 @@ $$("table[data-resizable]").forEach((table) => {
     grip.addEventListener("pointerdown", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
+      freeze();
       const x0 = ev.clientX;
       const w0 = cols[i].getBoundingClientRect().width;
       grip.classList.add("dragging");
@@ -860,8 +876,8 @@ function scanBoard() {
           <span class="sb-bar" role="progressbar" aria-label="${esc(dom)}: scans finished" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i data-pct="${pct}"></i></span>
           <span class="muted small-print sb-now">${active ? (now.length ? `Scanning ${esc(now.slice(0, 3).join(", "))}${now.length > 3 ? ` +${now.length - 3}` : ""}` : "waiting for a free slot") : `<a href="${esc(box.dataset.base)}/security/analysis?domain=${encodeURIComponent(dom)}">results</a>`}</span>
         </summary>
-        <div class="table-wrap"><table><thead><tr><th>Address</th><th>Host name</th><th>Status</th><th>Progress / result</th><th>Finished</th></tr></thead>
-          <tbody>${rows.map((it) => `<tr><td class="mono">${esc(it.ip)}</td><td>${esc(it.host)}</td><td>${pill(it)}</td><td>${part(it)}</td><td>${esc((it.finished || "").slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th class="fit">Address</th><th>Host name</th><th class="fit">Status</th><th>Progress / result</th><th class="fit">Finished</th></tr></thead>
+          <tbody>${rows.map((it) => `<tr><td class="mono">${esc(it.ip)}</td><td class="host">${esc(it.host)}</td><td>${pill(it)}</td><td class="long">${part(it)}</td><td>${esc((it.finished || "").slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
       </details>`;
     }).join("");
     $$(".sb-bar i", list).forEach((i) => { i.style.width = `${i.dataset.pct}%`; });   // CSP: no inline style attributes
