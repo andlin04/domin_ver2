@@ -149,7 +149,7 @@ def test_changes_compare_each_scan_with_the_previous_one(settings):
 
     def done(at, ports, services, status="done"):
         c.execute("""INSERT INTO posture_scans (domain, ip, hosts, ports, status, created, finished, services)
-                     VALUES (?, '172.20.4.50', 'web.home.arpa', ?, ?, ?, ?, ?)""",
+                     VALUES (?, '172.20.4.50', 'web.corp.example', ?, ?, ?, ?, ?)""",
                   (DOM, ports, status, at, at, json.dumps(services)))
     with db.connect(settings.db_path) as c:
         assert posture.changes(c, DOM)["compared"] == 0
@@ -400,14 +400,14 @@ def test_analyst_queues_a_whole_domain_and_sees_the_result(settings, nmap):
     assert 'data-domain-search="/admin/security/domain-search"' in page and 'class="field pick-filter">Filter' in page
     # the Filter box also narrows the host and CVE rows: each carries its lower-case text
     host_row = re.search(r'<tr data-text="([^"]*)" data-quiet="no">\s*<td class="tick"><input type="checkbox" '
-                         r'data-pick value="mail.lab', page)
+                         r'data-pick value="mail.corp', page)
     assert host_row and "openssh" in host_row.group(1) and "cve-2024-9999" in host_row.group(1)
     assert "22/tcp" in host_row.group(1) and "172.20.4.50" in host_row.group(1)
     assert re.search(r'<tr data-text="cve-2024-9999 [^"]*172\.20\.4\.50', page)
     with app_client(settings) as h:
-        assert h.get("/admin/security/domain-search?q=lab").status_code == 401
+        assert h.get("/admin/security/domain-search?q=corp").status_code == 401
         sign_in(h, "ana")
-        for q in ("WWW.LAB", "172.20.4.50", "cve-2024-9999", "openssh", f"{DOM} cve-2024", "50%"):
+        for q in ("WWW.CORP", "172.20.4.50", "cve-2024-9999", "openssh", f"{DOM} cve-2024", "50%"):
             hit = h.get("/admin/security/domain-search", params={"q": q}).json()["domains"]
             assert hit == ([DOM] if q != "50%" else []), q
         assert h.get("/admin/security/domain-search", params={"q": "www no-such-word"}).json()["domains"] == []
@@ -983,18 +983,18 @@ def test_report_on_ticked_domains(settings, nmap):
         assert 'id="pc-footprint"' not in h.get("/admin/security", params={"domain": other}).text
         every = h.get("/admin/security/kpis").text
         assert "<span>Filter</span>" not in every and "<span>Critical CVEs</span>" in every and "<i>of 1</i>" not in every
-        lab2 = h.get("/admin/security/kpis", params={"q": "lab2"}).text
-        assert "<span>Filter</span><b>lab2</b>" in lab2 and "<i>of 1</i>" in lab2
+        corp2 = h.get("/admin/security/kpis", params={"q": "corp2"}).text
+        assert "<span>Filter</span><b>corp2</b>" in corp2 and "<i>of 1</i>" in corp2
         assert "<i>of 1</i>" in h.get("/admin/security/kpis", params={"domain": other, "q": "web"}).text
         assert "<i>of 0</i>" in h.get("/admin/security/kpis", params={"domain": other, "q": "zzz"}).text
 
 
 def test_footprint_per_day_carries_each_domains_latest_scan(settings):
     with db.connect(settings.db_path) as c:
-        db.save_scan(c, "a.home.arpa", "2026-01-01T10:00:00", "scan",
-                     [{"host": "www.a.home.arpa", "ip": "172.20.4.10"}, {"host": "old.a.home.arpa", "ip": ""}])
-        db.save_scan(c, "b.home.arpa", "2026-01-02T10:00:00", "scan", [{"host": "b.home.arpa", "ip": "172.20.4.11"}])
-        db.save_scan(c, "a.home.arpa", "2026-01-03T10:00:00", "scan", [{"host": "www.a.home.arpa", "ip": "172.20.4.10"}])
+        db.save_scan(c, "a.corp.example", "2026-01-01T10:00:00", "scan",
+                     [{"host": "www.a.corp.example", "ip": "172.20.4.10"}, {"host": "old.a.corp.example", "ip": ""}])
+        db.save_scan(c, "b.corp.example", "2026-01-02T10:00:00", "scan", [{"host": "b.corp.example", "ip": "172.20.4.11"}])
+        db.save_scan(c, "a.corp.example", "2026-01-03T10:00:00", "scan", [{"host": "www.a.corp.example", "ip": "172.20.4.10"}])
         days = db.footprint_per_day(c)[:3]   # the fixture's own scans come later (today)
         assert [(d["day"], d["domains"], d["hosts"], d["resolved"], d["ips"]) for d in days] == [
             ("2026-01-01", 1, 2, 1, 1), ("2026-01-02", 2, 3, 2, 2), ("2026-01-03", 2, 2, 2, 2)]
