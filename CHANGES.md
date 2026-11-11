@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Posture tick tables: filters drop hidden ticks
+
+- Posture host and domain tables: a filter (Filter box, column boxes, chips, the page search) unticks the rows it
+  hides, so the report (PDF/Markdown) and Scan now cover only the visible ticked rows. The header box ticks only
+  visible rows and shows their state: ticked when all are, a dash when some are. Chip clicks now update the count.
+- The report endpoint already used only the posted names; a test now pins that.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Deleting a user drops their sign-in places
 
 - Deleting a user also deletes their sign-in history and waiting sign-ins, so a new user who gets the same id

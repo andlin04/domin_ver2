@@ -117,6 +117,7 @@ function applyFilters(table) {
   }
   const count = $(`[data-shown="#${table.id}"]`);
   if (count) count.textContent = shown;
+  table.dispatchEvent(new Event("tablefilter"));   // a tick table drops the ticks of rows it hid
 }
 $$("[data-chips] [data-attr]").forEach((b) => b.addEventListener("click", () => {
   b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
@@ -259,8 +260,10 @@ document.addEventListener("click", (ev) => {
   tr.classList.toggle("expanded", !!tr._detail);
   a.setAttribute("aria-expanded", tr._detail ? "true" : "false");
 });
-// tick tables (posture hosts, posture domains): the header box ticks every visible row; the card's buttons
-// ("Scan now": profile, "Report": format) open their dialog for the ticked rows that are still visible
+// tick tables (posture hosts, posture domains): the header box ticks every visible row; a filter (Filter box,
+// column boxes, chips, the page search) unticks the rows it hides, so a report or scan covers only visible ticked
+// rows. The header box shows the visible rows: ticked when all are, a dash (indeterminate) when some are.
+// The card's buttons ("Scan now": profile, "Report": format) open their dialog for those rows.
 $$("table[data-picker]").forEach((table) => {
   const card = table.closest("section") || document;
   const btns = $$("[data-picked-open]", card);
@@ -268,19 +271,30 @@ $$("table[data-picker]").forEach((table) => {
   const all = $("[data-pick-all]", table);
   const count = $("[data-picked-count]", card);
   const shown = (b) => { const tr = b.closest("tr"); return !tr.hidden && !tr.classList.contains("pf-out"); };
-  const picked = () => $$("tbody input[data-pick]", table).filter((b) => b.checked && shown(b));
+  const boxes = () => $$("tbody input[data-pick]", table);
+  const picked = () => boxes().filter((b) => b.checked && shown(b));
   const sync = () => {
+    const visible = boxes().filter((b) => {
+      if (shown(b)) return true;
+      b.checked = false;
+      return false;
+    });
     const n = picked().length;
+    if (all) {
+      all.checked = n > 0 && n === visible.length;
+      all.indeterminate = n > 0 && n < visible.length;
+    }
     btns.forEach((b) => { b.disabled = !n; });
     count.textContent = `${n} ticked`;
   };
-  all.addEventListener("change", () => {
-    $$("tbody input[data-pick]", table).forEach((b) => { if (shown(b)) b.checked = all.checked; });
+  all?.addEventListener("change", () => {
+    boxes().forEach((b) => { b.checked = all.checked && shown(b); });
     sync();
   });
   table.addEventListener("change", sync);
+  table.addEventListener("tablefilter", sync);
   document.addEventListener("pagefilter", sync);
-  document.addEventListener("input", (ev) => { if (ev.target.matches(`.colf, [data-filter='#${table.id}']`)) sync(); });
+  sync();
   btns.forEach((btn) => {
     const dlg = $(btn.dataset.pickedOpen);
     btn.addEventListener("click", () => {

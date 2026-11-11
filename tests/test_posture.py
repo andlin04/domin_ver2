@@ -1003,6 +1003,27 @@ def test_report_on_ticked_domains(settings, nmap):
         assert "<i>of 0</i>" in h.get("/admin/security/kpis", params={"domain": other, "q": "zzz"}).text
 
 
+def test_report_holds_only_the_posted_names(settings, nmap):
+    """A filtered table posts only its visible ticked rows; the report holds those and nothing else."""
+    other = "corp2.example"
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, other, db.now(), "scan", [{"host": "web.corp2.example", "ip": "172.20.4.80"}])
+    with app_client(settings) as h:
+        csrf = sign_in(h, "ana")
+        for d in (DOM, other):
+            h.post("/admin/security/posture", data={"csrf": csrf, "domain": d})
+        run_queue(settings)
+        md = h.post("/admin/security/report", data={"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example",
+                                                     "format": "md"}).text
+        assert "| nas.corp.example |" in md and "172.20.4.60" in md
+        for gone in ("www.corp.example", "mail.corp.example", "172.20.4.50", "web.corp2.example"):
+            assert gone not in md, gone
+        md = h.post("/admin/security/report", data={"csrf": csrf, "domains": other, "format": "md"}).text
+        assert "# Security posture report: corp2.example" in md and "| web.corp2.example |" in md
+        for gone in ("nas.corp.example", "www.corp.example", "172.20.4.50", "172.20.4.60"):
+            assert gone not in md, gone
+
+
 def test_footprint_per_day_carries_each_domains_latest_scan(settings):
     with db.connect(settings.db_path) as c:
         db.save_scan(c, "a.corp.example", "2026-01-01T10:00:00", "scan",
