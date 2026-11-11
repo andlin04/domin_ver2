@@ -18,17 +18,22 @@
     {% set pg = self.page() %}{% set sec = {'domain': 'overview', 'compare': 'overview'}.get(pg, pg) %}
     {% macro here(name) %}{% if sec == name %}class="active" aria-current="page"{% endif %}{% endmacro %}
     <nav>
+      {% if not user or access.can('inventory') %}
       <a href="/" {{ here('overview') }}>Inventory</a>
       <a href="/all" {{ here('all') }}>All records</a>
       <a href="/tools" {{ here('tools') }}>Whois &amp; e-mail</a>
+      {% endif %}
       {% if user %}
       <span class="nav-sep" aria-hidden="true"></span>
-      <a href="/admin/security" {{ here('security') }}>Posture</a>
+      {% if access.can('posture') %}<a href="/admin/security" {{ here('security') }}>Posture</a>
+      {% elif access.can('scans') %}<a href="/admin/security/scans" {{ here('security') }}>Posture</a>{% endif %}
       <details class="nav-menu" data-nav-menu>
         <summary {% if sec in ('admin', 'settings', 'users', 'account') %}class="active"{% endif %}>Admin</summary>
         <div class="nav-drop">
           {% if user.role == 'admin' %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
-          <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" {{ here('settings') }}>Settings</a>
+          {% set set_home = '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' if access.can('profiles')
+             else '/admin/security/discovery-profiles' if access.can('discovery') else '/admin/security/lookup' if access.can('posture') else '' %}
+          {% if set_home %}<a href="{{ set_home }}" {{ here('settings') }}>Settings</a>{% endif %}
           {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
           <a class="nav-acct" href="/admin/account" {{ here('account') }} title="Signed in as {{ user.name }}"><span>My account</span><small class="muted">{{ user.name }}</small></a>
         </div>
@@ -42,11 +47,13 @@
       <a href="/admin" {{ here('login') }}>Sign in</a>
       {% endif %}
     </nav>
+    {% if not user or access.can('inventory') %}
     <form class="jump" action="/d/" data-jump role="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
       <input name="q" placeholder="Go to domain…" autocomplete="off" list="domain-list" aria-label="Go to domain">
       <kbd title="Press / to search">/</kbd>
     </form>
+    {% endif %}
     <button class="icon-btn" id="theme" title="Toggle light / dark" aria-label="Toggle theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
     </button>

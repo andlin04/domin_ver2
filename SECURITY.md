@@ -65,7 +65,10 @@ a public issue for it.
   govern `/admin` on top.
 - Roles: admin, or power user limited to granted domains (viewer or domain admin per domain, covering the domains
   under it). One scope filter in every list, search, CSV, chart, count and posture query; an object outside a
-  power user's grants answers 404 like an unknown one. Only admins grant; the last enabled admin cannot be
+  power user's grants answers 404 like an unknown one. Feature rights per power user (none / read / read-write per
+  feature) are checked once per request from one route table before any handler runs: no right answers 404, read
+  only on a change 403. Admins grant; a domain admin may only give existing power users a viewer grant on its own
+  domains (audited). Operations, Settings, Routes and Users stay admin-only. The last enabled admin cannot be
   demoted, disabled or deleted. Inventory pages stay public to visitors without a session unless Settings,
   "Sign-in required for: Inventory" is ticked (then the sign-in page; API, CSV and drill data 401; private API
   clients of `DOMIN_INTERNAL_IPS` keep /api/). Posture always needs a session; the lab stand-in (sign-in turned off,

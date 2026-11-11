@@ -4,8 +4,8 @@
 {% block content %}
 <section class="hero"><div><h1>Users</h1>
   <p class="muted">Roles: admin sees every domain and manages users and settings; a power user sees only the domains
-    granted to it, per domain as viewer (read) or domain admin (also scans and tags). A grant covers the domains under
-    it.</p></div></section>
+    granted to it, per domain as viewer (read) or domain admin (also scans and tags), and only the features its
+    rights allow (Edit). A grant covers the domains under it.</p></div></section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if link %}<p class="note ok">One-time set-password link (valid 24 h, opens once the recipient is on the

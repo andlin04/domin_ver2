@@ -16,7 +16,7 @@
       title="Hides {{ quiet }} scanned address(es) with no open port and no finding; press again to show them">Open ports or findings <small>{{ host_list|length - quiet }}</small></button>
   </div>{% endif %}
   <div class="table-tools">
-    {% if access.manages(posture_domain) %}
+    {% if access.acts('scans', posture_domain) %}
     <button class="btn primary" type="button" data-picked-open="#scan-picked" disabled>Scan now</button>{% endif %}
     <button class="btn" type="button" data-picked-open="#report-picked" disabled>Report</button>
     <span class="muted small-print" data-picked-count>0 ticked</span>
@@ -25,13 +25,13 @@
   <div class="table-wrap"><table id="posture-hosts" class="sortable" data-colfilters data-resizable data-picker>
     {# start widths; drag a header's right edge to change one (kept per browser). Addresses: one IPv4 address #}
     <colgroup><col style="width:2.6rem"><col style="width:20rem"><col style="width:17ch"><col style="width:12rem">
-      <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem"><col style="width:14rem"></colgroup>
+      <col style="width:15rem"><col style="width:7rem"><col style="width:7rem"><col style="width:13rem">{% if access.can('tags') %}<col style="width:14rem">{% endif %}</colgroup>
     <thead><tr>
       <th class="tick" data-nofilter><input type="checkbox" data-pick-all aria-label="Tick every visible host name"></th>
       <th data-sort="text">Host name</th><th data-sort="ip">Addr</th><th data-sort="num">Severity</th>
       <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
-      <th data-sort="text">Last scan</th><th data-sort="text">Tags</th></tr></thead>
-    {% set tagger = access.manages(posture_domain) %}
+      <th data-sort="text">Last scan</th>{% if access.can('tags') %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
+    {% set tagger = access.acts('tags', posture_domain) %}
     <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}" data-quiet="{{ 'yes' if h.quiet else 'no' }}">
       <td class="tick"><input type="checkbox" data-pick value="{{ h.pick }}" aria-label="Tick {{ h.host }}"></td>
       <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
@@ -45,7 +45,7 @@
       <td data-key="{{ h.fixable if h.results else -1 }}">{% if h.cves %}{{ h.fixable }} of {{ h.cves }}{% endif %}</td>
       <td data-key="{{ h.open_ports if h.results else -1 }}">{% if h.results %}{{ h.open_ports }}{% endif %}</td>
       <td>{% if h.last %}{{ h.last }}{% else %}<span class="muted">Never</span>{% endif %}{% if h.pending %} <em>· queued</em>{% endif %}{% if h.skip %} <small class="muted">· {{ h.skip }}</small>{% endif %}</td>
-      <td class="tags">{% for t in h.net_tags %}<span class="pill" title="Network tag (Settings)">{{ t }}</span> {% endfor %}
+      {% if access.can('tags') %}<td class="tags">{% for t in h.net_tags %}<span class="pill" title="Network tag (Settings)">{{ t }}</span> {% endfor %}
         {% for t in h.tags %}<form method="post" action="{{ base }}/tags" class="inline tag">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
           <input type="hidden" name="host" value="{{ h.pick }}"><input type="hidden" name="tag" value="{{ t }}">
@@ -54,7 +54,7 @@
         {% if tagger %}<form method="post" action="{{ base }}/tags" class="inline tag">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
           <input type="hidden" name="host" value="{{ h.pick }}"><input type="hidden" name="from" value="posture">
-          <input name="tag" class="tag-in" placeholder="tag" maxlength="30" aria-label="New tag for {{ h.host }}"></form>{% endif %}</td>
+          <input name="tag" class="tag-in" placeholder="tag" maxlength="30" aria-label="New tag for {{ h.host }}"></form>{% endif %}</td>{% endif %}
     </tr>{% endfor %}</tbody>
   </table></div>
   </div>
@@ -102,7 +102,7 @@
       </tr>{% endfor %}</tbody>
     </table></div>
   </div>{% endif %}
-  {% if access.manages(posture_domain) %}
+  {% if access.acts('scans', posture_domain) %}
   <dialog class="confirm" id="scan-picked">
     <form method="post" action="{{ base }}/security/posture" data-posture-run>
       <input type="hidden" name="csrf" value="{{ csrf }}">

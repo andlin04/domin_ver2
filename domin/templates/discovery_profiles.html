@@ -11,7 +11,7 @@
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
-{% if user.role == 'admin' %}
+{% if access.can('discovery', 'write') %}
 <section class="card" id="profile-form">
   <h2>{% if editing %}Edit profile {{ form.get('name') }}
     <small>same name changes it, a new name adds a copy ·<a href="{{ base }}/security/discovery-profiles">new profile</a></small>
@@ -76,9 +76,9 @@
       <td class="cell-wrap">{% for s in p.used_by %}<div>{{ s }}</div>{% else %}<span class="muted">–</span>{% endfor %}</td>
       <td class="note-cell">{{ p.note }}</td>
       <td><span class="mono">{{ p.updated[:16].replace('T', ' ') }}</span>{% if p.updated_by %}<br><small class="muted">by {{ p.updated_by }}</small>{% endif %}</td>
-      <td><div class="row-actions">{% if user.role == 'admin' %}
+      <td><div class="row-actions">{% if access.can('discovery', 'write') %}
         <a class="btn small" href="?edit={{ p.name|urlencode }}#profile-form">Edit</a>{% endif %}
-        {% if user.role == 'admin' and p.name != 'default' %}
+        {% if access.can('discovery', 'write') and p.name != 'default' %}
         <form method="post" action="{{ base }}/security/discovery-profiles/{{ p.name }}/delete" class="inline"
               data-confirm="Delete discovery profile {{ p.name }}? Past scans keep their command line.">
           <input type="hidden" name="csrf" value="{{ csrf }}">

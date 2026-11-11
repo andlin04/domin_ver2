@@ -7,6 +7,7 @@ Scope.sql(column) to its WHERE clause, so one place decides what a user sees."""
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -16,6 +17,61 @@ from . import db
 LEVELS = ("viewer", "admin")   # per-domain grant levels, least to most
 LEVEL_LABELS = {"viewer": "viewer", "admin": "domain admin"}
 ALL = "*"                      # a grant on every domain
+
+# Feature rights of a power user (admins: everything). A feature right decides whether a user may use a feature at
+# all; the domain grants still decide on which domains. key: (label, what read allows, what read-write adds; "" = no
+# write part, the feature is read only).
+FEATURES = {
+    "inventory": ("Inventory", "inventory pages, all records, domain pages, search, CSV, drill data, whois and e-mail "
+                  "tools", ""),
+    "posture": ("Posture & CVEs", "posture overview and analysis, CVEs, changes, reports, the CVE look-up page", ""),
+    "scans": ("Scans & schedules", "Posture · Scans: scan activity and scheduled rescans",
+              "posture scans and renew, Scan with nmap, look-ups and fingerprints, schedules (add, edit, run, enable, "
+              "delete)"),
+    "tags": ("Tags", "host tags on the domain and posture pages", "add and remove host tags"),
+    "profiles": ("Scan profiles", "the profiles list", "add, change and delete profiles"),
+    "discovery": ("Discovery profiles", "the profiles list", "add, change and delete profiles, the default"),
+}
+ADMIN_FEATURES = {"operations": ("Operations", "jobs, tuning, visits, dropping a domain"),
+                  "settings": ("Settings", "general settings, Routes, sign-in"),
+                  "users": ("Users", "users, roles, rights and grants")}   # admins only
+RIGHTS = ("none", "read", "write")   # least to most
+RIGHT_LABELS = {"none": "none", "read": "read", "write": "read-write"}
+# What a power user could do before the rights existed (the migration and new power users)
+DEFAULT_RIGHTS = {"inventory": "read", "posture": "read", "scans": "write", "tags": "write", "profiles": "read",
+                  "discovery": "read"}
+
+
+def rights_of(user: dict) -> dict[str, str]:
+    """A user's feature rights from users.rights (JSON); '' = the defaults. Unknown keys and levels are dropped,
+    a read-only feature never holds write."""
+    raw = user.get("rights") or ""
+    saved = json.loads(raw) if raw else dict(DEFAULT_RIGHTS)
+    out = {}
+    for f, (_, _, write) in FEATURES.items():
+        lv = saved.get(f, "none")
+        lv = lv if lv in RIGHTS else "none"
+        out[f] = "read" if lv == "write" and not write else lv
+    return out
+
+
+def parse_rights(form: dict[str, str]) -> dict[str, str]:
+    """The matrix of the user edit page: r_<feature> = none | read | write."""
+    out = {}
+    for f, (label, _, write) in FEATURES.items():
+        lv = form.get(f"r_{f}") or "none"
+        if lv not in RIGHTS or (lv == "write" and not write):
+            raise ValueError(f"{label}: pick none, read{' or read-write' if write else ''}.")
+        out[f] = lv
+    return out
+
+
+def set_rights(conn: sqlite3.Connection, user_id: int, wanted: dict[str, str]) -> list[str]:
+    """Store a user's feature rights; returns the changes for the audit ("scans read->write")."""
+    row = conn.execute("SELECT rights FROM users WHERE id = ?", (user_id,)).fetchone()
+    have = rights_of({"rights": row["rights"] if row else ""})
+    conn.execute("UPDATE users SET rights = ? WHERE id = ?", (json.dumps(wanted, sort_keys=True), user_id))
+    return [f"{f} {have.get(f, 'none')}->{lv}" for f, lv in wanted.items() if have.get(f, "none") != lv]
 
 
 def covers(grant: str, name: str) -> bool:
@@ -29,6 +85,17 @@ class Scope:
     """What one request may see (hashable: it keys the page caches)."""
     everything: bool = False
     grants: tuple[tuple[str, str], ...] = ()   # (domain, level), sorted
+    rights: tuple[tuple[str, str], ...] = ()   # (feature, none | read | write), sorted; ignored when everything
+
+    def can(self, feature: str, level: str = "read") -> bool:
+        """The feature right: may this user use the feature at this level (read / write) at all?"""
+        if self.everything:
+            return True
+        return RIGHTS.index(dict(self.rights).get(feature, "none")) >= RIGHTS.index(level)
+
+    def acts(self, feature: str, name: str) -> bool:
+        """An action of a feature on one domain: read-write on the feature and domain admin of the domain."""
+        return self.can(feature, "write") and self.manages(name)
 
     def level(self, name: str) -> str:
         """The highest level of the grants covering name: "admin", "viewer" or "" (none)."""
@@ -86,6 +153,41 @@ def area(path: str) -> str:
     return "posture" if _POSTURE.fullmatch(path) else "admin"
 
 
+# Which feature right a request needs: (path pattern, feature, level); level None = read for GET/HEAD, write for any
+# other method. First match wins; no match = no feature right needed (sign-in, account, the admin start page).
+# The web app checks this for every signed-in request before its handler runs (web.create_app, gate).
+ROUTES = [(re.compile(p), f, lv) for p, f, lv in (
+    (r"/admin/security/report", "posture", "read"),
+    (r"/admin/security/posture/status", "", None),   # scan progress: grant-filtered, for posture and scans pages
+    (r"/admin/security/scans", "scans", "read"),
+    (r"/admin/security/(posture|scan)", "scans", "write"),
+    (r"/admin/security/lookup", "posture", "read"),
+    (r"/admin/security/profiles(/.*)?", "profiles", None),
+    (r"/admin/security/discovery-profiles(/.*)?", "discovery", None),
+    (r"/admin/security/scan-settings(/.*)?", "settings", None),
+    (r"/admin/security(/analysis|/kpis|/domain-search)?", "posture", "read"),
+    (r"/admin/(schedules(/.*)?|discovery/scan)", "scans", None),
+    (r"/admin/tags", "tags", "write"),
+    (r"/admin/(tune|jobs/.*|domains/[^/]+/delete)", "operations", "write"),
+    (r"/admin/(settings|users)(/.*)?", "settings", None),
+    (r"/admin/domains/[^/]+/viewers(/.*)?", "inventory", "read"),
+    (r"/|/all|/search|/search\.csv|/tools|/d/.*|/data/drill\.json|/scans/[^/]+\.csv"
+     r"|/api/(domains|scans|jobs|rdap|email|scan)(/.*)?", "inventory", "read"),
+)]
+
+
+def feature_of(method: str, path: str) -> tuple[str, str] | None:
+    """(feature, level) a request needs, or None."""
+    for pattern, feature, level in ROUTES:
+        if pattern.fullmatch(path):
+            return (feature, level or ("read" if method in ("GET", "HEAD") else "write")) if feature else None
+    return None
+
+
+def feature_label(feature: str) -> str:
+    return (FEATURES.get(feature) or ADMIN_FEATURES.get(feature) or (feature,))[0]
+
+
 def grants(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT domain, level, added, added_by FROM grants WHERE user_id = ? ORDER BY domain != ?, domain",
@@ -105,7 +207,8 @@ def for_user(conn: sqlite3.Connection, user: dict | None) -> Scope:
         return NONE
     if user["role"] == "admin":
         return FULL
-    return Scope(grants=tuple(sorted((g["domain"], g["level"]) for g in grants(conn, user["id"]))))
+    return Scope(grants=tuple(sorted((g["domain"], g["level"]) for g in grants(conn, user["id"]))),
+                 rights=tuple(sorted(rights_of(user).items())))
 
 
 def valid_domain(name: str) -> bool:
@@ -155,6 +258,57 @@ def parse_grants(form: dict[str, str], rows: int = 200) -> dict[str, str]:
 
 
 # --- audit trail ---------------------------------------------------------------------------------------------------
+
+# --- viewers granted by a domain admin (the domain page's Viewers panel) -----------------------------------------
+# A domain admin of a domain may give existing power users a viewer grant on exactly that domain, and take such a
+# grant back. Never more: no users made, no domain admin grants, admins untouched, a higher grant never lowered.
+
+def viewers_panel(conn: sqlite3.Connection, domain: str, actor: dict) -> dict:
+    """The grants on exactly this domain (power users) and the enabled power users that could get a viewer grant."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT g.user_id, u.name, g.level, g.added_by FROM grants g JOIN users u ON u.id = g.user_id "
+        "WHERE g.domain = ? AND u.role = 'power' ORDER BY u.name COLLATE NOCASE", (domain,))]
+    have = {r["user_id"] for r in rows}
+    pick = [dict(r) for r in conn.execute("SELECT id, name FROM users WHERE role = 'power' AND disabled = 0 "
+                                          "ORDER BY name COLLATE NOCASE") if r["id"] not in have | {actor["id"]}]
+    return {"rows": rows, "candidates": pick}
+
+
+def _power_user(conn: sqlite3.Connection, user_id: int, actor: dict) -> dict:
+    row = conn.execute("SELECT id, name, role, disabled FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row or row["role"] != "power" or row["id"] == actor["id"]:
+        raise LookupError("No such power user.")
+    return dict(row)
+
+
+def grant_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: dict) -> bool:
+    """A viewer grant on exactly `domain` for an existing, enabled power user. False = already there.
+    ValueError: the user already holds domain admin there (never lowered here). LookupError: no such power user."""
+    target = _power_user(conn, user_id, actor)
+    if target["disabled"]:
+        raise LookupError("No such power user.")
+    row = conn.execute("SELECT level FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain)).fetchone()
+    if row:
+        if row["level"] != "viewer":
+            raise ValueError(f"{target['name']} is domain admin of {domain}; only an admin changes that.")
+        return False
+    conn.execute("INSERT INTO grants (user_id, domain, level, added, added_by) VALUES (?, ?, 'viewer', ?, ?)",
+                 (user_id, domain, db.now(), actor["name"]))
+    audit(conn, actor["name"], "grant-viewer", target["name"], domain)
+    return True
+
+
+def revoke_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: dict) -> None:
+    """Take back a viewer grant on exactly `domain`. ValueError: it is a domain admin grant. LookupError: none."""
+    target = _power_user(conn, user_id, actor)
+    row = conn.execute("SELECT level FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain)).fetchone()
+    if not row:
+        raise LookupError(f"{target['name']} has no grant on {domain}.")
+    if row["level"] != "viewer":
+        raise ValueError(f"{target['name']} is domain admin of {domain}; only an admin changes that.")
+    conn.execute("DELETE FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain))
+    audit(conn, actor["name"], "revoke-viewer", target["name"], domain)
+
 
 def audit(conn: sqlite3.Connection, actor: str, action: str, target: str, detail: str = "") -> None:
     conn.execute("INSERT INTO audit (at, actor, action, target, detail) VALUES (?, ?, ?, ?, ?)",

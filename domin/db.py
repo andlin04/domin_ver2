@@ -1,6 +1,7 @@
 """SQLite storage. One connection per call site (cheap); WAL lets the web app read while the worker writes."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'power',        -- power (per-domain grants) | admin (old: viewer, analyst)
     totp_secret TEXT NOT NULL DEFAULT '',      -- '' = no second factor
     totp_required INTEGER NOT NULL DEFAULT 0,
+    rights TEXT NOT NULL DEFAULT '',           -- json feature rights of a power user; '' = the defaults
     totp_last_step INTEGER NOT NULL DEFAULT -1,   -- last accepted TOTP step: a code works only once
     recovery TEXT NOT NULL DEFAULT '[]',       -- json list of sha256 of the unused recovery codes
     disabled INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +261,10 @@ def init(path: Path) -> None:
                         SELECT DISTINCT scan_id, ip, country FROM records WHERE ip != '' AND country != '')
                     GROUP BY scan_id) c
                 WHERE scans.id = c.scan_id""", EU_NAMES)
+        if "rights" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
+            from .access import DEFAULT_RIGHTS  # local import: access -> db
+            conn.execute("ALTER TABLE users ADD COLUMN rights TEXT NOT NULL DEFAULT ''")
+            conn.execute("UPDATE users SET rights = ?", (json.dumps(DEFAULT_RIGHTS, sort_keys=True),))
         if "user_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(admin_sessions)")}:
             conn.execute("ALTER TABLE admin_sessions ADD COLUMN user_id INTEGER")
         have = {r["name"] for r in conn.execute("PRAGMA table_info(posture_scans)")}

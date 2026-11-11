@@ -10,7 +10,7 @@
 {% set sub = "profiles" %}{% include "_settings_nav.html" %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
-{% if user.role == 'admin' %}
+{% if access.can('profiles', 'write') %}
 <section class="card" id="profile-form">
   <h2>{% if request.query_params.get('edit') and form.get('name') %}Edit profile {{ form.get('name') }}
     <small>same name changes it, a new name adds a copy ·<a href="{{ base }}/security/profiles">new profile</a></small>
@@ -49,9 +49,9 @@
       <td><b>{{ p.name }}</b></td><td class="mono"><div class="lines2" title="{{ p.ports }}">{{ p.ports }}</div></td>
       <td class="num">{{ p.intensity }}</td><td class="num">T{{ p.timing }}</td><td class="num">{{ p.timeout }}</td>
       <td>{{ route_names.get(p.route, 'a deleted route') }}</td><td>{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
-      <td><div class="row-actions">{% if user.role == 'admin' %}
+      <td><div class="row-actions">{% if access.can('profiles', 'write') %}
         <a class="btn small" href="?edit={{ p.name|urlencode }}#profile-form">Edit</a>{% endif %}
-        {% if user.role == 'admin' and p.name != 'default' %}
+        {% if access.can('profiles', 'write') and p.name != 'default' %}
         <form method="post" action="{{ base }}/security/profiles/{{ p.name }}/delete" class="inline"
               data-confirm="Delete scan profile {{ p.name }}? Past scans keep their parameters.">
           <input type="hidden" name="csrf" value="{{ csrf }}">

@@ -10,8 +10,8 @@
 {% set tab_url = base ~ '/security' ~ ('' if tab == 'overview' else '/' ~ tab) %}
 <nav class="tabs posture-tabs" aria-label="Posture views">
   {% for t, label, sub in [('overview', 'Overview', 'What'), ('analysis', 'Analysis', 'Where'), ('scans', 'Scans', '')] %}
-  <a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
-    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}{% if sub %}<small class="tab-sub">{{ sub }}</small>{% endif %}</a>{% endfor %}
+  {% if access.can('scans' if t == 'scans' else 'posture') %}<a class="tab{% if t == tab %} active{% endif %}" {% if t == tab %}aria-current="page"{% endif %}
+    href="{{ base }}/security{{ '' if t == 'overview' else '/' ~ t }}{{ tab_q }}">{{ label }}{% if sub %}<small class="tab-sub">{{ sub }}</small>{% endif %}</a>{% endif %}{% endfor %}
 </nav>
 <section class="card controls">
   <form method="get" action="{{ tab_url }}" class="inline posture-pick">
@@ -35,7 +35,7 @@
         size="26" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Filter domains, hosts and CVEs on any attribute"></label>{% endif %}
   </form>
   {% if tab == 'scans' %}
-  {% if posture_domain and access.manages(posture_domain) %}
+  {% if posture_domain and access.acts('scans', posture_domain) %}
   <form method="post" action="{{ base }}/security/posture" class="inline posture-run" data-posture-run>
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="domain" value="{{ posture_domain }}">
@@ -107,7 +107,7 @@
 {% endif %}
 
 {% if tab != 'scans' %}
-{% with rep=report, renew_base=base, can_run=access.manages_any, show_domain=not posture_domain %}
+{% with rep=report, renew_base=base, can_run=access.manages_any and access.can('scans', 'write'), show_domain=not posture_domain %}
 {% include "_posture_report.html" %}
 {% endwith %}
 {% endif %}

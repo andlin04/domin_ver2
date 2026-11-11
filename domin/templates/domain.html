@@ -20,7 +20,7 @@
       <button class="btn primary" type="submit">Scan now</button>
       <div class="scan-status" data-scan-status {% if not open_job %}hidden{% endif %} data-job="{{ open_job or '' }}"></div>
     </form>
-    {% if user and access.manages(domain.name) and sched_opts %}
+    {% if user and access.acts('scans', domain.name) and sched_opts %}
     <form method="post" action="{{ admin_base }}/discovery/scan" class="inline nmap-scan"
           data-confirm="Scan {{ domain.name }} with an nmap discovery stage? It sweeps {{ 'the internal networks (Settings)' if domain_internal else 'only the addresses this scan finds for the domain' }}.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
@@ -40,28 +40,34 @@
   </div>
 </section>
 
-{% if user %}
+{% if user and (access.can('posture') or access.can('scans')) %}
 <div id="posture" class="posture-block">
+  {% if access.can('posture') %}
   <div class="card-head">
     <h2 class="section-title">Security posture <small>summary · hosts, CVEs and changes in Posture</small></h2>
-    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name|urlencode }}">Open in Posture{% if access.manages(domain.name) %} · scan / renew{% endif %}</a>
+    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name|urlencode }}">Open in Posture{% if access.acts('scans', domain.name) %} · scan / renew{% endif %}</a>
   </div>
   {% with pp_base=admin_base, pp_domain=domain.name, pp_pending=posture_report.kpi.pending %}
   {% include "_posture_progress.html" %}
   {% endwith %}
   {% with rep=posture_report %}{% include "_posture_summary.html" %}{% endwith %}
+  {% endif %}
+  {% if access.can('scans') %}
   {# a short list; the list with its actions and the add form live in Posture · Scans #}
   <section class="card" id="schedules">
     <div class="card-head"><h2>Scheduled rescans <small>{{ sched_rows|length }} · server local time</small></h2>
-      <a class="btn small" href="{{ admin_base }}/security/scans?domain={{ domain.name|urlencode }}#schedules">{{ 'Manage' if access.manages(domain.name) else 'Open' }} in Posture · Scans</a></div>
-    {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+      <a class="btn small" href="{{ admin_base }}/security/scans?domain={{ domain.name|urlencode }}#schedules">{{ 'Manage' if access.acts('scans', domain.name) else 'Open' }} in Posture · Scans</a></div>
+    {% if notice and not request.query_params.get('ok', '').startswith('viewer') %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
     {% if sched_rows %}<ul class="sched-short">{% for s in sched_rows %}
       <li><b>{{ s.name }}</b> <span class="pill {{ 'done' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>
         <span class="muted">· {{ s.when }}{% if s.enabled and s.next_run %} · next {{ s.next_run[:16].replace('T', ' ') }}{% endif %}</span></li>
     {% endfor %}</ul>{% else %}<p class="muted">No schedules.</p>{% endif %}
   </section>
+  {% endif %}
+  {% if viewers is not none %}{% include "_viewers.html" %}{% endif %}
   <h2 class="section-title">Inventory</h2>
 </div>
+{% elif viewers is not none %}{% include "_viewers.html" %}
 {% endif %}
 
 <section class="toolbar card">
@@ -81,7 +87,7 @@
 {% if current.error and current.status == 'done' %}
 <p class="note" role="status">This scan may be incomplete: {{ current.error }}.</p>
 {% endif %}
-{% if user and current.discovery %}
+{% if user and access.can('scans') and current.discovery %}
 <section class="card" id="discovery">
   <h2>nmap discovery <small>profile {{ current.discovery }} · {{ discovered|length }} live address(es)</small></h2>
   <p class="mono small">{{ current.discovery_params or 'not run' }}</p>
@@ -165,15 +171,15 @@
       <thead><tr><th data-sort="text">Host</th><th data-sort="ip">Address</th><th data-sort="num" class="num">ASN</th>
         <th data-sort="text">Prefix</th><th data-sort="text">Network</th><th data-sort="text">Description</th>
         <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th>
-        {% if user %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
+        {% if user and access.can('tags') %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
       <tbody>
-      {% set tagger = user and access.manages(domain.name) %}
+      {% set tagger = user and access.acts('tags', domain.name) %}
       {% for r in rows %}{% set eu = eu_status(r.country) %}
         <tr><td class="host">{{ r.host }}</td><td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td>
           <td class="mono">{{ r.prefix }}</td><td class="text net">{{ r.netname }}</td>
           <td class="text"><div class="lines2" title="{{ r.descr }}">{{ r.descr }}</div></td>
           <td class="{{ 'eu' if eu == 'EU' else 'non-eu' if eu }}">{{ eu }}</td><td>{{ r.country }}</td>
-          {% if user %}<td class="tags">
+          {% if user and access.can('tags') %}<td class="tags">
             {% for t in net_tags.get(r.host, []) %}<a class="pill" href="?tag={{ t }}#records" title="Network tag (Settings)">{{ t }}</a>{% endfor %}
             {% for t in host_tags.get(r.host, []) %}<form method="post" action="{{ admin_base }}/tags" class="inline tag">
               <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">

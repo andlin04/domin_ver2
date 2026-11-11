@@ -23,6 +23,29 @@
     {% else %}Admin: every domain, users and settings. Power user: the domains below only.{% endif %}</p>
 </section>
 
+<section class="card" id="rights">
+  <h2>Feature rights <small>{{ 'unused while admin' if target.role == 'admin' else 'with the domain grants below' }}</small></h2>
+  {% if target.role == 'admin' %}<p class="note">An admin has every right; these apply only if the role becomes power
+    user.</p>{% endif %}
+  <form method="post" action="{{ base }}/users/{{ target.id }}/rights">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="table-wrap short"><table class="rights">
+      <thead><tr><th>Feature</th>{% for k, label in right_labels.items() %}<th class="pick">{{ label }}</th>{% endfor %}<th>Read · read-write adds</th></tr></thead>
+      <tbody>{% for f, (label, read, write) in features.items() %}<tr>
+        <td><b>{{ label }}</b></td>
+        {% for k in right_labels %}<td class="pick">{% if k != 'write' or write %}<input type="radio" name="r_{{ f }}" value="{{ k }}"
+          aria-label="{{ label }}: {{ right_labels[k] }}" {% if rights[f] == k %}checked{% endif %}>{% else %}<span class="muted" title="Read only feature">–</span>{% endif %}</td>{% endfor %}
+        <td class="muted small">{{ read }}{% if write %} · <i>{{ write }}</i>{% endif %}</td>
+      </tr>{% endfor %}
+      {% for f, (label, what) in admin_features.items() %}<tr class="muted"><td>{{ label }}</td>
+        <td class="pick" colspan="3">admins only</td><td class="small">{{ what }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted">A right decides what this user may use at all; the domain grants decide on which domains. Actions
+      on a domain (scans, tags, schedules) need read-write here and domain admin of that domain.</p>
+    <p><button class="btn primary" type="submit">Save rights</button></p>
+  </form>
+</section>
+
 <section class="card" id="two-factor">
   <h2>Two-factor <small>{{ 'on' if target.has_totp else 'not set up' }}</small></h2>
   <form method="post" action="{{ base }}/users/{{ target.id }}/require-2fa" class="inline">

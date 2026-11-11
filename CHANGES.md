@@ -2,6 +2,25 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Feature rights per power user, viewers granted by domain admins
+
+- Users, edit page, "Feature rights": none / read / read-write per feature for a power user: Inventory, Posture &
+  CVEs, Scans & schedules, Tags, Scan profiles, Discovery profiles (docs/delegation.md, Feature rights). Operations,
+  Settings/Routes and Users stay admin-only. Admins have every right. Audit: `rights`.
+- Checked once, centrally (`access.ROUTES`, before the handler): no right = 404 as an unknown page, read only on a
+  change = 403. Navigation, tabs, buttons and columns (Tags) hide what the user can't use. Combines with the domain
+  grants: an action on a domain needs read-write on the feature and domain admin of the domain.
+- Profile and discovery profile edits follow the rights instead of the admin role.
+- A power user's start page is the first feature it may use (Posture, Scans, Inventory, My account).
+- Domain page, "Viewers" panel (domain admins of that domain, and admins): give an enabled power user a viewer grant
+  on exactly that domain, or take one back. No users made, no domain admin grants, admins and higher grants
+  untouched (409). Audit: `grant-viewer`, `revoke-viewer`.
+- Migration on start (once): new column `users.rights`; every existing user gets what power users could do before:
+  inventory, posture, profiles, discovery read; scans & schedules, tags read-write. New users get the same.
+- Rollback: `git revert` this commit and re-run install.sh; older code ignores `users.rights` (every power user gets
+  the old abilities back, profile edits admin-only again). Viewer grants made by domain admins stay as normal grants;
+  remove them on the Users page if unwanted (audit `grant-viewer` lists them).
+
 ## 2026-11-11: Sign-in per area, two-factor per user
 
 - Settings, "Sign-in required for": Inventory and/or Posture (docs/delegation.md, Sign-in). Inventory ticked: a

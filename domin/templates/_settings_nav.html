@@ -1,7 +1,7 @@
 <nav class="subnav" aria-label="Settings sections">
   {% if user.role == 'admin' %}<a href="{{ base }}/settings" class="{{ 'active' if sub == 'general' }}">General</a>{% endif %}
-  <a href="{{ base }}/security/profiles" class="{{ 'active' if sub == 'profiles' }}">Scan profiles</a>
-  <a href="{{ base }}/security/discovery-profiles" class="{{ 'active' if sub == 'discovery' }}">Discovery profiles</a>
-  <a href="{{ base }}/security/lookup" class="{{ 'active' if sub == 'lookup' }}">CVE look-up</a>
+  {% if access.can('profiles') %}<a href="{{ base }}/security/profiles" class="{{ 'active' if sub == 'profiles' }}">Scan profiles</a>{% endif %}
+  {% if access.can('discovery') %}<a href="{{ base }}/security/discovery-profiles" class="{{ 'active' if sub == 'discovery' }}">Discovery profiles</a>{% endif %}
+  {% if access.can('posture') %}<a href="{{ base }}/security/lookup" class="{{ 'active' if sub == 'lookup' }}">CVE look-up</a>{% endif %}
   {% if user.role == 'admin' %}<a href="{{ base }}/security/scan-settings" class="{{ 'active' if sub == 'scan-settings' }}">Routes</a>{% endif %}
 </nav>

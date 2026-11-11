@@ -3,11 +3,11 @@
 <div class="table-wrap"><table class="schedules">
   <thead><tr>{% if show_domain %}<th>Domain</th>{% endif %}<th>Name</th><th>When</th><th>Runs</th><th>Next run</th>
     <th>Last run</th><th></th></tr></thead>
-  <tbody>{% for s in sched_rows %}{% set mine = access.manages(s.domain) %}<tr>
+  <tbody>{% for s in sched_rows %}{% set mine = access.acts('scans', s.domain) %}<tr>
     {% if show_domain %}<td><a href="/d/{{ s.domain }}">{{ s.domain }}</a></td>{% endif %}
     <td class="name"><b>{{ s.name }}</b><br><span class="pill {{ 'done' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>
       {% if s.busy %}<span class="pill running">running</span>{% endif %}
-      {% if not mine %}<span class="pill" title="Your grant on {{ s.domain }} is viewer">read-only</span>{% endif %}</td>
+      {% if not mine %}<span class="pill" title="Viewer on {{ s.domain }}, or read only on Scans &amp; schedules">read-only</span>{% endif %}</td>
     <td class="when">{{ s.when }}</td>
     <td class="runs">{% if s.discovery %}<div>Inventory{% if s.discovery_profile %} + nmap <b>{{ s.discovery_profile }}</b>{% else %} (DNS only){% endif %}</div>{% endif %}
       {% if s.posture %}<div>Posture <b>{{ s.posture_profile }}</b> ·

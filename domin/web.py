@@ -235,26 +235,49 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         """Settings, Sign-in: a visitor without a user on a page whose area requires sign-in goes to the sign-in page
         (API, drill data, CSV and form posts: 401). Inventory: every visitor without a session, except private API
         clients (DOMIN_INTERNAL_IPS) on /api/. Posture: only the lab stand-in is turned away here; a visitor without
-        a session gets the posture handlers' own answer, as before."""
+        a session gets the posture handlers' own answer, as before.
+        Then the feature rights (access.ROUTES) of a signed-in user: none = 404, read only on a write = 403."""
         path = request.url.path
-        where = access.area(path)
-        if where == "admin" or path.startswith("/static/") or path == "/healthz":
+        if path.startswith("/static/") or path == "/healthz":
             return None
+        where = access.area(path)
+        need = access.feature_of(request.method, path)
         if where == "inventory" and path.startswith("/api/") and peer_in(request, internal_nets):
             return None
+        machine = request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv")
         with conn() as c:
-            if not users.signin_required(c)[where]:
+            required = where != "admin" and users.signin_required(c)[where]
+            if not required and (not need or (COOKIE not in request.cookies and not settings.allow_no_login)):
                 return None
             s = session_for(c, request, settings)
             u = users.get(c, s["user_id"]) if s and s["user_id"] else None
-            if u and not u["disabled"]:
+            u = u if u and not u["disabled"] else None
+            if u is None:
+                stand_in = settings.allow_no_login and admin.no_login_session(c)
+                if not required or (where == "posture" and not stand_in):
+                    return None   # a public page, or the handler's own answer (the sign-in page)
+                if machine:
+                    return JSONResponse({"error": "Sign in first."}, status_code=401, headers=PRIVATE)
+                here = path + (f"?{request.url.query}" if request.url.query else "")
+                return RedirectResponse(f"{ADMIN}?{urlencode({'next': here})}", status_code=303, headers=PRIVATE)
+            if not need:
                 return None
-            if where == "posture" and not (settings.allow_no_login and admin.no_login_session(c)):
-                return None
-        if request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv"):
-            return JSONResponse({"error": "Sign in first."}, status_code=401, headers=PRIVATE)
-        here = path + (f"?{request.url.query}" if request.url.query else "")
-        return RedirectResponse(f"{ADMIN}?{urlencode({'next': here})}", status_code=303, headers=PRIVATE)
+            scope = access.for_user(c, u)
+        feature, level = need
+        if scope.can(feature, level):
+            return None
+        # Feature rights (access.FEATURES): no right at all answers as an unknown page, read without write as a
+        # refused action, as the domain grants do.
+        if not scope.can(feature):
+            code, msg = 404, "Not Found"
+        else:
+            code, msg = 403, f"{access.feature_label(feature)}: your account may only read here."
+        if path.startswith(("/api/", "/data/")) or path.endswith(".csv") or "json" in request.headers.get("accept", ""):
+            return JSONResponse({"error": msg}, status_code=code, headers=PRIVATE)
+        request.state.scope = scope
+        resp = page(request, "error.html", code, message=msg, code=code)
+        resp.headers.update(PRIVATE)
+        return resp
 
     @app.middleware("http")
     async def headers(request: Request, call_next):
@@ -335,10 +358,14 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         user, csrf = viewer(request)
         posture_rows, posture_trend, host_tags, suggested, tag_counts, net_tags = [], [], {}, {}, {}, {}
         tag = request.query_params.get("tag", "")
-        if user:   # posture results and host tags are signed-in reports
+        # posture results, host tags and schedules are signed-in reports, each behind its feature right
+        see_posture, see_tags, see_scans = (bool(user) and scope.can(f) for f in ("posture", "tags", "scans"))
+        if see_posture:
             with conn() as c:
                 posture_rows = posture.current(c, d["name"])
                 posture_trend = posture.trend(c, d["name"])
+        if see_tags:
+            with conn() as c:
                 host_tags = tags.for_hosts(c, sorted({r["host"] for r in rows}))
                 rules = users.get_scope(c)["net_tags"]
             suggested = tags.suggestions(rows, posture_rows, host_tags)
@@ -355,21 +382,24 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 tag = ""
         posture_report = posture.report(posture_rows)
         posture_report["charts"]["trend"] = posture_trend
-        sched_rows, sched_opts, discovered, internal = [], None, [], False
-        if user:   # schedules and the nmap discovery stage: signed-in, like posture
+        sched_rows, sched_opts, discovered, internal, viewers = [], None, [], False, None
+        if see_scans:   # schedules and the nmap discovery stage: signed-in, like posture
             with conn() as c:
                 sched_rows = schedules.for_domain(c, d["name"])
-                if scope.manages(d["name"]):
+                if scope.acts("scans", d["name"]):
                     sched_opts = schedule_opts(c, d["name"])
                 if current.get("discovery"):
                     discovered = db.discovery_results(c, current["id"])
                 internal = is_internal(d["name"], admin.effective(settings, c).internal_zones)
+        if user and scope.manages(d["name"]):   # domain admins (and admins) grant viewer here
+            with conn() as c:
+                viewers = access.viewers_panel(c, d["name"], user)
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
                     posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
                     tag_counts=dict(sorted(tag_counts.items())), tag=tag, sched_rows=sched_rows,
-                    sched_opts=sched_opts, discovered=discovered,
+                    sched_opts=sched_opts, discovered=discovered, viewers=viewers,
                     domain_internal=internal, notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -651,7 +681,8 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "schedule-saved": "Schedule saved; its next run is shown below.", "schedule-deleted": "Schedule removed.",
            "schedule-run": "Schedule run queued.", "schedule-on": "Schedule enabled; next run from now.",
            "schedule-off": "Schedule disabled.", "discovery-queued": "Scan with nmap discovery queued.",
-           "discovery-open": "A scan of this domain is already queued or running; it keeps its own parameters."}
+           "discovery-open": "A scan of this domain is already queued or running; it keeps its own parameters.",
+           "viewer-added": "Viewer added.", "viewer-removed": "Viewer removed.", "rights-saved": "Rights saved."}
 
 
 def schedule_opts(c, domain: str, internal: bool = False) -> dict:
@@ -773,7 +804,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                     return back(nxt)
                 if u["role"] == "admin":
                     return dashboard(request, c, u, s)
-                return back(base + "/security")
+                can = request.state.scope.can   # a power user's start page: the first feature it may use
+                return back(base + "/security" if can("posture") else base + "/security/scans" if can("scans")
+                            else "/" if can("inventory") else base + "/account")
             any_user = users.count(c) > 0
         return priv(page(request, "login.html", base=base, any_user=any_user, error="", next=nxt))
 
@@ -978,7 +1011,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return shell(request, "user_edit.html", u, s, status, target=target, roles=users.ROLES,
                      last_admin=users.is_last_admin(c, target["id"]), grant_rows=rows + [{"domain": "",
                      "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
-                     role_2fa=users.required_for(c, target["role"]), error=error)
+                     role_2fa=users.required_for(c, target["role"]), error=error,
+                     features=access.FEATURES, admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
+                     right_labels=access.RIGHT_LABELS)
 
     @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
     def user_edit_page(request: Request, user_id: PathId):
@@ -1042,6 +1077,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 if detail:
                     access.audit(c, u["name"], "grants", target["name"], detail)
                 return back(f"{base}/users/{user_id}", "user-saved")
+            if action == "rights":
+                try:
+                    wanted = access.parse_rights(data)
+                except ValueError as exc:
+                    return user_edit_view(request, c, u, s, target, 422, str(exc))
+                if changed := access.set_rights(c, user_id, wanted):
+                    access.audit(c, u["name"], "rights", target["name"], ", ".join(changed))
+                return back(f"{base}/users/{user_id}#rights", "rights-saved")
             if action == "disable":
                 want = data.get("disabled") == "on"
                 if want and users.is_last_admin(c, user_id):
@@ -1082,6 +1125,35 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not d or not db.delete_domain(c, d):
                 raise HTTPException(404, "No such domain")
         return back("/")   # the domain is gone from the overview
+
+    # --- viewers on a domain (domain admin of it: access.grant_viewer) -------------------------------------------
+
+    @app.post(base + "/domains/{name}/viewers", include_in_schema=False)
+    @app.post(base + "/domains/{name}/viewers/{user_id}/delete", include_in_schema=False)
+    async def domain_viewers(request: Request, name: str, user_id: int | None = None):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            grants = request.state.scope
+            d = db.domain(c, name.lower())
+            if not d or not grants.sees(d["name"]):   # outside the grants: as an unknown domain
+                raise HTTPException(404, f"{name} has not been scanned")
+            if not grants.manages(d["name"]):
+                raise HTTPException(403, f"Granting viewers needs domain admin rights on {d['name']}.")
+            try:
+                if user_id is None:
+                    if not (data.get("user") or "").isdigit():
+                        raise HTTPException(422, "Pick a power user.")
+                    access.grant_viewer(c, d["name"], int(data["user"]), u)
+                else:
+                    access.revoke_viewer(c, d["name"], user_id, u)
+            except LookupError as e:
+                raise HTTPException(404, str(e)) from None
+            except ValueError as e:
+                raise HTTPException(409, str(e)) from None
+        return back(f"/d/{d['name']}#viewers", "viewer-removed" if user_id else "viewer-added")
 
     # --- settings / scope (admin only) ---------------------------------------------------------------------------
 
@@ -1226,7 +1298,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         """Posture · Scans, Scheduled rescans: the schedules of the domains in the scope (dom: that one only); the add
         form's domain picker lists the domains this user is domain admin of (none: no form)."""
         rows = [r for r in schedules.listing(c, grants) if not dom or r["domain"] == dom]
-        mine = [d for d in posture.domains(c, grants) if grants.manages(d)]
+        mine = [d for d in posture.domains(c, grants) if grants.acts("scans", d)]
         pick = dom if dom in mine else ""
         opts = schedule_opts(c, pick, internal_check(c)(pick) if pick else False) if mine else None
         return {"sched_rows": schedule_rows(c, rows), "sched_domains": mine, "sched_pick": pick,
@@ -1459,8 +1531,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if u["role"] != "admin":
-                return profiles_view(request, u, s, 403, "Changing scan profiles needs the admin role.", data)
+            if not request.state.scope.can("profiles", "write"):
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs read-write on Scan profiles.",
+                                     data)
             p, error = posture.check_profile((data.get("name") or "").strip().lower(),
                                              (data.get("ports") or "").strip(), data.get("intensity"),
                                              data.get("timing"), data.get("timeout"), (data.get("route") or "").strip(),
@@ -1477,8 +1550,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if u["role"] != "admin":
-                return profiles_view(request, u, s, 403, "Changing scan profiles needs the admin role.")
+            if not request.state.scope.can("profiles", "write"):
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs read-write on Scan profiles.")
             if uses := posture.profile_used_by(c, name):
                 return profiles_view(request, u, s, 409, f"{name} is used by schedule(s) {', '.join(uses)}: pick "
                                      "another profile there first.")
@@ -1517,8 +1590,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if u["role"] != "admin":
-                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            if not request.state.scope.can("discovery", "write"):
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs read-write on "
+                                      "Discovery profiles.")
             raw_ok = admin.kv_get(c, posture.RAW_KEY) == "1" and users.get_scope(c)["raw_scans"]
             p, error = discovery.check(data, {r["id"] for r in proxy.get(c)["routes"]}, raw_ok)
             if not p:
@@ -1534,8 +1608,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if u["role"] != "admin":
-                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            if not request.state.scope.can("discovery", "write"):
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs read-write on "
+                                      "Discovery profiles.")
             name = (data.get("name") or "").strip()
             try:
                 discovery.set_default(c, name)
@@ -1551,8 +1626,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if u["role"] != "admin":
-                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            if not request.state.scope.can("discovery", "write"):
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs read-write on "
+                                      "Discovery profiles.")
             if why := discovery.delete(c, name):
                 return discovery_view(request, c, u, s, 409 if "used by" in why else 422, why)
             access.audit(c, u["name"], "discovery-profile-delete", name, "")
@@ -1597,8 +1673,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         grants = request.state.scope
         rows = [r for r in schedules.for_domain(c, dom) if r["id"] == sid] if sid else []
         return shell(request, "schedule.html", u, s, status, error=error, sf=sf, sf_id=sid, sched_domain=dom,
-                     sched_rows=schedule_rows(c, rows), can_manage=grants.manages(dom), route_warn=route_warn,
-                     sched_opts=schedule_opts(c, dom, internal_check(c)(dom)) if grants.manages(dom) else None)
+                     sched_rows=schedule_rows(c, rows), can_manage=grants.acts("scans", dom), route_warn=route_warn,
+                     sched_opts=schedule_opts(c, dom, internal_check(c)(dom)) if grants.acts("scans", dom) else None)
 
     def schedules_page(dom: str = "") -> str:
         """Posture · Scans, Scheduled rescans (filtered to dom)."""

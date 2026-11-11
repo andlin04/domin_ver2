@@ -9,7 +9,7 @@
 {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
-{% if access.manages_any %}
+{% if access.manages_any and access.can('scans', 'write') %}
 <section class="card">
   <h2>Look up CVEs</h2>
   <form method="post" action="{{ base }}/security/scan" class="cve-form">

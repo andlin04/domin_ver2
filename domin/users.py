@@ -57,8 +57,10 @@ def create(conn: sqlite3.Connection, name: str, role: str, password: str = "") -
     if by_name(conn, name):
         raise ValueError(f"a user named {name} already exists")
     pw = admin.hash_password(password) if password else ""
-    uid = conn.execute("INSERT INTO users (name, password_hash, role, created) VALUES (?, ?, ?, ?)",
-                       (name, pw, "power" if role in OLD_ROLES else role, db.now())).lastrowid
+    from .access import DEFAULT_RIGHTS  # local import: access -> db
+    uid = conn.execute("INSERT INTO users (name, password_hash, role, created, rights) VALUES (?, ?, ?, ?, ?)",
+                       (name, pw, "power" if role in OLD_ROLES else role, db.now(),
+                        json.dumps(DEFAULT_RIGHTS, sort_keys=True))).lastrowid
     if role in OLD_ROLES:
         conn.execute("INSERT INTO grants (user_id, domain, level, added, added_by) VALUES (?, '*', ?, ?, '')",
                      (uid, OLD_ROLES[role], db.now()))
