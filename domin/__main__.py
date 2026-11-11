@@ -1,4 +1,4 @@
-"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-public <db>|refresh-fixes|
+"""CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-csv <csv>|refresh-fixes|
 user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password}."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import access, admin, cve, db, importer, jobs, posture, publicsync, tools, users
+from . import access, admin, csvimport, cve, db, importer, jobs, posture, tools, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -40,9 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("domain")
     geo = sub.add_parser("geoip", help="load a DB-IP 'IP to Country Lite' CSV (.csv or .csv.gz) for visitor countries")
     geo.add_argument("file", type=Path)
-    pub = sub.add_parser("import-public", help="replace the inventory with a copy of the public database "
-                                               "(own scans are kept; Settings > Sync runs this)")
-    pub.add_argument("file", type=Path)
+    ic = sub.add_parser("import-csv", help="load a domin CSV export (All records or a search download) as imported "
+                                           "scans, one per domain; existing scans are kept, re-imports add nothing")
+    ic.add_argument("file", type=Path)
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
     ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
@@ -87,9 +87,18 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "geoip":
         with db.connect(settings.db_path) as conn:
             print(f"{admin.import_geo(conn, args.file)} address ranges loaded")
-    elif args.cmd == "import-public":
+    elif args.cmd == "import-csv":
         with db.connect(settings.db_path) as conn:
-            print(json.dumps(publicsync.import_public(conn, args.file)))
+            zones = admin.effective(settings, conn).internal_zones
+            try:
+                stats = csvimport.import_file(conn, args.file, zones, actor="cli", name=args.file.name,
+                                              work_dir=settings.db_path.parent)
+            except (ValueError, csvimport.TooLarge, OSError) as e:
+                print(f"import-csv: {e}", file=sys.stderr)
+                return 1
+        print(csvimport.summary(stats))
+        for line in stats["errors"]:
+            print(f"  bad row: {line}")
     elif args.cmd == "refresh-fixes":
         cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
         with db.connect(settings.db_path) as conn, tools.http_client() as client:

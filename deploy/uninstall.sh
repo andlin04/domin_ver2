@@ -21,7 +21,7 @@ systemctl disable -q --now domin domin-worker domin-mullvad.path domin-public-sy
 rm -f /etc/systemd/system/domin.service /etc/systemd/system/domin-worker.service \
   /etc/systemd/system/domin-mullvad.path /etc/systemd/system/domin-mullvad.service \
   /etc/systemd/system/domin-tor.path /etc/systemd/system/domin-tor.service \
-  /etc/systemd/system/domin-public-sync.path /etc/systemd/system/domin-public-sync.service
+  /etc/systemd/system/domin-public-sync.path /etc/systemd/system/domin-public-sync.service   # retired units
 # the Mullvad tunnel (wg-quick@mullvad, /etc/wireguard/mullvad.*) stays: deploy/mullvad-tunnel.sh down stops it
 rm -rf /etc/systemd/system/domin.service.d /etc/systemd/system/domin-worker.service.d
 systemctl daemon-reload

@@ -2,6 +2,27 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: CSV import replaces the public database sync
+
+- Settings > CSV import (admins only), in place of Settings > Public database: upload a CSV download of this or
+  another domin (All records or a search; the export's columns, with or without first_seen/seen) of up to 200 MB.
+  The upload is streamed to a temp file in /var/lib/domin and queued; the worker imports it on its own thread and
+  the page shows the progress and the counts (rows, bad rows with their first line numbers, domains imported, already
+  there, out of scope). One imported scan per domain, timed by the newest last_seen of its rows (the import time
+  when the file has none), so the overview, history and charts treat it like a scan. A domain that already has a
+  scan at that time is skipped: re-importing a file, or this instance's own export, adds nothing. Existing scans are
+  never changed or deleted; out-of-scope domains are skipped. Each import goes to the audit log.
+- CLI: `python -m domin import-csv <file>` (same code; replaces `import-public`).
+- nginx: `location = /admin/settings/csv-import` allows a 201 MB body, streamed (proxy_request_buffering off); every
+  other path keeps the 4 kB limit. Needs install.sh (update.sh does not touch nginx).
+- Removed: the public database sync (deploy/public-sync.sh, domin-public-sync.path/.service, domin/publicsync.py,
+  `--public-sync`, DOMIN_PUBLIC_SYNC). install.sh and update.sh disable and delete the units, /var/lib/domin-sync,
+  the request/status files and the DOMIN_PUBLIC_SYNC line where they exist; update.sh deletes the dropped files.
+- Tests use corp.example names instead of lab names.
+- Rollback: `git revert` this commit and re-run install.sh; a host that should get the sync back needs
+  `install.sh --public-sync` and a new copy delivered (the inbox was deleted). Imported scans stay (source
+  `import`); remove them per domain with the domain page's Delete if unwanted.
+
 ## 2026-11-11: README screenshots in Graphite, neutral test data
 
 - README screenshots regenerated (mock data, Graphite colours).

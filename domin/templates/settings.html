@@ -126,25 +126,31 @@
   <p><button class="btn primary" type="submit">Save settings</button></p>
 </form>
 
-<section class="card">
-  <h2>Public database</h2>
-  <p class="muted">Replaces the inventory here with the newest copy of the public server's database. This instance's
-    own scans stay; users, settings, posture scans and queued jobs are not touched, and nothing starts scanning.</p>
-  {% if not sync.installed %}
-  <p class="note">Not installed on this host: the inventory holds this instance's own scans only. Install it with
-    <code>install.sh --public-sync</code>.</p>
-  {% else %}
+<section class="card" id="csv-import">
+  <h2>CSV import</h2>
+  <p class="muted">Loads a CSV download of this or another domin (All records, or a search's CSV) as imported scans:
+    one per domain, timed by the newest "last seen" in the file. Existing scans are never changed; a domain that
+    already has a scan at that time is skipped, so the same file twice adds nothing. Out-of-scope domains and bad rows
+    are skipped and counted. Up to {{ csv_max_mb }} MB; the worker runs it in the background.</p>
+  {% set ci = csv_import %}
+  {% if ci.state %}
   <dl class="facts">
-    <dt>Copy on this host</dt><dd>{{ sync.received or "none received yet" }}</dd>
-    <dt>Last sync</dt><dd>{% if sync.imported %}{{ sync.imported }}: {{ sync.scans }} public scans (newest
-      {{ sync.latest or "?" }}), {{ sync.records }} records, {{ sync.own }} own scans kept{% else %}never{% endif %}</dd>
-    {% if sync.at %}<dt>Last run</dt><dd>{{ sync.at }}: {{ "OK" if sync.ok else "failed" }}{% if sync.message %},
-      {{ sync.message }}{% endif %}</dd>{% endif %}
+    <dt>Last import</dt><dd>{{ ci.file or "?" }} by {{ ci.user or "?" }}, {{ ci.at }}:
+      {% if ci.state == "queued" %}queued{% elif ci.state == "running" %}running{% elif ci.state == "done" %}done
+      {{ ci.finished }}{% else %}failed{% if ci.error %}, {{ ci.error }}{% endif %}{% endif %}</dd>
+    {% if ci.rows is defined %}<dt>Rows</dt><dd>{{ ci.rows }} read, {{ ci.bad }} bad{% if ci.errors %}
+      ({{ ci.errors | join("; ") }}){% endif %}</dd>{% endif %}
+    {% if ci.domains %}<dt>Domains</dt><dd>{{ ci.imported }} imported ({{ ci.records }} records),
+      {{ ci.existing }} already there, {{ ci.out_of_scope }} out of scope, of {{ ci.domains }}</dd>{% endif %}
   </dl>
-  <form method="post" action="{{ base }}/settings/public-sync">
+  {% endif %}
+  {% if ci.state in ("queued", "running") %}
+  <p class="muted">Import {{ ci.state }}; reload the page for its progress.</p>
+  {% else %}
+  <form method="post" action="{{ base }}/settings/csv-import" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% if sync.pending %}<p class="muted">Sync running.</p>{% else %}
-    <p><button class="btn primary" type="submit">Sync</button></p>{% endif %}
+    <label class="field">CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <p><button class="btn primary" type="submit">Import</button></p>
   </form>
   {% endif %}
 </section>

@@ -466,14 +466,13 @@ def test_install_leaves_tor_off_and_root_scripts_write_only_fresh_temp_files():
     assert "TOR_START=off" in install and 'tor-switch.sh" "$TOR_START"' in install
     switch = (deploy / "tor-switch.sh").read_text()
     assert "mktemp" in switch and '[ ! -L "$1" ]' in switch
-    for name in ("tor-switch.sh", "mullvad-tunnel.sh", "public-sync.sh"):   # $DATA belongs to the app user
+    for name in ("tor-switch.sh", "mullvad-tunnel.sh"):   # $DATA belongs to the app user
         assert "STATUS.tmp" not in (deploy / name).read_text() and "mktemp" in (deploy / name).read_text()
-    assert ".public-import.db" not in (deploy / "public-sync.sh").read_text()
 
 
 def test_root_helper_units_are_sandboxed_and_a_failed_tor_switch_shows():
     deploy = Path(__file__).parent.parent / "deploy"
-    for name in ("tor", "mullvad", "public-sync"):
+    for name in ("tor", "mullvad"):
         unit = (deploy / f"domin-{name}.service").read_text()
         for line in ("ProtectSystem=strict", "NoNewPrivileges=true", "PrivateTmp=true", "ProtectHome=true",
                      "ReadWritePaths=/var/lib/domin", "CapabilityBoundingSet=CAP_"):
@@ -901,16 +900,21 @@ def test_routes_page_offers_ready_made_routes(settings, monkeypatch):
             assert len(proxy.get(c)["routes"]) == 2   # not created twice
 
 
-def test_install_sets_up_the_public_sync_only_with_its_flag():
-    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
-    assert "    --public-sync) PUBSYNC=1 ;;" in install and "  PUBSYNC=0" in install
-    assert '[ "$PUBSYNC" != 1 ] || setenv DOMIN_PUBLIC_SYNC 1' in install   # kept for later runs
-    assert "[ ! -f /etc/systemd/system/domin-public-sync.path ] || PUBSYNC=1" in install   # older installs keep it
-    enable = [ln for ln in install.splitlines() if "enable" in ln and "domin-public-sync" in ln]
-    assert enable == ['[ "$PUBSYNC" != 1 ] || systemctl enable -q --now domin-public-sync.path']
-    unit = install.index('install -m 644 "$APP/app/deploy/domin-public-sync.path"')
-    assert install.rindex('if [ "$PUBSYNC" = 1 ]; then', 0, unit) > install.rindex("\nfi\n", 0, unit)
-    assert "/var/lib/domin-sync" not in install   # the inbox exists only where a copy is delivered
+def test_install_and_update_retire_the_public_sync():
+    root = Path(__file__).parent.parent
+    assert not any((root / p).exists() for p in ("deploy/public-sync.sh", "deploy/domin-public-sync.path",
+                                                  "deploy/domin-public-sync.service", "domin/publicsync.py"))
+    for name in ("install.sh", "update.sh"):
+        text = (root / "deploy" / name).read_text()
+        assert "PUBSYNC" not in text and "--public-sync" not in text and "enable -q --now domin-public-sync" not in text
+        assert "systemctl disable -q --now domin-public-sync.path domin-public-sync.service" in text
+        assert "rm -f /etc/systemd/system/domin-public-sync.path /etc/systemd/system/domin-public-sync.service" in text
+        assert "rm -rf /var/lib/domin-sync" in text and "sed -i '/^DOMIN_PUBLIC_SYNC=/d' /etc/domin.env" in text
+    assert 'rm -f "$APP/domin/publicsync.py"' in (root / "deploy" / "update.sh").read_text()   # cp never deletes
+    install = (root / "deploy" / "install.sh").read_text()
+    upload = install.split("location = /admin/settings/csv-import {")[1].split("}")[0]
+    assert "client_max_body_size 201m;" in upload and "proxy_request_buffering off;" in upload
+    assert "client_max_body_size 4k;" in install   # every other request stays small
 
 
 def test_the_tree_and_the_archive_hold_no_database():

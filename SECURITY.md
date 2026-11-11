@@ -54,8 +54,16 @@ a public issue for it.
 ## Network
 - `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list (kept for later runs). On-prem, HTTP and
   HTTPS are open only to `--admin-sources` (unless `any`), so the firewall and nginx both enforce that list.
-- The package and the repository hold no database; a new install starts empty. Only `--public-sync` installs the
-  root unit that imports a delivered copy of a public database (domin-public-sync.path).
+- The package and the repository hold no database; a new install starts empty. Data comes in only through scans
+  and Settings > CSV import; no root unit or SSH key on the host receives database copies.
+- CSV import (Settings, admins only; others get 404): the upload is streamed to a temp file in /var/lib/domin
+  (never held in memory), at most 200 MB (nginx allows a larger body on that one path only, 4 kB elsewhere; the
+  app counts the bytes and stops at the cap), CSRF token in the form, one file and at most five fields. The header
+  must be the export's; every field is checked (domain name as for a scan, host name syntax, IP address, ASN,
+  network prefix, ISO dates, numbers, text length and control characters) and the exporter's formula escape `'`
+  is removed. Bad rows are skipped and counted, out-of-scope domains skipped; existing scans are never changed or
+  deleted. The worker runs it (no work in the web request), the temp files are removed afterwards, and the
+  import is written to the audit log (who, file name, counts).
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.
 
@@ -90,11 +98,11 @@ a public issue for it.
   domains, every change is in the audit table.
 
 ## Root helpers
-- The app never runs privileged commands. Settings actions that need root (Tor on/off, the Mullvad tunnel, the
-  public database import) drop a request file in `/var/lib/domin`; a root path unit runs a fixed script from
+- The app never runs privileged commands. Settings actions that need root (Tor on/off, the Mullvad tunnel) drop
+  a request file in `/var/lib/domin`; a root path unit runs a fixed script from
   `/opt/domin`. Tor is installed but off until an admin turns it on.
 - `/var/lib/domin` belongs to the app user, so those scripts read only one validated word or no-secret JSON from it,
   skip symlinks, and write only through fresh `mktemp` files renamed into place (never a fixed temporary name).
-- The helper services are sandboxed (`systemd-analyze security`: 3.0 Tor, 3.4 import, 4.3 Mullvad, from 9.6):
+- The helper services are sandboxed (`systemd-analyze security`: 3.0 Tor, 4.3 Mullvad, from 9.6):
   read-only system except the paths each one writes, a short capability list, no new privileges, private /tmp and
-  devices; the Tor switch and the import also have no network.
+  devices; the Tor switch also has no network.

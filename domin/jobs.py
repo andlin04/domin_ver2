@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, cve, db, posture, proxy, scanner, tools, users
+from . import admin, csvimport, cve, db, posture, proxy, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -311,6 +311,20 @@ def _schedule_loop(settings: Settings) -> None:
         time.sleep(SCHEDULE_TICK)
 
 
+IMPORT_POLL = 5   # seconds between checks for a queued CSV import (Settings > CSV import)
+
+
+def _import_loop(settings: Settings) -> None:
+    """CSV imports (domin.csvimport): one at a time, on their own thread so scans keep running."""
+    while True:
+        try:
+            if st := csvimport.run_pending(settings):
+                log.info("csv import %s: %s", st.get("file", ""), st.get("state"))
+        except Exception:
+            log.exception("csv import error")
+        time.sleep(IMPORT_POLL)
+
+
 def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     """once: run housekeeping, then every queued job one at a time (visitors' first), and return."""
     db.init(settings.db_path)
@@ -319,8 +333,10 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
                      "WHERE status = 'running'", (db.now(),))
         if n := posture.requeue_running(conn):
             log.info("restart: %d posture scans requeued", n)
+        csvimport.recover(conn)
     housekeeping(settings)
     if once:
+        csvimport.run_pending(settings)
         schedule_tick(settings)
         for refresh in (False, True):
             while (got := _next(settings, refresh))[1]:
@@ -338,6 +354,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
             threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,
                              name=f"{'refresh' if refresh else 'user'}-{i}").start()
     threading.Thread(target=_schedule_loop, args=(settings,), daemon=True, name="schedules").start()
+    threading.Thread(target=_import_loop, args=(settings,), daemon=True, name="csv-import").start()
     while True:
         time.sleep(3600)   # hourly: a failed job waits at most an hour for its retry
         try:

@@ -139,8 +139,11 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   write the result to `/etc/domin/tls.crt`, re-run `bash deploy/install.sh` (turns on HSTS). The key never leaves
   the host.
 - **Firewall:** `--firewall` turns on ufw: SSH (`--ssh-from` to limit it), HTTP/HTTPS only from `--admin-sources`.
-- **Database:** a new install starts with an empty database. `--public-sync` adds Settings > Public database > Sync
-  (imports a copy of a public server's database delivered to this host; kept for later runs).
+- **Database:** a new install starts with an empty database. To populate it from a CSV export (All records >
+  CSV on this or another domin), upload the file in Settings > CSV import (admin, up to 200 MB; the worker
+  imports it in the background) or, as root, `cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin
+  -- /opt/domin/venv/bin/python -m domin import-csv <file>`. One imported scan per domain, timed by the file's newest
+  "last seen"; existing scans are kept and importing the same file again adds nothing.
 - **Scan reach:** public addresses, `--scan-nets` (this host's own addresses refused) and the `--internal-dns`
   servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
 - **HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first (sudo:

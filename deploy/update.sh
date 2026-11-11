@@ -29,6 +29,23 @@ if printf '%s\n' "$changed" | grep -qx 'deploy/requirements.txt'; then
   echo "dependencies: installed from deploy/requirements.txt"
 fi
 
+# files a release dropped (cp above only adds and replaces)
+rm -f "$APP/domin/publicsync.py" "$APP/deploy/public-sync.sh" "$APP/deploy/domin-public-sync.path" \
+  "$APP/deploy/domin-public-sync.service"
+# Retired: the public database sync (replaced by Settings > CSV import). A host that had it loses its units, the
+# copy inbox and its state files; nothing else on the host is touched.
+if [ -e /etc/systemd/system/domin-public-sync.path ] || [ -e /etc/systemd/system/domin-public-sync.service ] ||
+   [ -e /var/lib/domin-sync ]; then
+  systemctl disable -q --now domin-public-sync.path domin-public-sync.service 2>/dev/null || true
+  rm -f /etc/systemd/system/domin-public-sync.path /etc/systemd/system/domin-public-sync.service
+  systemctl daemon-reload
+  rm -rf /var/lib/domin-sync
+  rm -f /var/lib/domin/public-sync.request /var/lib/domin/public-sync.status
+  echo "public sync: removed (retired; Settings > CSV import replaces it)"
+fi
+if [ -f /etc/domin.env ] && grep -q '^DOMIN_PUBLIC_SYNC=' /etc/domin.env; then
+  sed -i '/^DOMIN_PUBLIC_SYNC=/d' /etc/domin.env
+fi
 web=$(printf '%s\n' "$changed" | grep '^domin/' || true)
 worker=$(printf '%s\n' "$web" | grep -Ev '^domin/(templates|static)/|^domin/web\.py$' || true)
 if [ -n "$web" ]; then

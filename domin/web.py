@@ -36,6 +36,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import (
     access,
     admin,
+    csvimport,
     cve,
     db,
     discovery,
@@ -44,7 +45,6 @@ from . import (
     mullvad,
     posture,
     proxy,
-    publicsync,
     reports,
     schedules,
     tags,
@@ -694,7 +694,7 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running.",
-           "sync-requested": "Sync started; reload in a minute for the result.",
+           "import-queued": "CSV import queued; reload the page for its progress.",
            "schedule-saved": "Schedule saved; its next run is shown below.", "schedule-deleted": "Schedule removed.",
            "schedule-run": "Schedule run queued.", "schedule-on": "Schedule enabled; next run from now.",
            "schedule-off": "Schedule disabled.", "discovery-queued": "Scan with nmap discovery queued.",
@@ -1188,7 +1188,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      inv_counts=users.inventory_in_scope(c, scope), posture_counts=users.posture_in_scope(c, scope),
                      countries=countries, roles=users.ROLES, error=error,
                      internal_zones=eff.internal_zones, internal_dns=eff.internal_dns, internal_nets=eff.internal_nets,
-                     sync=publicsync.status(settings.db_path.parent, c),
+                     csv_import=csvimport.status(c), csv_max_mb=csvimport.MAX_BYTES // (1024 * 1024),
                      allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None,
                      signin=users.signin_required(c))
 
@@ -1225,18 +1225,33 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             users.set_signin_required(c, users.signin_required(c)["inventory"], not off)
         return back(base + "/settings", "saved")
 
-    @app.post(base + "/settings/public-sync", include_in_schema=False)
-    async def settings_public_sync(request: Request):
-        """Ask the host to import the newest copy of the public database (the request file holds a time only)."""
-        data = await form(request)
+    @app.post(base + "/settings/csv-import", include_in_schema=False)
+    async def settings_csv_import(request: Request):
+        """Upload a CSV export (All records or a search download): streamed to a temp file in the data directory
+        (csvimport.MAX_BYTES at most), then queued for the worker; the page shows its progress."""
         with conn() as c:
-            s, u, redirect = admin_only(request, c, data)
+            s, u, redirect = admin_only(request, c)   # CSRF: the token is in the multipart body, checked below
             if redirect:
                 return redirect
-        if not publicsync.installed():
-            raise HTTPException(409, "Public database sync is not installed on this host (install.sh --public-sync).")
-        publicsync.request_sync(settings.db_path.parent)
-        return back(base + "/settings", "sync-requested")
+            if csvimport.busy(c):
+                raise HTTPException(409, "An import is already queued or running; wait for it to finish.")
+        try:
+            fields, path, name = await csvimport.receive(request, settings.db_path.parent)
+        except csvimport.TooLarge:
+            raise HTTPException(413, f"The file is larger than {csvimport.MAX_BYTES // (1024 * 1024)} MB.") from None
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        if not hmac.compare_digest(fields.get("csrf", ""), s["csrf"]):
+            if path:
+                path.unlink(missing_ok=True)
+            raise HTTPException(403, "The form expired; reload the page and try again")
+        if not path or not path.stat().st_size:
+            if path:
+                path.unlink(missing_ok=True)
+            raise HTTPException(422, "Pick a CSV file.")
+        with conn() as c:
+            csvimport.queue(c, path, name, u["name"])
+        return back(base + "/settings#csv-import", "import-queued")
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)
     def settings_page(request: Request):

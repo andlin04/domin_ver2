@@ -10,8 +10,6 @@
 #                       the server has no database yet, unless --replace-history (the old one is kept as .bak)
 #   --no-worker         install the scan worker but don't start it (pages and tools only, no scans)
 #   --firewall          enable ufw with SSH (22), HTTP and HTTPS only (on-prem: HTTP/HTTPS from --admin-sources)
-#   --public-sync       install Settings > Public database > Sync (domin-public-sync.path): imports a copy of a
-#                       public server's database that a backup host delivers; without it the database starts empty
 #   --ssh-from CIDRS    with --firewall: SSH only from these networks (comma-separated; default any)
 #   --admin-ip CIDRS    client addresses that get the admin page /admin (comma-separated); without it, and without
 #                       DOMIN_ADMIN_IPS in /etc/domin.env, there is no admin page
@@ -52,7 +50,7 @@
 set -euo pipefail
 
 DOMAIN= ALIAS= EMAIL= HISTORY= REPLACE=0 WORKER=1 FIREWALL=0 CLOUDFLARE=0 ORIGIN= SSH_FROM= ADMIN_IP= DENY=
-INTERNAL= SOURCES= SCAN_NETS= ZONES= ZONE_DNS= RAW= ADMIN_USER= PUBSYNC=
+INTERNAL= SOURCES= SCAN_NETS= ZONES= ZONE_DNS= RAW= ADMIN_USER=
 CIDRS='^[0-9A-Fa-f:.,/]*$'
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,7 +74,6 @@ while [ $# -gt 0 ]; do
     --replace-history) REPLACE=1 ;;
     --no-worker) WORKER=0 ;;
     --firewall) FIREWALL=1 ;;
-    --public-sync) PUBSYNC=1 ;;
     *) echo "unknown option: $1"; exit 2 ;;
   esac
   shift
@@ -84,11 +81,6 @@ done
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 # Install mode: kept in /etc/domin.env, so a later run without options stays on-prem
 envget() { [ -r /etc/domin.env ] && sed -n "s/^$1=//p" /etc/domin.env | tail -n1 || true; }
-# --public-sync: kept as DOMIN_PUBLIC_SYNC=1; an install that already has the unit (from before the flag) keeps it
-if [ -z "$PUBSYNC" ]; then
-  PUBSYNC=0
-  [ "$(envget DOMIN_PUBLIC_SYNC)" != 1 ] && [ ! -f /etc/systemd/system/domin-public-sync.path ] || PUBSYNC=1
-fi
 [ -n "$INTERNAL" ] || [ -n "$DOMAIN" ] || [ "$(envget DOMIN_INSTALL_MODE)" != internal ] || INTERNAL=1
 if [ "$INTERNAL" = 1 ]; then
   [ -z "$EMAIL$ORIGIN" ] && [ "$CLOUDFLARE" = 0 ] || { echo "--internal: no --email, --cloudflare or --origin-cert"; exit 2; }
@@ -172,7 +164,6 @@ setenv() {  # KEY VALUE: replace or add one line of /etc/domin.env; other lines 
 # Admin page at /admin, served and linked only for DOMIN_ADMIN_IPS (comma-separated IPs/CIDRs; edit, then
 # systemctl restart domin); everyone else gets 404. `python -m domin admin-password` sets its password.
 [ -z "$ADMIN_IP" ] || setenv DOMIN_ADMIN_IPS "$ADMIN_IP"
-[ "$PUBSYNC" != 1 ] || setenv DOMIN_PUBLIC_SYNC 1
 # --deny is kept in the env file (the app ignores it) so a later run without it keeps the list.
 if [ -n "$DENY" ]; then setenv DOMIN_DENY_IPS "$DENY"
 else DENY=$(sed -n 's/^DOMIN_DENY_IPS=//p' /etc/domin.env); fi
@@ -443,6 +434,13 @@ client_body_timeout 10s;
 client_header_timeout 10s;
 limit_conn domin_conn 20;
 include /etc/nginx/domin-site.d/*.conf;   # extra locations on this host (e.g. /3dtools/)
+location = /admin/settings/csv-import {   # Settings > CSV import: the one large body (the app caps it at 200 MB)
+    client_max_body_size 201m;
+    client_body_timeout 60s;
+    proxy_request_buffering off;   # streamed to the app, which writes it to /var/lib/domin
+    limit_req zone=domin_pages burst=40 nodelay;
+    include /etc/nginx/domin-proxy.conf;
+}
 location / {
     limit_req zone=domin_pages burst=40 nodelay;
     include /etc/nginx/domin-proxy.conf;
@@ -479,18 +477,25 @@ nginx -t -q
 install -m 644 "$APP/app/deploy/domin-mullvad.path" "$APP/app/deploy/domin-mullvad.service" /etc/systemd/system/
 # Tor on/off from the Routes page: a root path unit runs tor-switch.sh apply
 install -m 644 "$APP/app/deploy/domin-tor.path" "$APP/app/deploy/domin-tor.service" /etc/systemd/system/
-# Settings > Public database > Sync (--public-sync only): a root path unit runs public-sync.sh import (a staging
-# copy of the public data). Without it a new install has an empty database and nothing that imports one.
-if [ "$PUBSYNC" = 1 ]; then
-  install -m 644 "$APP/app/deploy/domin-public-sync.path" "$APP/app/deploy/domin-public-sync.service" \
-    /etc/systemd/system/
+# Retired: the public database sync (replaced by Settings > CSV import). A host that had it loses its units, the
+# copy inbox and its state files; nothing else on the host is touched.
+if [ -e /etc/systemd/system/domin-public-sync.path ] || [ -e /etc/systemd/system/domin-public-sync.service ] ||
+   [ -e /var/lib/domin-sync ]; then
+  systemctl disable -q --now domin-public-sync.path domin-public-sync.service 2>/dev/null || true
+  rm -f /etc/systemd/system/domin-public-sync.path /etc/systemd/system/domin-public-sync.service
+  systemctl daemon-reload
+  rm -rf /var/lib/domin-sync
+  rm -f /var/lib/domin/public-sync.request /var/lib/domin/public-sync.status
+  echo "public sync: removed (retired; Settings > CSV import replaces it)"
+fi
+if [ -f /etc/domin.env ] && grep -q '^DOMIN_PUBLIC_SYNC=' /etc/domin.env; then
+  sed -i '/^DOMIN_PUBLIC_SYNC=/d' /etc/domin.env
 fi
 
 systemctl daemon-reload
 systemctl enable -q --now domin-mullvad.path
 bash "$APP/app/deploy/tor-switch.sh" "$TOR_START" >/dev/null
 systemctl enable -q --now domin-tor.path
-[ "$PUBSYNC" != 1 ] || systemctl enable -q --now domin-public-sync.path
 systemctl enable -q domin
 systemctl restart domin
 if [ "$WORKER" = 1 ]; then systemctl enable -q domin-worker; systemctl restart domin-worker
