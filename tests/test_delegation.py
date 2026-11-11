@@ -239,7 +239,9 @@ def test_admin_sets_grants_and_the_change_is_audited(settings):
         r = h.post(f"{BASE}/users/{pia}/grants", data={"csrf": csrf, "g_domain_0": "bad domain!",
                                                         "g_level_0": "viewer"})
         assert r.status_code == 422 and 'value="bad domain!" selected' in r.text
-        r = h.post(BASE + "/users/add", data={"csrf": csrf, "name": "newp", "role": "power"}, follow_redirects=False)
+        r = h.post(BASE + "/users/add", data={"csrf": csrf, "name": "newp", "role": "power",
+                                               "password": "a fine handover pw", "confirm": "a fine handover pw"},
+                   follow_redirects=False)
         assert r.status_code == 303 and re.search(r"/admin/users/\d+\?", r.headers["location"])
     with client(settings) as h:   # the new grants apply at once
         login(h, "pia")

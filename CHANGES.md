@@ -2,6 +2,29 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Admins set passwords directly; set-password links removed
+
+- Users > Add a user takes Password and Confirm (both required); Generate fills both with 20 random characters
+  (`crypto.getRandomValues`, `static/password.js`), Show/Hide and Copy help hand it over. A user's edit page has a
+  Set password form (same fields) in place of the "Set-pw link" button; it ends that user's sessions. Server side:
+  the fields must match and meet the policy (12+ characters, one helper `users.password_problem` for the web and
+  the CLI), the scrypt hash is stored, the password is never logged, echoed or put in a URL, and a refused form
+  comes back without it. Handing the password over is now the admin's job.
+- First sign-ins: a password an admin set (columns `users.pw_set_by_admin`, `users.pw_grace_left`, added by
+  `db.init`) may be kept for 3 sign-ins; each one (after the 2FA code) opens "Your password was set by an admin.
+  Change it now?" with the change form (no current password within 15 minutes of the sign-in) and "Keep it (N of 3
+  left)". The 4th sign-in locks the user's sessions to that page (others redirect there; API and posts: 403) until
+  a new password is set. A self-change (that page or My account) clears it; an admin reset gives 3 again. Users
+  list: "preset password, N grace sign-ins left" / "must renew". 2FA: a user who must enrol goes to My account first
+  (which offers the change); a locked user renews first.
+- Audit: `set password (admin)`, `password changed (self)` (no secret).
+- Removed: `/admin/set-password` (404 now), the 24 h tokens and the admin's once-shown copy (kv `setpw:*`,
+  `setpw-link:*`, deleted by `db.init`; there was no table), `setpw.html`, the `reset-password` user action.
+  CLI `user-add` asks for the password (twice, or `--password-stdin`); `--own` for your own account, used by
+  `install.sh --admin-user`, which now asks on the terminal. `user-passwd` sets it as an admin (3 sign-ins).
+- Rollback: `git revert` this commit and run update.sh. The two new columns stay (unused by the old code); old
+  set-password links are gone either way: give users a password with `user-passwd`.
+
 ## 2026-11-11: Domain viewers move to the admin side; "domain admin" is now "maintainer"
 
 - The per-domain levels are Maintainer and Viewer: "domain admin" (formerly; it reads as Active Directory Domain

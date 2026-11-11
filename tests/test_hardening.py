@@ -1,5 +1,5 @@
-"""Fixes from the security audit: the 2FA cookie path, non-global scan targets, re-authentication, set-password links
-out of URLs, DOMIN_ALLOW_NO_LOGIN guard rails, the deploy scripts and hashed requirements."""
+"""Fixes from the security audit: the 2FA cookie path, non-global scan targets, re-authentication,
+DOMIN_ALLOW_NO_LOGIN guard rails, the deploy scripts and hashed requirements."""
 import re
 import time
 from dataclasses import replace
@@ -224,29 +224,6 @@ def test_password_change_counts_wrong_current_passwords_and_locks_out(settings):
         assert r.status_code == 429 and "wait 15 minutes" in r.text
     with db.connect(settings.db_path) as c:
         assert users.verify_password(c, "boss", PW)   # unchanged
-
-
-# --- L4: set-password links never in a URL -----------------------------------------------------------------------
-
-def test_set_password_links_are_shown_once_from_the_session_not_the_url(settings):
-    with client(settings) as h:
-        login(h)
-        csrf = csrf_of(h, BASE + "/users")
-        r = h.post(BASE + "/users/add", data={"csrf": csrf, "name": "pia", "role": "power"}, follow_redirects=False)
-        assert r.status_code == 303 and "token" not in r.headers["location"] and "link" not in r.headers["location"]
-        page = h.get(r.headers["location"]).text   # the power user's edit page
-        token = re.search(r"/set-password\?token=([A-Za-z0-9_-]+)", page).group(1)
-        assert "set-password?token=" not in h.get(r.headers["location"]).text   # once
-        assert h.get(BASE + "/users", params={"link": "/admin/set-password?token=planted"}).text.count("planted") == 0
-        with db.connect(settings.db_path) as c:
-            pia = users.by_name(c, "pia")["id"]
-            assert users.setpw_user(c, token)["name"] == "pia"
-        r = h.post(f"{BASE}/users/{pia}/reset-password", data={"csrf": csrf, "from": "edit"}, follow_redirects=False)
-        assert r.status_code == 303 and "token" not in r.headers["location"]
-        assert "set-password?token=" in h.get(r.headers["location"]).text
-    with client(settings) as other:   # another admin session never sees it
-        login(other)
-        assert "set-password?token=" not in other.get(f"{BASE}/users/{pia}").text
 
 
 # --- L7: DOMIN_ALLOW_NO_LOGIN ------------------------------------------------------------------------------------

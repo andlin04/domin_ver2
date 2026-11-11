@@ -66,5 +66,6 @@
   <script src="{{ url_for('static', path='vendor/chart.umd.min.js').path }}"></script>
   <script src="{{ url_for('static', path='app.js').path }}"></script>
   <script src="{{ url_for('static', path='drill.js').path }}"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

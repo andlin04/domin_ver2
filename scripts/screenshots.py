@@ -335,6 +335,7 @@ def seed_settings(c) -> str:
     carol = users.create(c, "carol", "power", DEMO_PASSWORD)
     dave = users.create(c, "dave", "power", DEMO_PASSWORD)
     frank = users.create(c, "frank", "power", DEMO_PASSWORD)
+    users.create(c, "gina", "power", DEMO_PASSWORD, by_admin=True)   # an admin-set password: the change offer
     access.set_grants(c, bob, {"*": "admin"}, "alice")
     access.set_grants(c, carol, {"example.com": "admin", "example.org": "viewer"}, "alice")
     access.set_grants(c, dave, {"example.net": "viewer"}, "alice")
@@ -562,7 +563,10 @@ SHOTS = {
     "public-overview": ("/", False, 1200, ""),
     "public-domain": ("/d/example.com", False, 1400, ""),
     "not-found": ("/d/no-such-domain.example", True, 500, ""),   # error.html
-    "setpw-invalid": ("/admin/set-password?token=demo", False, 600, ""),
+    # Add a user with a generated password (masked), and the offer after a sign-in with an admin-set password
+    "user-add-generated": ("/admin/users", True, 560, "document.querySelector('input[name=name]').value = 'hana';"
+                           "document.querySelector('[data-pw-generate]').click();" + from_card("Add a user")),
+    "pw-renew": ("/admin/account/renew", "gina", 620, ""),
 }
 LIGHT = ("overview", "posture-overview", "header", "csv-map")   # also shot in the light theme: NAME-light.png
 # another tool's export for the mapping dialog: renamed, reordered, semicolons, a column domin has no field for

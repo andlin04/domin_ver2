@@ -90,6 +90,27 @@ content from the assigned rights; viewer and administrative rights per domain.
   an admin saves the setting. Audit: `sign-in`.
 - Public mode with "neither": unchanged (inventory public, posture and admin behind sign-in).
 
+## Passwords set by an admin (owner 2026-11-11)
+- Users > Add a user: name, role, Password + Confirm (Generate fills both with 20 random characters in the browser,
+  Show/Hide, Copy). A user's edit page: Set password (same fields), which ends that user's sessions. Users list:
+  Set password links there. Policy: the two fields match, 12+ characters (`users.password_problem`, also the CLI).
+- The admin hands the password over; nothing is shown or sent by domin. Audit: `user-add`, `set password (admin)`;
+  the user's own change: `password changed (self)`. No secret in any of them.
+- Columns `users.pw_set_by_admin` (1 after an admin set it) and `users.pw_grace_left` (3 then; -1 = must renew).
+- Each successful sign-in (after the code, if 2FA is on) with the mark counts one: sign-ins 1-3 open "Your password
+  was set by an admin. Change it now?" (`/admin/account/renew`) with the change form and "Keep it (N of 3 left)",
+  which goes on to the page the sign-in was for. The 4th sign-in locks every session of the user to that page and
+  Sign out: other pages redirect there, the API and form posts answer 403. Setting a password (not the admin's) there
+  or under My account clears the mark and the lock; this browser stays signed in, others are signed out.
+- Current password: not asked within 15 minutes of the sign-in (the session's age), asked after that.
+- Order with two-factor: the code comes first; a user who must enrol is sent to My account first (as before), which
+  shows the offer with a link; a locked user renews first, then enrols.
+- Users list: "preset password, N grace sign-ins left" or "must renew" in the Status column.
+- An admin set or reset (web or CLI `user-passwd`) restores 3. CLI `user-add NAME [--role R] [--password-stdin]
+  [--own]`: asks twice on a terminal or reads one stdin line; `--own` (the installer's first admin) leaves no mark.
+- Removed: the one-time set-password links (`/admin/set-password`, 24 h tokens in kv `setpw:*`, the admin's copy in
+  `setpw-link:*`); `db.init` deletes leftover keys, no table was involved.
+
 ## Two-factor
 - Required per role (Settings) or per user (Users, edit page: "Require two-factor for this user"; column
   `users.totp_required`), either one is enough. Same edit page: reset button, link to My account.

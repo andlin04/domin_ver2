@@ -7,18 +7,20 @@
 {% include "_roles_info.html" %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-{% if link %}<p class="note ok">One-time set-password link (valid 24 h, opens once the recipient is on the
-  allowlist): <code class="mono">{{ link }}</code></p>{% endif %}
-
 <section class="card">
   <h2>Add a user</h2>
-  <form method="post" action="{{ base }}/users/add" class="inline">
+  <form method="post" action="{{ base }}/users/add" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="text" name="name" placeholder="User name" required aria-label="User name">
-    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}">{{ role_labels[r] }}</option>{% endfor %}</select>
-    <button class="btn primary" type="submit">Create</button>
+    <div class="pw-fields">
+      <input type="text" name="name" placeholder="User name" required aria-label="User name" value="{{ form_name }}">
+      <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}"{% if r == form_role %} selected{% endif %}>{{ role_labels[r] }}</option>{% endfor %}</select>
+    </div>
+    {% set pw_name = "password" %}{% include "_pw_fields.html" %}
+    <p><button class="btn primary" type="submit">Create</button></p>
   </form>
-  <p class="muted">A new power user sees nothing until it has grants: its page opens after Create.</p>
+  <p class="muted">At least {{ min_pw }} characters. Generate makes a random one in your browser; copy it and hand it to
+    the user yourself over a channel you trust. They may keep it for {{ grace }} sign-ins, then must set their own. A new power
+    user sees nothing until it has grants: its page opens after Create.</p>
 </section>
 
 <section class="card">
@@ -40,12 +42,12 @@
           <span class="pill {{ 'ok' if g.level == 'admin' }}">{{ levels[g.level] }}</span></span>{% if not loop.last %} {% endif %}
         {% else %}<span class="muted">none</span>{% endfor %}{% endif %}</td>
       <td>{% if us.has_totp %}on{% elif must_2fa[us.id] %}<span class="pill bad" title="Required (role or user), not set up yet">required</span>{% else %}–{% endif %}</td>
-      <td>{{ 'disabled' if us.disabled else 'active' }}</td>
+      <td>{{ 'disabled' if us.disabled else 'active' }}{% if pw_state[us.id] %}
+        <span class="pill {{ 'bad' if us.must_renew else 'warn' }}">{{ pw_state[us.id] }}</span>{% endif %}</td>
       <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
       <td class="row-actions">
         <a class="btn small" href="{{ base }}/users/{{ us.id }}">Edit</a>
-        <form method="post" action="{{ base }}/users/{{ us.id }}/reset-password" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Set-pw link</button></form>
+        <a class="btn small" href="{{ base }}/users/{{ us.id }}#password">Set password</a>
         {% if us.has_totp %}
         <form method="post" action="{{ base }}/users/{{ us.id }}/reset-2fa" class="inline"
               data-confirm="Reset two-factor for {{ us.name }}?">
@@ -77,3 +79,4 @@
   {% else %}<p class="muted">No changes recorded yet.</p>{% endif %}
 </section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='password.js').path }}"></script>{% endblock %}

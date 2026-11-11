@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Your password · domin{% endblock %}
+{% block page %}account{% endblock %}
+{% block content %}
+<section class="card narrow">
+  {% if user.must_renew %}
+  <h1>Set a new password</h1>
+  <p class="muted">Your password was set by an admin and its {{ grace }} grace sign-ins are used. Set your own
+    password to continue; until then this is the only page you can open.</p>
+  {% else %}
+  <h1>Your password was set by an admin. Change it now?</h1>
+  <p class="muted">You can keep it for {{ user.pw_grace_left }} more sign-in{{ '' if user.pw_grace_left == 1 else 's' }};
+    after that you must set your own.</p>
+  {% endif %}
+  {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ base }}/account/renew" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if need_current %}<input type="password" name="current" placeholder="Current password"
+      autocomplete="current-password" required aria-label="Current password">{% endif %}
+    {% set pw_name, pw_label = "new", "New password" %}{% include "_pw_fields.html" %}
+    <p class="row-actions">
+      <button class="btn primary" type="submit">Change password</button>
+      {% if not user.must_renew %}<a class="btn" href="{{ keep_to }}">Keep it ({{ user.pw_grace_left }} of {{ grace }} left)</a>{% endif %}
+    </p>
+  </form>
+  {% if user.must_renew %}
+  <form method="post" action="{{ base }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Sign out</button></form>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='password.js').path }}"></script>{% endblock %}

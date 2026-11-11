@@ -4,21 +4,31 @@ Roles: power (a power user: only the domains of its grants, as viewer or maintai
 admin (every domain, users, grants and settings; several allowed, never fewer than one enabled). Passwords use the
 same scrypt format as the old single admin password (admin.hash_password), so a migrated password keeps working
 and is re-hashed at the next sign-in. Second factor: a TOTP secret plus one-time recovery codes (domin.totp); only
-hashes of the recovery codes are stored, and the last accepted TOTP step is kept so a code works only once."""
+hashes of the recovery codes are stored, and the last accepted TOTP step is kept so a code works only once.
+A password an admin sets (create or reset) is marked: the user may keep it for GRACE_SIGNINS sign-ins, then must
+renew it (count_signin); a password the user sets clears the mark."""
 from __future__ import annotations
 
 import ipaddress
 import json
-import secrets
 import sqlite3
-from datetime import datetime, timedelta
 
 from . import admin, db, tags, totp
 
 ROLES = ("power", "admin")
 ROLE_LABELS = {"power": "power user", "admin": "admin"}
 OLD_ROLES = {"viewer": "viewer", "analyst": "admin"}   # role before delegation -> grant level on every domain
-SETPW_HOURS = 24          # a set-password link is valid this long
+MIN_PASSWORD = 12         # characters: the one password policy (web forms and CLI)
+GRACE_SIGNINS = 3         # sign-ins an admin-set password may be kept before it must be renewed
+
+
+def password_problem(password: str, confirm: str | None = None) -> str:
+    """Why a new password is refused ('' = fine); confirm, when given, must match."""
+    if confirm is not None and password != confirm:
+        return "The two passwords differ."
+    if len(password) < MIN_PASSWORD:
+        return f"Use at least {MIN_PASSWORD} characters."
+    return ""
 
 
 def _row(r: sqlite3.Row | None) -> dict | None:
@@ -29,6 +39,8 @@ def _row(r: sqlite3.Row | None) -> dict | None:
     d["has_totp"] = bool(d["totp_secret"])
     d["disabled"] = bool(d["disabled"])
     d["totp_required"] = bool(d["totp_required"])
+    d["pw_set_by_admin"] = bool(d["pw_set_by_admin"])
+    d["must_renew"] = d["pw_set_by_admin"] and d["pw_grace_left"] < 0
     return d
 
 
@@ -48,9 +60,10 @@ def count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
-def create(conn: sqlite3.Connection, name: str, role: str, password: str = "") -> int:
-    """A new user. The old role names still work as shorthands, as the migration maps them: viewer = power user with
-    a viewer grant on every domain, analyst = power user with a maintainer grant on every domain."""
+def create(conn: sqlite3.Connection, name: str, role: str, password: str = "", by_admin: bool = False) -> int:
+    """A new user; by_admin marks its password as set by an admin (set_password). The old role names still work as
+    shorthands, as the migration maps them: viewer = power user with a viewer grant on every domain, analyst = power
+    user with a maintainer grant on every domain."""
     name = name.strip()
     if not name or len(name) > 64 or role not in (*ROLES, *OLD_ROLES):
         raise ValueError("name (1..64 chars) and a valid role are required")
@@ -58,18 +71,50 @@ def create(conn: sqlite3.Connection, name: str, role: str, password: str = "") -
         raise ValueError(f"a user named {name} already exists")
     pw = admin.hash_password(password) if password else ""
     from .access import DEFAULT_RIGHTS  # local import: access -> db
-    uid = conn.execute("INSERT INTO users (name, password_hash, role, created, rights) VALUES (?, ?, ?, ?, ?)",
+    marked = bool(password and by_admin)
+    uid = conn.execute("INSERT INTO users (name, password_hash, role, created, rights, pw_set_by_admin, pw_grace_left)"
+                       " VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (name, pw, "power" if role in OLD_ROLES else role, db.now(),
-                        json.dumps(DEFAULT_RIGHTS, sort_keys=True))).lastrowid
+                        json.dumps(DEFAULT_RIGHTS, sort_keys=True), int(marked),
+                        GRACE_SIGNINS if marked else 0)).lastrowid
     if role in OLD_ROLES:
         conn.execute("INSERT INTO grants (user_id, domain, level, added, added_by) VALUES (?, '*', ?, ?, '')",
                      (uid, OLD_ROLES[role], db.now()))
     return uid
 
 
-def set_password(conn: sqlite3.Connection, user_id: int, password: str) -> None:
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (admin.hash_password(password), user_id))
-    admin.end_user_sessions(conn, user_id)   # a new password signs that user's browsers out
+def set_password(conn: sqlite3.Connection, user_id: int, password: str, by_admin: bool = False) -> None:
+    """A new password; signs that user's browsers out. by_admin: an admin set it, so the user may keep it for
+    GRACE_SIGNINS sign-ins and must then renew it; else the user set it, which clears that mark."""
+    conn.execute("UPDATE users SET password_hash = ?, pw_set_by_admin = ?, pw_grace_left = ? WHERE id = ?",
+                 (admin.hash_password(password), int(by_admin), GRACE_SIGNINS if by_admin else 0, user_id))
+    admin.end_user_sessions(conn, user_id)
+
+
+def count_signin(conn: sqlite3.Connection, user: dict) -> str:
+    """At a successful sign-in (after the second factor): what an admin-set password asks for. '' = nothing;
+    'offer' = one grace sign-in counted, the user may change or keep it; 'renew' = none left: pw_grace_left -1 locks
+    every session of the user to the renewal page until the user sets a password."""
+    if not user["pw_set_by_admin"]:
+        return ""
+    left = user["pw_grace_left"]
+    if left > 0:
+        conn.execute("UPDATE users SET pw_grace_left = ? WHERE id = ?", (left - 1, user["id"]))
+        user["pw_grace_left"] = left - 1
+        return "offer"
+    conn.execute("UPDATE users SET pw_grace_left = -1 WHERE id = ?", (user["id"],))
+    user["pw_grace_left"], user["must_renew"] = -1, True
+    return "renew"
+
+
+def pw_state(user: dict) -> str:
+    """The Users list's note on an admin-set password ('' = the user's own)."""
+    if not user["pw_set_by_admin"]:
+        return ""
+    if user["must_renew"]:
+        return "must renew"
+    n = user["pw_grace_left"]
+    return f"preset password, {n} grace sign-in{'' if n == 1 else 's'} left"
 
 
 def set_role(conn: sqlite3.Connection, user_id: int, role: str) -> None:
@@ -210,34 +255,6 @@ def migrate_signin(conn: sqlite3.Connection) -> bool:
         return False
     set_signin_required(conn, False, admin.no_login_session(conn) is None)
     return True
-
-
-# --- one-time set-password tokens (for invites and admin resets) --------------------------------------------------
-
-def new_setpw_token(conn: sqlite3.Connection, user_id: int) -> str:
-    token = secrets.token_urlsafe(24)
-    expires = (datetime.now() + timedelta(hours=SETPW_HOURS)).isoformat(timespec="seconds")
-    admin.kv_set(conn, f"setpw:{admin._token_hash(token)}", json.dumps({"user_id": user_id, "expires": expires}))
-    return token
-
-
-def setpw_user(conn: sqlite3.Connection, token: str) -> dict | None:
-    raw = admin.kv_get(conn, f"setpw:{admin._token_hash(token)}") if token else None
-    if not raw:
-        return None
-    data = json.loads(raw)
-    if data["expires"] < db.now():
-        return None
-    return get(conn, data["user_id"])
-
-
-def use_setpw_token(conn: sqlite3.Connection, token: str, password: str) -> dict | None:
-    u = setpw_user(conn, token)
-    if not u:
-        return None
-    set_password(conn, u["id"], password)
-    conn.execute("DELETE FROM kv WHERE key = ?", (f"setpw:{admin._token_hash(token)}",))
-    return u
 
 
 # --- migration from the single admin password --------------------------------------------------------------------

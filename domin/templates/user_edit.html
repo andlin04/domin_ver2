@@ -7,8 +7,6 @@
     {{ 'disabled' if target.disabled else 'active' }} · two-factor {{ 'on' if target.has_totp else 'off' }}</p></div></section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-{% if link %}<p class="note ok">One-time set-password link (valid 24 h, shown only this once):
-  <code class="mono">{{ link }}</code></p>{% endif %}
 
 <section class="card">
   <h2>Role</h2>
@@ -44,6 +42,18 @@
       on a domain (scans, tags, schedules) need read-write here and maintainer of that domain.</p>
     <p><button class="btn primary" type="submit">Save rights</button></p>
   </form>
+</section>
+
+<section class="card" id="password">
+  <h2>Set password <small>{{ pw_state or 'set by the user' if target.password_hash else 'none yet' }}</small></h2>
+  <form method="post" action="{{ base }}/users/{{ target.id }}/set-password" class="stack"
+        data-confirm="Set a new password for {{ target.name }}? Their open sessions end.">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="from" value="edit">
+    {% set pw_name = "password" %}{% include "_pw_fields.html" %}
+    <p><button class="btn primary" type="submit">Set password</button></p>
+  </form>
+  <p class="muted">At least {{ min_pw }} characters. Hand the password to {{ target.name }} yourself over a channel
+    you trust. Their open sessions end; they may keep it for {{ grace }} sign-ins, then must set their own.</p>
 </section>
 
 <section class="card" id="two-factor">
@@ -92,3 +102,4 @@
   </form>
 </section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='password.js').path }}"></script>{% endblock %}

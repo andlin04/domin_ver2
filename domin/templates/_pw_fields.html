@@ -1,0 +1,15 @@
+{# A new password typed twice, with Generate, Show and Copy (static/password.js). Set pw_name (the field name) and
+   optionally pw_label first. #}
+{% set label = pw_label|default("Password") %}
+<div class="pw-fields" data-pw>
+  <input type="password" name="{{ pw_name }}" placeholder="{{ label }}" autocomplete="new-password" required
+         minlength="{{ min_pw }}" aria-label="{{ label }}" data-pw-input>
+  <input type="password" name="confirm" placeholder="Confirm {{ label|lower }}" autocomplete="new-password" required
+         minlength="{{ min_pw }}" aria-label="Confirm {{ label|lower }}" data-pw-input>
+  <span class="pw-tools">
+    <button class="btn small" type="button" data-pw-generate>Generate</button>
+    <button class="btn small" type="button" data-pw-toggle aria-pressed="false">Show</button>
+    <button class="btn small" type="button" data-pw-copy>Copy</button>
+    <span class="muted small" data-pw-status role="status"></span>
+  </span>
+</div>

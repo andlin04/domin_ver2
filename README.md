@@ -75,6 +75,9 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
 - **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role
   (Settings) and per user (Users, edit page; the user enrols under My account, sent there after sign-in).
   Settings, "Sign-in required for": Inventory (the public pages) and/or Posture; inventory is open by default.
+  Admins create users with a password (typed or Generate, with Copy) and hand it over themselves; Set password on a
+  user's page resets it and signs that user out. A user may change or keep an admin-set password at the next 3
+  sign-ins; the 4th requires a new one ([docs/delegation.md](docs/delegation.md)).
 - **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
   (cancel, stop, retry), tuning without restart.
 
@@ -135,7 +138,7 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
 ```
 
 - **Web UI:** `https://<name>/` on 443 (80 redirects), only from `--admin-sources` (default: the private ranges;
-  `any` = no network limit). `--admin-user` prints a one-time link to set the first admin's password (24 h).
+  `any` = no network limit). `--admin-user` creates the first admin and asks for its password (twice).
 - **TLS:** self-signed (`/etc/domin/tls.crt`, 825 days) until replaced: sign `/etc/domin/tls.csr` with your CA,
   write the result to `/etc/domin/tls.crt`, re-run `bash deploy/install.sh` (turns on HSTS). The key never leaves
   the host.
@@ -168,13 +171,15 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   sign-in alone governs access.
 - Client address: nginx's `$remote_addr` as X-Real-IP (with `--cloudflare`: CF-Connecting-IP, trusted only from
   Cloudflare's ranges); other forwarding headers ignored.
-- **First admin** (prints a one-time link to set the password):
+- **First admin** (asks for the password twice; `--password-stdin` reads one line instead; `--own`: your own
+  password, so no change prompt at sign-in):
 
   ```bash
-  cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 /opt/domin/venv/bin/python -m domin user-add you --role admin
+  cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- env PYTHONDONTWRITEBYTECODE=1 /opt/domin/venv/bin/python -m domin user-add you --role admin --own
   ```
 
-  Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <admin|power>`,
+  Without `--own` (a password you hand to someone else) the user may keep it for 3 sign-ins, then must renew it.
+  Other commands: `user-list`, `user-passwd <name> [--password-stdin]` (sets it as an admin: same 3 sign-ins), `user-role <name> <admin|power>`,
   `user-grant <name> <domain|*> <viewer|admin|none>`, `user-2fa-reset <name>`,
   `admin-password` (the `admin` user's password). An existing single `admin_password` becomes an `admin` user on
   first start.

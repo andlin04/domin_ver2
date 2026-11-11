@@ -38,7 +38,7 @@
 #   --internal-dns IPS  DNS servers for those zones
 #   --raw / --no-raw    give the scan worker raw sockets for nmap SYN scans (CAP_NET_RAW/CAP_NET_ADMIN) or take them
 #                       away; default off, kept on later runs
-#   --admin-user NAME   create the first admin account and print its one-time set-password link (24 h)
+#   --admin-user NAME   create the first admin account; asks for its password (twice) on the terminal
 #
 # Every option above is kept in /etc/domin.env: later runs need no options (`bash deploy/install.sh`).
 # Behind an HTTP proxy: export https_proxy/http_proxy (and no_proxy) first; apt, pip and the downloads use them and
@@ -548,8 +548,10 @@ if [ "$INTERNAL" = 1 ]; then
   if [ -n "$ADMIN_USER" ]; then
     if ( eval "$CLI user-list" ) | cut -f1 | grep -qx "$ADMIN_USER"; then
       echo "admin user $ADMIN_USER exists (new password: $CLI user-passwd $ADMIN_USER)"
+    elif [ -t 0 ]; then   # asks for the password twice (the installer's operator is that admin: --own)
+      ( eval "$CLI user-add $ADMIN_USER --role admin --own" ) || echo "admin user not created; run: $CLI user-add $ADMIN_USER --role admin --own"
     else
-      ( eval "$CLI user-add $ADMIN_USER --role admin" ) | sed "s|at: /admin|at: https://$DOMAIN/admin|"
+      echo "no terminal for the password; create the admin with: $CLI user-add $ADMIN_USER --role admin --own"
     fi
   fi
   echo "site: https://$DOMAIN/ (sign-in /admin) for $SOURCES; users: $CLI user-add NAME --role admin|power, user-grant NAME DOMAIN viewer|admin"

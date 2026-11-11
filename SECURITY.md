@@ -42,8 +42,17 @@ a public issue for it.
   5 failed sign-ins in 15 minutes block the client (30 in total block everyone; a wrong current password or code on
   My account counts too), session and second-factor cookies `__Host-` (Path=/), Secure, HttpOnly, SameSite=Strict,
   CSRF token on every form, `Cache-Control: no-store`. Changing the password needs the current one; turning
-  two-factor off needs the current password or a code. A new set-password link is shown once to the admin who made
-  it, kept server-side for that session (never in a redirect URL).
+  two-factor off needs the current password or a code.
+- **Admin-set passwords** (Users: create, or Set password on a user's page; CLI `user-add`, `user-passwd`): the admin
+  types or generates the password (Generate: 20 characters from `crypto.getRandomValues` in the browser, a static
+  script) and hands it over; **that handover is the admin's responsibility** (a channel you trust, not the same one
+  as the user name). The server checks the two fields and the policy (12+ characters), stores only the scrypt hash,
+  ends the user's sessions on a reset, and never logs, echoes or redirects with the password; a refused form comes
+  back empty. The audit log records "set password (admin)" and "password changed (self)", never the password.
+- **First sign-ins after an admin set the password:** the user may change it (no current password within 15 minutes
+  of the sign-in, else it is asked) or keep it, 3 times; the 4th sign-in is locked to the renewal page (every other
+  page redirects there, the API and form posts answer 403) until the user sets a password other than the admin's.
+  A password change by the user at any time ends this. There are no set-password links any more.
 - **`DOMIN_ALLOW_NO_LOGIN`** (dev/lab only): refused at start-up (sign-in stays on, an error is logged) unless
   `DOMIN_ADMIN_IPS` is set, and on a public install it may list private networks only; while accepted a warning is
   logged at every start and the stand-in session counts only for requests from `DOMIN_ADMIN_IPS`.

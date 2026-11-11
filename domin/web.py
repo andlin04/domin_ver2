@@ -84,6 +84,9 @@ PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
 QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
 ADMIN = "/admin"   # shown and served only to DOMIN_ADMIN_IPS
 COOKIE = "__Host-domin_admin"   # __Host-: Secure, path /, no Domain; the site must be served over HTTPS
+RENEW = ADMIN + "/account/renew"   # the page an admin-set password is changed on (users.count_signin)
+RENEW_OPEN = {RENEW, ADMIN + "/logout", ADMIN + "/login", ADMIN + "/login/totp"}   # reachable while it must be
+RENEW_FRESH_MIN = 15   # this long after sign-in the renewal page asks no current password
 log = logging.getLogger("domin.web")
 
 
@@ -260,11 +263,20 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         path = request.url.path
         if path.startswith("/static/") or path == "/healthz":
             return None
+        machine = request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv")
+        if COOKIE in request.cookies and path not in RENEW_OPEN:   # an admin-set password past its grace sign-ins
+            with conn() as c:
+                s = admin.session(c, request.cookies.get(COOKIE))
+                u = users.get(c, s["user_id"]) if s and s["user_id"] else None
+            if u and u["must_renew"] and not u["disabled"]:
+                if machine:
+                    return JSONResponse({"error": "Set a new password first: " + RENEW}, status_code=403,
+                                        headers=PRIVATE)
+                return RedirectResponse(RENEW, status_code=303, headers=PRIVATE)
         where = access.area(path)
         need = access.feature_of(request.method, path)
         if where == "inventory" and path.startswith("/api/") and peer_in(request, internal_nets):
             return None
-        machine = request.method != "GET" or path.startswith(("/api/", "/data/")) or path.endswith(".csv")
         with conn() as c:
             required = where != "admin" and users.signin_required(c)[where]
             if not required and (not need or (COOKIE not in request.cookies and not settings.allow_no_login)):
@@ -691,7 +703,9 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "relays": "Mullvad relay list refreshed.", "route-saved": "Route saved.", "route-deleted": "Route removed.",
            "default-saved": "Preferred route saved: the default for posture scans.",
            "user-saved": "User updated.", "user-deleted": "User removed.", "pw-changed": "Password changed.",
-           "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
+           "2fa-off": "Two-factor turned off.",
+           "pw-set-admin": "Password set and the user's sessions ended. Hand the password over yourself; the user "
+                           f"may keep it for {users.GRACE_SIGNINS} sign-ins, then must renew it.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running.",
            "import-queued": "CSV import queued; reload the page for its progress.",
@@ -832,11 +846,25 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             any_user = users.count(c) > 0
         return priv(page(request, "login.html", base=base, any_user=any_user, error="", next=nxt))
 
+    def renew_url(nxt: str) -> str:
+        return RENEW + (f"?{urlencode({'next': nxt})}" if nxt else "")
+
     def signed_in(c, u: dict, nxt: str) -> RedirectResponse:
-        """After the password (and code): a user who must set up two-factor (role or own tick) goes to My account
-        first; else back where the sign-in started, or the start page."""
+        """After the password (and code). An admin-set password with no grace sign-in left: the renewal page, the
+        only one this session reaches until it is changed. Else a user who must set up two-factor (role or own tick)
+        goes to My account first (it offers the password change too); else a grace sign-in of an admin-set password
+        offers the change (or keep); else back where the sign-in started, or the start page."""
         users.record_login(c, u["id"])
-        resp = back(base + "/account" if users.needs_totp_setup(c, u) else nxt or base)
+        step = users.count_signin(c, u)
+        if step == "renew":
+            target = renew_url(nxt)
+        elif users.needs_totp_setup(c, u):
+            target = base + "/account"
+        elif step == "offer":
+            target = renew_url(nxt)
+        else:
+            target = nxt or base
+        resp = back(target)
         set_session(resp, c, u["id"])
         return resp
 
@@ -905,30 +933,54 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return resp
 
-    # --- set a password from a one-time link (invite or admin reset) ----------------------------------------------
+    # --- an admin-set password: change it, keep it (grace sign-ins), or renew it (none left) ------------------------
 
-    @app.get(base + "/set-password", response_class=HTMLResponse, include_in_schema=False)
-    def set_password_page(request: Request, token: str = ""):
-        with conn() as c:
-            u = users.setpw_user(c, token)
-        if not u:
-            return priv(page(request, "setpw.html", 404, base=base, user_name=None, token="", error=""))
-        return priv(page(request, "setpw.html", base=base, user_name=u["name"], token=token, error=""))
+    def fresh(s: dict) -> bool:
+        """Signed in within RENEW_FRESH_MIN: the renewal page then asks no current password."""
+        since = datetime.now() + timedelta(hours=admin.SESSION_HOURS, minutes=-RENEW_FRESH_MIN)
+        return bool(s.get("token_hash")) and s["expires"] >= since.isoformat(timespec="seconds")
 
-    @app.post(base + "/set-password", include_in_schema=False)
-    async def set_password_submit(request: Request):
-        data = await form(request)
-        token = data.get("token", "")
+    def renew_view(request, c, u, s, nxt: str, status: int = 200, error: str = ""):
+        return shell(request, "pw_renew.html", u, s, status, next=nxt, need_current=not fresh(s), error=error,
+                     grace=users.GRACE_SIGNINS, keep_to=nxt or base, min_pw=users.MIN_PASSWORD)
+
+    @app.get(RENEW, response_class=HTMLResponse, include_in_schema=False)
+    def renew_page(request: Request):
+        nxt = safe_next(request.query_params.get("next"))
         with conn() as c:
-            u = users.setpw_user(c, token)
+            s, u = current(request, c)
             if not u:
-                return priv(page(request, "setpw.html", 404, base=base, user_name=None, token="", error=""))
-            pw = data.get("password", "")
-            if pw != data.get("confirm", "") or len(pw) < 12:
-                return priv(page(request, "setpw.html", 422, base=base, user_name=u["name"], token=token,
-                                 error="Use at least 12 characters and type the same password twice."))
-            users.use_setpw_token(c, token, pw)
-        return back(base, "pw-set")
+                return back()
+            if not u["pw_set_by_admin"]:
+                return back(nxt or base)
+            return renew_view(request, c, u, s, nxt)
+
+    @app.post(RENEW, include_in_schema=False)
+    async def renew_submit(request: Request):
+        data = await form(request)
+        nxt = safe_next(data.get("next"))
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if not fresh(s):   # later than right after the sign-in: prove the current password, as My account does
+                who = admin.client_key(c, client_ip(request))
+                if admin.login_blocked(c, who):
+                    return renew_view(request, c, u, s, nxt, 429, "Too many failed tries; wait 15 minutes.")
+                if not users.verify_password(c, u["name"], data.get("current", "")):
+                    admin.login_failed(c, who)
+                    return renew_view(request, c, u, s, nxt, 401, "The current password is wrong.")
+            new = data.get("new", "")
+            error = users.password_problem(new, data.get("confirm", ""))
+            if not error and users.verify_password(c, u["name"], new):
+                error = "Choose a password other than the one the admin set."
+            if error:
+                return renew_view(request, c, u, s, nxt, 422, error)
+            users.set_password(c, u["id"], new)   # clears the mark; signs every browser out, this one back in below
+            access.audit(c, u["name"], "password changed (self)", u["name"])
+            resp = back(base + "/account" if users.needs_totp_setup(c, u) else nxt or base, "pw-changed")
+            set_session(resp, c, u["id"])
+        return resp
 
     # --- account (any signed-in user) ----------------------------------------------------------------------------
 
@@ -960,10 +1012,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return shell(request, "account.html", u, s, 401, enrol=None, otpauth="", must_setup=False,
                              error="The current password is wrong.")
             new = data.get("new", "")
-            if new != data.get("confirm", "") or len(new) < 12:
+            if error := users.password_problem(new, data.get("confirm", "")):
                 return shell(request, "account.html", u, s, 422, enrol=None, otpauth="", must_setup=False,
-                             error="Use at least 12 characters and type the same new password twice.")
-            users.set_password(c, u["id"], new)   # signs this browser out too
+                             error=error)
+            users.set_password(c, u["id"], new)   # clears an admin-set mark; signs this browser out too
+            access.audit(c, u["name"], "password changed (self)", u["name"])
         return back(base + "/account", "pw-changed")
 
     @app.post(base + "/account/2fa/start", include_in_schema=False)
@@ -1025,34 +1078,18 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             raise HTTPException(404, "Not Found")
         return s, u, None
 
-    # A new set-password link is shown once to the admin who made it: kept server-side (kv) under this session, never
-    # in a redirect URL (browser history, logs, Referer).
-    LINK_MIN = 10
+    # Passwords an admin types or generates (static/password.js) are handed over by the admin; the server never shows,
+    # logs or redirects with one, and a refused form comes back without it.
 
-    def link_key(s: dict) -> str:
-        return "setpw-link:" + admin._token_hash(s["csrf"])
-
-    def link_keep(c, s: dict, token: str) -> None:
-        c.execute("DELETE FROM kv WHERE key LIKE 'setpw-link:%' AND json_extract(value, '$.expires') < ?",
-                  (db.now(),))
-        expires = (datetime.now() + timedelta(minutes=LINK_MIN)).isoformat(timespec="seconds")
-        admin.kv_set(c, link_key(s), json.dumps({"link": f"{base}/set-password?token={token}", "expires": expires}))
-
-    def link_take(c, s: dict) -> str:
-        raw = admin.kv_get(c, link_key(s))
-        if not raw:
-            return ""
-        conn_del(c, link_key(s))   # once
-        data = json.loads(raw)
-        return data["link"] if data["expires"] >= db.now() else ""
-
-    def users_view(request, c, u, s, status: int = 200, error: str = "", link: str = ""):
+    def users_view(request, c, u, s, status: int = 200, error: str = "", form_name: str = "", form_role: str = ""):
         rows = users.listing(c)
         return shell(request, "users.html", u, s, status, users=rows, roles=users.ROLES,
                      must_2fa={r["id"]: users.totp_required(c, r) for r in rows},
                      last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows},
+                     pw_state={r["id"]: users.pw_state(r) for r in rows}, min_pw=users.MIN_PASSWORD,
+                     grace=users.GRACE_SIGNINS,
                      grants=access.all_grants(c), levels=access.LEVEL_LABELS, audit=access.audit_recent(c),
-                     link=link, error=error)
+                     error=error, form_name=form_name, form_role=form_role)
 
     @app.get(base + "/users", response_class=HTMLResponse, include_in_schema=False)
     def users_page(request: Request):
@@ -1060,10 +1097,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            return users_view(request, c, u, s, link=link_take(c, s))
+            return users_view(request, c, u, s)
 
     def user_edit_view(request, c, u, s, target: dict, status: int = 200, error: str = "",
-                       rows: list[dict] | None = None, link: str = ""):
+                       rows: list[dict] | None = None):
         """One user's role and per-domain grants; rows: a refused form's grant rows, else the saved grants."""
         rows = rows if rows is not None else access.grants(c, target["id"])
         domains = [r["name"] for r in c.execute("SELECT name FROM domains ORDER BY name")]
@@ -1072,7 +1109,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
                      role_2fa=users.required_for(c, target["role"]), error=error,
                      features=access.FEATURES, admin_features=access.ADMIN_FEATURES, rights=access.rights_of(target),
-                     right_labels=access.RIGHT_LABELS, link=link)
+                     right_labels=access.RIGHT_LABELS, pw_state=users.pw_state(target), min_pw=users.MIN_PASSWORD,
+                     grace=users.GRACE_SIGNINS)
 
     @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
     def user_edit_page(request: Request, user_id: PathId):
@@ -1083,7 +1121,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             target = users.get(c, user_id)
             if not target:
                 raise HTTPException(404, "No such user")
-            return user_edit_view(request, c, u, s, target, link=link_take(c, s))
+            return user_edit_view(request, c, u, s, target)
 
     @app.post(base + "/users/add", include_in_schema=False)
     async def users_add(request: Request):
@@ -1092,12 +1130,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c, data)
             if redirect:
                 return redirect
+            name = data.get("name", "").strip()
             try:
-                uid = users.create(c, data.get("name", ""), data.get("role", ""))
+                if error := users.password_problem(data.get("password", ""), data.get("confirm", "")):
+                    raise ValueError(error)
+                uid = users.create(c, name, data.get("role", ""), data["password"], by_admin=True)
             except ValueError as exc:
-                return users_view(request, c, u, s, 422, str(exc))
-            access.audit(c, u["name"], "user-add", data.get("name", "").strip(), f"role {data.get('role')}")
-            link_keep(c, s, users.new_setpw_token(c, uid))
+                return users_view(request, c, u, s, 422, str(exc), form_name=name, form_role=data.get("role", ""))
+            access.audit(c, u["name"], "user-add", name, f"role {data.get('role')}")
+            access.audit(c, u["name"], "set password (admin)", name)
         if data.get("role") == "power":   # next: pick its domains
             return back(f"{base}/users/{uid}", "user-added")
         return back(f"{base}/users", "user-added")
@@ -1161,10 +1202,12 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 if want != target["totp_required"]:
                     access.audit(c, u["name"], "require-2fa", target["name"], "on" if want else "off")
                 return back(after, "user-saved")
-            if action == "reset-password":
-                link_keep(c, s, users.new_setpw_token(c, user_id))
-                access.audit(c, u["name"], "reset-password", target["name"])
-                return back(after, "user-saved")
+            if action == "set-password":
+                if error := users.password_problem(data.get("password", ""), data.get("confirm", "")):
+                    return user_edit_view(request, c, u, s, target, 422, error)
+                users.set_password(c, user_id, data["password"], by_admin=True)   # signs that user out everywhere
+                access.audit(c, u["name"], "set password (admin)", target["name"])
+                return back(f"{base}/users/{user_id}#password", "pw-set-admin")
             if action == "delete":
                 if users.is_last_admin(c, user_id):
                     raise HTTPException(409, "This is the last admin; cannot delete it")

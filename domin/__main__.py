@@ -14,17 +14,17 @@ from .config import Settings
 from .validate import normalize_domain
 
 
-def _read_password(confirm: bool = True) -> str | None:
-    """A password from the tty (asked twice) or one line on stdin; None if it is too short or the two differ."""
-    if sys.stdin.isatty():
+def _read_password(from_stdin: bool = False) -> str | None:
+    """A password from the tty (asked twice) or one line on stdin (--password-stdin, or no tty); None, with the
+    reason on stderr, if it breaks the password policy (users.password_problem) or the two differ."""
+    if sys.stdin.isatty() and not from_stdin:
         pw = getpass.getpass("New password: ")
-        if confirm and pw != getpass.getpass("Again: "):
-            print("the passwords differ", file=sys.stderr)
-            return None
+        problem = users.password_problem(pw, getpass.getpass("Again: "))
     else:
         pw = sys.stdin.readline().rstrip("\r\n")
-    if len(pw) < 12:
-        print("use at least 12 characters", file=sys.stderr)
+        problem = users.password_problem(pw)
+    if problem:
+        print(problem, file=sys.stderr)
         return None
     return pw
 
@@ -49,12 +49,18 @@ def main(argv: list[str] | None = None) -> int:
                          "mapping guessed from the header names; fields: " + ", ".join(csvimport.TARGETS))
     ic.add_argument("--delimiter", choices=(",", ";", "tab"), help="instead of the detected one")
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
-    ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
+    ua = sub.add_parser("user-add", help="create a user with a password (asked twice, or one line on stdin); hand it "
+                                         "over yourself: the user may keep it for a few sign-ins, then must renew it")
     ua.add_argument("name")
     ua.add_argument("--role", choices=users.ROLES, default="power")
+    ua.add_argument("--password-stdin", action="store_true", help="read the password as one line from stdin")
+    ua.add_argument("--own", action="store_true", help="the password is the user's own (you are that user): no "
+                                                       "change offer, no renewal")
     sub.add_parser("user-list", help="list users")
-    up = sub.add_parser("user-passwd", help="set a user's password (asked twice, or one line on stdin)")
+    up = sub.add_parser("user-passwd", help="set a user's password as an admin (asked twice, or one line on stdin); "
+                                            "the user may keep it for a few sign-ins, then must renew it")
     up.add_argument("name")
+    up.add_argument("--password-stdin", action="store_true", help="read the password as one line from stdin")
     ur = sub.add_parser("user-role", help="change a user's role")
     ur.add_argument("name")
     ur.add_argument("role", choices=users.ROLES)
@@ -117,15 +123,19 @@ def main(argv: list[str] | None = None) -> int:
         with db.connect(settings.db_path) as conn, tools.http_client() as client:
             print(json.dumps(posture.refresh_fixes(conn, cve_db, client, settings.nvd_api_key)))
     elif args.cmd == "user-add":
+        pw = _read_password(args.password_stdin)
+        if pw is None:
+            return 2
         with db.connect(settings.db_path) as conn:
             try:
-                uid = users.create(conn, args.name, args.role)
+                users.create(conn, args.name, args.role, pw, by_admin=not args.own)
             except ValueError as exc:
                 print(exc, file=sys.stderr)
                 return 2
-            token = users.new_setpw_token(conn, uid)
-        print(f"user {args.name} ({args.role}) created")
-        print(f"set a password within 24 h at: /admin/set-password?token={token}")
+            access.audit(conn, "cli", "user-add", args.name.strip(), f"role {args.role}")
+            if not args.own:
+                access.audit(conn, "cli", "set password (admin)", args.name.strip())
+        print(f"user {args.name} ({args.role}) created" + ("" if args.own else "; hand the password over yourself"))
     elif args.cmd == "user-list":
         with db.connect(settings.db_path) as conn:
             for u in users.listing(conn):
@@ -139,10 +149,11 @@ def main(argv: list[str] | None = None) -> int:
             if not u:
                 print(f"no such user: {args.name}", file=sys.stderr)
                 return 2
-            pw = _read_password()
+            pw = _read_password(args.password_stdin)
             if pw is None:
                 return 2
-            users.set_password(conn, u["id"], pw)
+            users.set_password(conn, u["id"], pw, by_admin=True)
+            access.audit(conn, "cli", "set password (admin)", u["name"])
         print(f"password set for {args.name}; open sessions were signed out")
     elif args.cmd == "user-role":
         with db.connect(settings.db_path) as conn:

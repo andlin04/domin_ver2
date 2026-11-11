@@ -64,11 +64,13 @@ CREATE TABLE IF NOT EXISTS ip_cache (
     asn TEXT, prefix TEXT, netname TEXT, descr TEXT, country TEXT,
     fetched TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- tuning, salts, scope, set-pw tokens
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- tuning, salts, scope, pending steps
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL DEFAULT '',   -- scrypt$log_n$salt$hash; '' until the first set-password
+    password_hash TEXT NOT NULL DEFAULT '',   -- scrypt$log_n$salt$hash; '' = no password yet (cannot sign in)
+    pw_set_by_admin INTEGER NOT NULL DEFAULT 0,   -- 1: an admin set the password (users.count_signin)
+    pw_grace_left INTEGER NOT NULL DEFAULT 0,     -- sign-ins it may still be kept; -1 = must renew now
     role TEXT NOT NULL DEFAULT 'power',        -- power (per-domain grants) | admin (old: viewer, analyst)
     totp_secret TEXT NOT NULL DEFAULT '',      -- '' = no second factor
     totp_required INTEGER NOT NULL DEFAULT 0,
@@ -265,6 +267,12 @@ def init(path: Path) -> None:
             from .access import DEFAULT_RIGHTS  # local import: access -> db
             conn.execute("ALTER TABLE users ADD COLUMN rights TEXT NOT NULL DEFAULT ''")
             conn.execute("UPDATE users SET rights = ?", (json.dumps(DEFAULT_RIGHTS, sort_keys=True),))
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        for col in ("pw_set_by_admin", "pw_grace_left"):
+            if col not in have:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+        # the removed set-password links: their tokens (kv setpw:*) and the admin's once-shown copies (setpw-link:*)
+        conn.execute("DELETE FROM kv WHERE key LIKE 'setpw:%' OR key LIKE 'setpw-link:%'")
         if "user_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(admin_sessions)")}:
             conn.execute("ALTER TABLE admin_sessions ADD COLUMN user_id INTEGER")
         have = {r["name"] for r in conn.execute("PRAGMA table_info(posture_scans)")}

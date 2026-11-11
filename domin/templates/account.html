@@ -11,6 +11,9 @@
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if must_setup %}<p class="note bad" role="alert">Two-factor is required for your account. Set it up below:
   Set up two-factor, add the secret to your authenticator app, enter its code.</p>{% endif %}
+{% if user.pw_set_by_admin %}<p class="note" role="status">Your password was set by an admin
+  ({{ user.pw_grace_left }} grace sign-in{{ '' if user.pw_grace_left == 1 else 's' }} left).
+  <a href="{{ base }}/account/renew">Change it now</a> or under Change password below.</p>{% endif %}
 
 {% if recovery %}
 <section class="card">
