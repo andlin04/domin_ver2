@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Map CSV columns · domin{% endblock %}
+{% block page %}settings{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Map CSV columns</h1>
+  <p class="muted">Pick the column that feeds each domin field; fields left on "don't import" stay empty. A row needs
+    a domain or a host (the domain is then derived from the host), and the file at least one data field.</p></div></section>
+
+{% set sub = "general" %}{% include "_settings_nav.html" %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>File <small>{{ file or "upload" }}</small></h2>
+  <dl class="facts">
+    <dt>Format</dt><dd>{{ delimiter }} separated, {{ layout.encoding }}</dd>
+    <dt>Columns</dt><dd>{{ columns|length }}</dd>
+    <dt>Kept until</dt><dd>{{ expires }} <small class="muted">then deleted unless imported</small></dd>
+  </dl>
+</section>
+
+<section class="card">
+  <h2>Columns in the file <small>first row and up to {{ layout.sample|length }} rows after it</small></h2>
+  <div class="table-wrap short"><table class="fit-table">
+    <thead><tr><th>#</th><th>First row</th><th>Sample values</th></tr></thead>
+    <tbody>
+    {% for col in columns %}{% set i = loop.index0 %}
+    <tr><td class="mono">{{ loop.index }}</td><td class="cell-wrap">{{ col or "(empty)" }}</td>
+      <td class="cell-wrap mono">{% set vals = [] %}{% for r in layout.sample[:3] %}{% if i < r|length and r[i] %}{% set _ = vals.append(r[i][:60]) %}{% endif %}{% endfor %}{{ vals|join(" · ") }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>Import into</h2>
+  <form method="post" action="{{ base }}/settings/csv-import/map">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="t" value="{{ token }}">
+    <div class="grid g3">
+      {% for t in targets %}
+      <label class="field">{{ labels[t] }} <small>{{ hints[t] }}</small>
+        <select name="map_{{ t }}"><option value="">— don't import —</option>
+          {% for col in columns %}<option value="{{ loop.index0 }}" {% if mapping[t] == loop.index0 %}selected{% endif %}>{{ loop.index }} · {{ col[:40] or "(empty)" }}</option>{% endfor %}
+        </select></label>
+      {% endfor %}
+    </div>
+    <p><label class="tick"><input type="checkbox" name="header" {% if header %}checked{% endif %}>
+      First row is a header (not imported)</label></p>
+    <div class="actions">
+      <button class="btn primary" type="submit" name="action" value="import">Import</button>
+      <button class="btn" type="submit" name="action" value="cancel" formnovalidate>Cancel and delete the upload</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

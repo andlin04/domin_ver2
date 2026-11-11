@@ -695,6 +695,7 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running.",
            "import-queued": "CSV import queued; reload the page for its progress.",
+           "import-cancelled": "CSV import cancelled; the uploaded file was removed.",
            "schedule-saved": "Schedule saved; its next run is shown below.", "schedule-deleted": "Schedule removed.",
            "schedule-run": "Schedule run queued.", "schedule-on": "Schedule enabled; next run from now.",
            "schedule-off": "Schedule disabled.", "discovery-queued": "Scan with nmap discovery queued.",
@@ -1249,8 +1250,74 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if path:
                 path.unlink(missing_ok=True)
             raise HTTPException(422, "Pick a CSV file.")
+        try:
+            layout = await run_in_threadpool(csvimport.inspect, path)
+        except (ValueError, csvimport.TooLarge) as e:
+            path.unlink(missing_ok=True)
+            raise HTTPException(422, f"Cannot read {name or 'the file'}: {e}.") from None
         with conn() as c:
-            csvimport.queue(c, path, name, u["name"])
+            csvimport.sweep(c, settings.db_path.parent)
+            token = csvimport.hold(c, path, name, u["id"], s["token_hash"], layout)
+        return back(f"{base}/settings/csv-import/map?t={token}")
+
+    def held_upload(c, s, u, token: str) -> dict:
+        up = csvimport.held(c, token, u["id"], s["token_hash"], settings.db_path.parent)
+        if not up:
+            raise HTTPException(404, "This upload has expired or is not yours; upload the file again.")
+        return up
+
+    def csv_map_view(request, c, u, s, token: str, up: dict, mapping: dict, header: bool, error: str = "",
+                     status: int = 200):
+        lay = up["layout"]
+        return shell(request, "csv_map.html", u, s, status, token=token, file=up["file"], layout=lay,
+                     columns=lay["columns"], mapping=mapping, header=header, targets=csvimport.TARGETS,
+                     labels=csvimport.LABELS, hints=csvimport.HINTS,
+                     delimiter=csvimport.DELIMITERS.get(lay["delimiter"], lay["delimiter"]),
+                     expires=datetime.fromtimestamp(up["at"] + csvimport.UPLOAD_TTL).isoformat(" ", "minutes"),
+                     error=error)
+
+    @app.get(base + "/settings/csv-import/map", response_class=HTMLResponse, include_in_schema=False)
+    def settings_csv_map(request: Request, t: str = ""):
+        """Step 2 of the CSV import: which column feeds which field (pre-filled from the header names)."""
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            up = held_upload(c, s, u, t)
+            lay = up["layout"]
+            mapping = csvimport.auto_map(lay["columns"]) if lay["header"] else dict.fromkeys(csvimport.TARGETS)
+            return csv_map_view(request, c, u, s, t, up, mapping, lay["header"])
+
+    @app.post(base + "/settings/csv-import/map", include_in_schema=False)
+    async def settings_csv_map_post(request: Request):
+        """Step 3: import with the chosen mapping (queued for the worker), or cancel (the file is removed)."""
+        data = await form(request)
+        token = data.get("t", "")
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            up = held_upload(c, s, u, token)
+            data_dir = settings.db_path.parent
+            if data.get("action") == "cancel":
+                csvimport.drop(c, token, data_dir)
+                return back(base + "/settings#csv-import", "import-cancelled")
+            lay = up["layout"]
+            mapping, error = {}, ""
+            for t in csvimport.TARGETS:
+                v = data.get("map_" + t, "")
+                mapping[t] = int(v) if v.isdigit() and int(v) < len(lay["columns"]) else None
+                if v and mapping[t] is None:
+                    error = "The form names a column the file does not have."
+            header = data.get("header") == "on"
+            error = error or csvimport.check_mapping(mapping, len(lay["columns"]))
+            if error:
+                return csv_map_view(request, c, u, s, token, up, mapping, header,
+                                    error=error[:1].upper() + error[1:] + ".", status=422)
+            if csvimport.busy(c):
+                raise HTTPException(409, "An import is already queued or running; wait for it to finish.")
+            csvimport.queue(c, Path(up["path"]), up["file"], u["name"], mapping, {**lay, "header": header})
+            csvimport.drop(c, token, data_dir, keep_file=True)
         return back(base + "/settings#csv-import", "import-queued")
 
     @app.get(base + "/settings", response_class=HTMLResponse, include_in_schema=False)

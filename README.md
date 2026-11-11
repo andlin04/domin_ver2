@@ -140,10 +140,18 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   the host.
 - **Firewall:** `--firewall` turns on ufw: SSH (`--ssh-from` to limit it), HTTP/HTTPS only from `--admin-sources`.
 - **Database:** a new install starts with an empty database. To populate it from a CSV export (All records >
-  CSV on this or another domin), upload the file in Settings > CSV import (admin, up to 200 MB; the worker
-  imports it in the background) or, as root, `cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin
-  -- /opt/domin/venv/bin/python -m domin import-csv <file>`. One imported scan per domain, timed by the file's newest
-  "last seen"; existing scans are kept and importing the same file again adds nothing.
+  CSV on this or another domin) or any CSV with a domain or host column and some record fields (comma, semicolon
+  or tab separated; UTF-8 or Latin-1), upload the file in Settings > CSV import (admin, up to 200 MB). A dialog
+  shows the file's columns with sample values and asks which column feeds which field (domain, host, ip, asn,
+  prefix, netname, descr, country, last_seen, first_seen, eu), pre-filled from the header names and common aliases
+  (hostname/fqdn/name → host, address/ip_address → ip, date/timestamp → last_seen, ...); domin's own export is
+  pre-mapped, so you only press Import. Only mapped fields are imported; a host without a domain gets its domain
+  from the inventory or the host name. The worker imports it in the background; an upload left unmapped is deleted
+  after an hour. Or, as root, `cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin
+  -- /opt/domin/venv/bin/python -m domin import-csv <file> [--map field=column ...] [--delimiter ,|;|tab]` (without
+  --map the guessed mapping; --map overrides it per field by header name or 1-based number). One imported scan per
+  domain, timed by the file's newest "last seen"; existing scans are kept and importing the same file again adds
+  nothing.
 - **Scan reach:** public addresses, `--scan-nets` (this host's own addresses refused) and the `--internal-dns`
   servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
 - **HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first (sudo:

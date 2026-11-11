@@ -27,6 +27,7 @@ import ipaddress
 import json
 import os
 import random
+import re
 import shutil
 import socket
 import struct
@@ -547,6 +548,7 @@ SHOTS = {
     "operations-schedules": ("/admin", True, 300, from_card("Scheduled rescans")),
     "settings-signin": ("/admin/settings", True, 520, from_card("Sign-in required for")),
     "settings-csv-import": ("/admin/settings", True, 420, from_card("CSV import")),
+    "csv-map": ("", True, 1500, ""),   # the path: an upload of DEMO_CSV, made in main()
     "domain-viewers": ("/d/example.com", "carol", 560, from_card("Viewers")),
     "table-cves": ("/admin/security/analysis?domain=example.com", True, 1000,
                    "document.querySelector('[data-tab=cves]')?.click();" + show_from("section.host-list")),
@@ -561,7 +563,12 @@ SHOTS = {
     "not-found": ("/d/no-such-domain.example", True, 500, ""),   # error.html
     "setpw-invalid": ("/admin/set-password?token=demo", False, 600, ""),
 }
-LIGHT = ("overview", "posture-overview", "header")   # also shot in the light theme: NAME-light.png
+LIGHT = ("overview", "posture-overview", "header", "csv-map")   # also shot in the light theme: NAME-light.png
+# another tool's export for the mapping dialog: renamed, reordered, semicolons, a column domin has no field for
+DEMO_CSV = (b"Hostname;Address;Owner;AS;Country;Seen at;Ticket\r\n"
+            b"www.example.com;192.0.2.10;EXAMPLE-NET;64500;Sweden;2026-11-01 08:00;OPS-1041\r\n"
+            b"mail.example.com;198.51.100.25;DOC-MAIL;64501;Germany;2026-11-01 08:00;OPS-1041\r\n"
+            b"api.example.org;2001:db8::20;DOC-V6;64502;Netherlands;2026-11-02 09:30;\r\n")
 PHONE, PHONE_WIDTH = ("header",), 390   # also shot at a phone width, dark and light: NAME-390[-light].png
 
 
@@ -653,6 +660,14 @@ def main() -> int:
             if r.status_code != 303 or not r.cookies.get(COOKIE):
                 raise SystemExit(f"demo sign-in of {name} failed: {r.status_code}")
             tokens[name] = r.cookies.get(COOKIE)
+        client.cookies.clear()   # the demo admin again (the power users' sign-ins replaced the cookie)
+        client.cookies.set(COOKIE, token)
+        csrf = re.search(r'name="csrf" value="([^"]+)"', client.get("/admin/settings").text)[1]
+        r = client.post("/admin/settings/csv-import", data={"csrf": csrf},
+                        files={"file": ("other-tool-export.csv", DEMO_CSV, "text/csv")}, follow_redirects=False)
+        if r.status_code != 303:
+            raise SystemExit(f"demo CSV upload failed: {r.status_code}")
+        SHOTS["csv-map"] = (r.headers["location"], *SHOTS["csv-map"][1:])
         port = free_port()
         server = uvicorn.Server(uvicorn.Config(wrap(app), host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)

@@ -128,16 +128,20 @@
 
 <section class="card" id="csv-import">
   <h2>CSV import</h2>
-  <p class="muted">Loads a CSV download of this or another domin (All records, or a search's CSV) as imported scans:
-    one per domain, timed by the newest "last seen" in the file. Existing scans are never changed; a domain that
-    already has a scan at that time is skipped, so the same file twice adds nothing. Out-of-scope domains and bad rows
-    are skipped and counted. Up to {{ csv_max_mb }} MB; the worker runs it in the background.</p>
+  <p class="muted">Loads a CSV file as imported scans: a download of this or another domin (All records, or a search's
+    CSV), or any CSV with a domain or host column and some of the record fields (comma, semicolon or tab separated;
+    UTF-8 or Latin-1). After the upload you pick which column feeds which field; only those are imported. One scan per
+    domain, timed by the newest "last seen" in the file. Existing scans are never changed; a domain that already has
+    a scan at that time is skipped, so the same file twice adds nothing. Out-of-scope domains and bad rows are
+    skipped and counted. Up to {{ csv_max_mb }} MB; an upload not imported within an hour is deleted; the worker runs
+    the import in the background.</p>
   {% set ci = csv_import %}
   {% if ci.state %}
   <dl class="facts">
     <dt>Last import</dt><dd>{{ ci.file or "?" }} by {{ ci.user or "?" }}, {{ ci.at }}:
       {% if ci.state == "queued" %}queued{% elif ci.state == "running" %}running{% elif ci.state == "done" %}done
       {{ ci.finished }}{% else %}failed{% if ci.error %}, {{ ci.error }}{% endif %}{% endif %}</dd>
+    {% if ci.map %}<dt>Mapping</dt><dd class="mono">{{ ci.map }}</dd>{% endif %}
     {% if ci.rows is defined %}<dt>Rows</dt><dd>{{ ci.rows }} read, {{ ci.bad }} bad{% if ci.errors %}
       ({{ ci.errors | join("; ") }}){% endif %}</dd>{% endif %}
     {% if ci.domains %}<dt>Domains</dt><dd>{{ ci.imported }} imported ({{ ci.records }} records),
@@ -150,7 +154,7 @@
   <form method="post" action="{{ base }}/settings/csv-import" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="field">CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
-    <p><button class="btn primary" type="submit">Import</button></p>
+    <p><button class="btn primary" type="submit">Upload and map columns</button></p>
   </form>
   {% endif %}
 </section>

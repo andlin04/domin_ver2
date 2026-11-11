@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from test_fingerprint import PW
 
 from domin import __main__ as cli
-from domin import csvimport, db, users
+from domin import admin, csvimport, db, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
@@ -112,8 +113,9 @@ HEADER = "domain,host,ip,asn,prefix,netname,descr,country,eu,last_seen\r\n"
 
 
 def test_a_bad_header_stores_nothing(settings, tmp_path):
-    for text in ("name,address\r\nexample.com,192.0.2.1\r\n", "domain,host\r\nexample.com,example.com\r\n",
-                 HEADER.replace("eu", "extra"), HEADER.replace("eu", "host"), ""):
+    # no data field; a repeated column; nothing at all; no domain or host column
+    for text in ("domain,host\r\nexample.com,example.com\r\n", HEADER.replace("eu", "host"), "",
+                 "ip,country\r\n192.0.2.1,Sweden\r\n"):
         with pytest.raises(ValueError):
             run_import(settings, write(tmp_path, text))
     assert scan_count(settings) == 0
@@ -183,6 +185,23 @@ def test_out_of_scope_domains_are_skipped(settings, tmp_path):
     assert (audit["actor"], audit["target"]) == ("cli", "in.csv") and "out of scope 1" in audit["detail"]
 
 
+def upload(h, csrf, data, name="e.csv"):
+    """Upload through Settings; returns the mapping page and its form as the browser would send it."""
+    r = h.post("/admin/settings/csv-import", data={"csrf": csrf}, files={"file": (name, data, "text/csv")},
+               follow_redirects=False)
+    assert r.status_code == 303 and "/admin/settings/csv-import/map?t=" in r.headers["location"], r.text
+    page = h.get(r.headers["location"])
+    assert page.status_code == 200
+    html = page.text
+    form = {"csrf": csrf, "t": re.search(r'name="t" value="([^"]+)"', html)[1]}
+    if re.search(r'name="header" checked', html):
+        form["header"] = "on"
+    for field, opts in re.findall(r'<select name="(map_\w+)">(.*?)</select>', html, re.S):
+        got = re.search(r'value="(\d+)" selected', opts)
+        form[field] = got[1] if got else ""
+    return html, form
+
+
 def test_upload_queues_a_job_that_the_worker_runs(settings, tmp_path):
     fill(settings)
     data = export(settings)
@@ -200,13 +219,19 @@ def test_upload_queues_a_job_that_the_worker_runs(settings, tmp_path):
         assert h.post("/admin/settings/csv-import", data={"csrf": csrf}, files={"file": ("e.csv", b"")},
                       follow_redirects=False).status_code == 422
         assert not list(target.db_path.parent.glob("csv-import-*"))
-        r = h.post("/admin/settings/csv-import", data={"csrf": csrf}, files={"file": ("e.csv", data, "text/csv")},
-                   follow_redirects=False)
+        page, form = upload(h, csrf, data)   # domin's own export: pre-mapped, only "Import" to press
+        assert form == {"csrf": csrf, "t": form["t"], "header": "on", "map_domain": "0", "map_host": "1",
+                        "map_ip": "2", "map_asn": "3", "map_prefix": "4", "map_netname": "5", "map_descr": "6",
+                        "map_country": "7", "map_eu": "8", "map_last_seen": "9", "map_first_seen": ""}
+        assert len(list(target.db_path.parent.glob("csv-import-*.csv"))) == 1
+        r = h.post("/admin/settings/csv-import/map", data={**form, "action": "import"}, follow_redirects=False)
         assert r.status_code == 303 and "import-queued" in r.headers["location"]
         assert len(list(target.db_path.parent.glob("csv-import-*.csv"))) == 1
+        assert h.get(f"/admin/settings/csv-import/map?t={form['t']}").status_code == 404   # used up
         assert "Import queued" in h.get("/admin/settings").text
         assert h.post("/admin/settings/csv-import", data={"csrf": csrf}, files={"file": ("e.csv", data)},
                       follow_redirects=False).status_code == 409   # one at a time
+        assert "e.csv by adm" in h.get("/admin/settings").text
         st = csvimport.run_pending(target)
         assert st["state"] == "done" and (st["imported"], st["user"], st["file"]) == (2, "adm", "e.csv")
         assert csvimport.run_pending(target) is None
@@ -281,3 +306,195 @@ def test_cli_import_csv(settings, tmp_path, monkeypatch, capsys):
     assert cli.main(["import-csv", str(write(tmp_path, "a,b\r\n1,2\r\n"))]) == 1
     assert "not a domin CSV export" in capsys.readouterr().err
     assert Path(f).exists()   # the CLI never removes the file it was given
+
+
+# ---------------------------------------------------------------- any CSV: layout detection and column mapping
+
+def stored(s, domain):
+    with db.connect(s.db_path) as c:
+        sid = db.history(c, domain)[-1]["id"]   # the newest scan
+        return sorted((dict(r) for r in db.records(c, sid)), key=lambda r: r["host"])
+
+
+def test_renamed_reordered_semicolon_columns_with_a_junk_column(settings, tmp_path):
+    text = ("Notes;FQDN;Junk;Country;IP Address;Date\r\n"
+            "edge box;www.example.com;zzz;Sweden;192.0.2.10;2026-03-01 10:00:00\r\n"
+            "'=cmd;mail.example.com;zzz;Norway;2001:db8::1;2026-03-02T09:00:00Z\r\n")
+    f = write(tmp_path, text)
+    lay = csvimport.inspect(f)
+    assert (lay["delimiter"], lay["encoding"], lay["header"]) == (";", "utf-8", True)
+    m = csvimport.auto_map(lay["columns"])
+    assert {t: i for t, i in m.items() if i is not None} == {"host": 1, "ip": 4, "descr": 0, "country": 3,
+                                                             "last_seen": 5}
+    stats = run_import(settings, f)
+    assert (stats["rows"], stats["bad"], stats["imported"], stats["records"]) == (2, 0, 1, 2)
+    recs = stored(settings, "example.com")   # the domain derived from the host names
+    assert [(r["host"], r["ip"], r["country"], r["descr"]) for r in recs] == [
+        ("mail.example.com", "2001:db8::1", "Norway", "=cmd"), ("www.example.com", "192.0.2.10", "Sweden", "edge box")]
+    with db.connect(settings.db_path) as c:
+        assert db.history(c, "example.com")[0]["started"] == "2026-03-02T09:00:00"
+        audit = c.execute("SELECT detail FROM audit WHERE action = 'csv-import'").fetchone()["detail"]
+    assert "semicolon" in audit and "host=FQDN" in audit and "ip=IP Address" in audit and "Junk" not in audit
+
+
+def test_a_latin1_tab_separated_file(settings, tmp_path):
+    p = tmp_path / "l1.csv"
+    p.write_bytes("domain\thost\tdescr\tcountry\r\nexample.se\twww.example.se\tGöteborg kontor\tSverige\r\n"
+                  .encode("latin-1"))
+    lay = csvimport.inspect(p)
+    assert (lay["delimiter"], lay["encoding"]) == ("\t", "latin-1")
+    assert run_import(settings, p)["imported"] == 1
+    assert stored(settings, "example.se")[0]["descr"] == "Göteborg kontor"
+
+
+def test_only_mapped_fields_are_stored(settings, tmp_path):
+    fill(settings)
+    f = tmp_path / "e.csv"
+    f.write_bytes(export(settings))
+    empty = replace(settings, db_path=tmp_path / "empty" / "e.db")
+    empty.db_path.parent.mkdir()
+    db.init(empty.db_path)
+    lay = csvimport.inspect(f)
+    m = {**csvimport.auto_map(lay["columns"]), "descr": None, "country": None, "netname": None}
+    assert run_import(empty, f, mapping=m, layout=lay)["imported"] == 2
+    recs = stored(empty, "example.com")
+    assert {r["host"] for r in recs} == {"example.com", "www.example.com", "old.example.com"}
+    assert all(r["descr"] == r["country"] == r["netname"] == "" for r in recs)
+    assert {r["asn"] for r in recs} == {"64500", "64501", ""}   # mapped ones are kept
+
+
+def test_host_only_input_derives_the_domain(settings, tmp_path):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "sub.example.net", "2026-01-01T00:00:00", "scan", [{"host": "sub.example.net"}])
+    assert csvimport.domain_of("a.b.example.co.uk") == "example.co.uk"
+    assert csvimport.domain_of("x.sub.example.net", {"example.net", "sub.example.net"}) == "sub.example.net"
+    assert csvimport.domain_of("info@mail.example.org") == "example.org"
+    assert csvimport.domain_of("nas.corp.example", zones=("corp.example",)) == "corp.example"
+    assert csvimport.domain_of("localhost") is None
+    text = ("hostname,ip\r\nwww.example.co.uk,192.0.2.1\r\nx.sub.example.net,192.0.2.2\r\n"
+            "localhost,192.0.2.3\r\n")
+    stats = run_import(settings, write(tmp_path, text))
+    assert (stats["bad"], stats["imported"], stats["errors"]) == (1, 2, ["line 4: domain"])
+    assert stored(settings, "example.co.uk")[0]["host"] == "www.example.co.uk"
+    assert [r["host"] for r in stored(settings, "sub.example.net")] == ["x.sub.example.net"]
+
+
+def test_missing_required_fields_are_rejected(settings, tmp_path):
+    f = write(tmp_path, "domain,host,ip\r\nexample.com,www.example.com,192.0.2.1\r\n")
+    lay = csvimport.inspect(f)
+    for m, why in (({"ip": 2}, "domain or a host"), ({"domain": 0, "host": 1}, "data column"),
+                   ({"domain": 0, "host": 0, "ip": 2}, "only one field"), ({"domain": 0, "ip": 7}, "does not have")):
+        assert why in csvimport.check_mapping(m, len(lay["columns"]))
+        with pytest.raises(ValueError, match=why):
+            run_import(settings, f, mapping=m, layout=lay)
+    assert scan_count(settings) == 0
+
+
+def test_a_headerless_file_with_a_mapping(settings, tmp_path):
+    f = write(tmp_path, "www.example.com,192.0.2.1,Sweden\r\nexample.com,192.0.2.2,Sweden\r\n")
+    lay = csvimport.inspect(f)
+    assert not lay["header"] and lay["columns"] == ["www.example.com", "192.0.2.1", "Sweden"]
+    stats = run_import(settings, f, mapping={"host": 0, "ip": 1, "country": 2}, layout=lay)
+    assert (stats["rows"], stats["records"]) == (2, 2)
+
+
+def test_mapping_dialog_import_cancel_and_validation(settings):
+    text = b"FQDN;Address;Junk\r\nwww.example.com;192.0.2.1;x\r\n"
+    data_dir = settings.db_path.parent
+    with client(settings) as h:
+        csrf = sign_in(h, "adm")
+        html, form = upload(h, csrf, text)
+        assert "semicolon separated" in html and "www.example.com" in html and "— don't import —" in html
+        assert (form["map_host"], form["map_ip"], form["map_domain"]) == ("0", "1", "")
+        files = list(data_dir.glob("csv-import-*.csv"))
+        bad = h.post("/admin/settings/csv-import/map", data={**form, "map_ip": "", "action": "import"})
+        assert bad.status_code == 422 and "Map at least one data column" in bad.text
+        assert h.post("/admin/settings/csv-import/map", data={**form, "csrf": "x", "action": "import"}
+                      ).status_code == 403
+        assert len(files) == 1 and files[0].exists()   # a rejected mapping keeps the upload for another try
+        r = h.post("/admin/settings/csv-import/map", data={**form, "action": "cancel"}, follow_redirects=False)
+        assert r.status_code == 303 and "import-cancelled" in r.headers["location"]
+        assert not list(data_dir.glob("csv-import-*"))
+        _, form = upload(h, csrf, text)
+        r = h.post("/admin/settings/csv-import/map", data={**form, "action": "import"}, follow_redirects=False)
+        assert r.status_code == 303 and "import-queued" in r.headers["location"]
+    st = csvimport.run_pending(settings)
+    assert st["state"] == "done" and st["map"] == "host=FQDN, ip=Address" and st["records"] == 1
+    assert [(r["host"], r["ip"]) for r in stored(settings, "example.com")] == [("www.example.com", "192.0.2.1")]
+    with db.connect(settings.db_path) as c:
+        detail = c.execute("SELECT detail FROM audit WHERE action = 'csv-import'").fetchone()["detail"]
+    assert "map host=FQDN, ip=Address" in detail
+    assert not list(data_dir.glob("csv-import-*"))
+
+
+def test_upload_tokens_expire_and_belong_to_one_user(settings, monkeypatch):
+    with db.connect(settings.db_path) as c:
+        users.create(c, "adm2", "admin", PW)
+    text = b"host,ip\r\nwww.example.com,192.0.2.1\r\n"
+    data_dir = settings.db_path.parent
+    with client(settings) as h, client(settings) as other:
+        csrf = sign_in(h, "adm")
+        csrf2 = sign_in(other, "adm2")
+        _, form = upload(h, csrf, text)
+        url = f"/admin/settings/csv-import/map?t={form['t']}"
+        assert other.get(url).status_code == 404   # another admin: not theirs
+        for action in ("import", "cancel"):
+            assert other.post("/admin/settings/csv-import/map", data={**form, "csrf": csrf2, "action": action}
+                              ).status_code == 404
+        assert h.get(url).status_code == 200 and len(list(data_dir.glob("csv-import-*.csv"))) == 1
+        assert h.get("/admin/settings/csv-import/map?t=" + "A" * 32).status_code == 404   # unknown
+        later = csvimport.time.time() + csvimport.UPLOAD_TTL + 1
+        monkeypatch.setattr(csvimport.time, "time", lambda: later)
+        assert h.get(url).status_code == 404   # expired: the file is removed at once
+        assert not list(data_dir.glob("csv-import-*"))
+        assert h.post("/admin/settings/csv-import/map", data={**form, "action": "import"}).status_code == 404
+    with db.connect(settings.db_path) as c:
+        assert not csvimport.busy(c) and scan_count(settings) == 0
+
+
+def test_the_worker_sweeps_expired_and_orphaned_uploads(settings):
+    data_dir = settings.db_path.parent
+    held, orphan, fresh = (data_dir / f"csv-import-{n}.csv" for n in ("held", "orphan", "fresh"))
+    for p in (held, orphan, fresh):
+        p.write_text("host,ip")
+    old = csvimport.time.time() - csvimport.UPLOAD_TTL - 10
+    os.utime(orphan, (old, old))
+    with db.connect(settings.db_path) as c:
+        token = csvimport.hold(c, held, "h.csv", 1, "", {"columns": []})
+        c.execute("UPDATE kv SET value = json_set(value, '$.at', ?) WHERE key = ?",
+                  (old, csvimport.UPLOAD_KEY + token))
+        c.commit()
+    assert csvimport.run_pending(settings) is None   # nothing queued; the sweep still ran
+    assert not held.exists() and not orphan.exists() and fresh.exists()
+    with db.connect(settings.db_path) as c:
+        assert admin.kv_get(c, csvimport.UPLOAD_KEY + token) is None
+
+
+def test_only_admins_reach_the_mapping(settings):
+    with client(settings) as h:
+        csrf = sign_in(h, "adm")
+        _, form = upload(h, csrf, b"host,ip\r\nwww.example.com,192.0.2.1\r\n")
+    with client(settings) as h:
+        r = h.get(f"/admin/settings/csv-import/map?t={form['t']}", follow_redirects=False)
+        assert r.status_code in (303, 401, 403, 404)
+        csrf = sign_in(h, "ana")
+        assert h.get(f"/admin/settings/csv-import/map?t={form['t']}").status_code == 404
+        assert h.post("/admin/settings/csv-import/map", data={**form, "csrf": csrf, "action": "import"}
+                      ).status_code == 404
+    with db.connect(settings.db_path) as c:
+        assert not csvimport.status(c)
+    assert len(list(settings.db_path.parent.glob("csv-import-*.csv"))) == 1   # still the admin's
+
+
+def test_cli_map_and_delimiter(settings, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DOMIN_DB", str(settings.db_path))
+    f = write(tmp_path, "a|x;b;c\r\nwww.example.com;192.0.2.1;Sweden\r\n")
+    assert cli.main(["import-csv", str(f)]) == 1
+    err = capsys.readouterr().err
+    assert "map a domain or a host column" in err and "--map field=column" in err
+    assert cli.main(["import-csv", str(f), "--delimiter", ";", "--map", "host=1", "--map", "ip=b",
+                     "--map", "country=C"]) == 0
+    out = capsys.readouterr().out
+    assert "semicolon separated" in out and "host=a|x, ip=b, country=c" in out and "imported 1 (1 records)" in out
+    assert cli.main(["import-csv", str(f), "--map", "nope=1"]) == 1
+    assert "unknown field" in capsys.readouterr().err

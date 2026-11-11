@@ -2,6 +2,29 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: CSV import of any CSV, with a column mapping
+
+- Settings > CSV import accepts any CSV with the inventory's data, not only domin's export. The upload (streamed,
+  200 MB cap, CSRF, temp file in /var/lib/domin as before) is inspected: delimiter (comma, semicolon or tab;
+  csv.Sniffer with a fallback), encoding (UTF-8, UTF-8 with BOM, else Latin-1), header row and the first 10 rows.
+- New step, Settings > CSV import > Map CSV columns: the file's columns with sample values and one select per domin
+  field (domain, host, ip, asn, prefix, netname, descr, country, last_seen, first_seen, eu), pre-filled from the
+  header names and aliases (hostname, fqdn, name → host; address, ip_address → ip; date, seen, timestamp →
+  last_seen; ...). "First row is a header" checkbox. Required: a domain or a host column (a host-only row gets the
+  longest inventory domain it is under, else its registrable part) and at least one data field; otherwise the
+  dialog shows what is missing. Only mapped fields are stored. domin's own export is pre-mapped: press Import.
+- The upload waits under a random token bound to the user and session; it is deleted on Cancel, on use after an
+  hour, or by the worker's sweep after an hour (which also removes orphaned upload files).
+- The import itself is unchanged: worker thread, progress in Settings, per-field checks, idempotency, scope skip,
+  formula-escape strip. The audit entry and Settings now show the mapping, delimiter and encoding.
+- CLI: `import-csv <file> [--map field=column ...] [--delimiter ,|;|tab]`; without --map the guessed mapping, with a
+  clear error naming the file's columns when it lacks the required fields.
+- nginx: no change (the mapping form is a small POST); a host whose nginx predates the CSV import entry needs the
+  `location = /admin/settings/csv-import` block from install.sh.
+- Rollback: `git revert` this commit and deploy with update.sh. Held uploads (kv keys `csv_import:upload:*`) are
+  then never swept; remove them with `DELETE FROM kv WHERE key LIKE 'csv_import:upload:%'` and the files
+  /var/lib/domin/csv-import-*.csv. Imported scans stay (source `import`).
+
 ## 2026-11-11: CSV import replaces the public database sync
 
 - Settings > CSV import (admins only), in place of Settings > Public database: upload a CSV download of this or

@@ -58,12 +58,17 @@ a public issue for it.
   and Settings > CSV import; no root unit or SSH key on the host receives database copies.
 - CSV import (Settings, admins only; others get 404): the upload is streamed to a temp file in /var/lib/domin
   (never held in memory), at most 200 MB (nginx allows a larger body on that one path only, 4 kB elsewhere; the
-  app counts the bytes and stops at the cap), CSRF token in the form, one file and at most five fields. The header
-  must be the export's; every field is checked (domain name as for a scan, host name syntax, IP address, ASN,
-  network prefix, ISO dates, numbers, text length and control characters) and the exporter's formula escape `'`
-  is removed. Bad rows are skipped and counted, out-of-scope domains skipped; existing scans are never changed or
-  deleted. The worker runs it (no work in the web request), the temp files are removed afterwards, and the
-  import is written to the audit log (who, file name, counts).
+  app counts the bytes and stops at the cap), CSRF token in the form, one file and at most five fields. The
+  uploaded file waits for the column mapping under a random token (24 bytes) bound to the uploading user and
+  session: another user, another session or an unknown token gets 404. It is deleted on Cancel, when the token is
+  used past its lifetime, and at the latest about an hour after the upload (UPLOAD_TTL 3600 s; the worker's import
+  thread sweeps every 5 s and also removes upload files older than an hour that nothing holds or queued). A queued
+  file is deleted when its import finishes or fails. Only the mapped columns are read; every mapped field is
+  checked (domain name as for a scan, host name syntax, IP address, ASN, network prefix, ISO dates, EU flag, text
+  length and control characters) and the exporter's formula escape `'` is removed. Bad rows are skipped and
+  counted, out-of-scope domains skipped; existing scans are never changed or deleted. The worker runs it (no work
+  in the web request), the staging files are removed afterwards, and the import is written to the audit log (who,
+  file name, counts, delimiter, encoding and the mapping).
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.
 

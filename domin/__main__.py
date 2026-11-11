@@ -40,9 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("domain")
     geo = sub.add_parser("geoip", help="load a DB-IP 'IP to Country Lite' CSV (.csv or .csv.gz) for visitor countries")
     geo.add_argument("file", type=Path)
-    ic = sub.add_parser("import-csv", help="load a domin CSV export (All records or a search download) as imported "
-                                           "scans, one per domain; existing scans are kept, re-imports add nothing")
+    ic = sub.add_parser("import-csv", help="load a CSV (a domin export, or any file with a domain or host column) as "
+                                           "imported scans, one per domain; existing scans are kept, re-imports add "
+                                           "nothing")
     ic.add_argument("file", type=Path)
+    ic.add_argument("--map", action="append", default=[], metavar="FIELD=COLUMN",
+                    help="column for a field (header name or 1-based number; empty = don't import), over the "
+                         "mapping guessed from the header names; fields: " + ", ".join(csvimport.TARGETS))
+    ic.add_argument("--delimiter", choices=(",", ";", "tab"), help="instead of the detected one")
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
     ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
@@ -91,8 +96,15 @@ def main(argv: list[str] | None = None) -> int:
         with db.connect(settings.db_path) as conn:
             zones = admin.effective(settings, conn).internal_zones
             try:
+                layout = csvimport.inspect(args.file, "\t" if args.delimiter == "tab" else args.delimiter)
+                mapping = csvimport.cli_map(layout, args.map)
+                if err := csvimport.check_mapping(mapping, len(layout["columns"])):
+                    raise ValueError(f"not a domin CSV export, and the columns found are not enough: {err}; name "
+                                     f"them with --map field=column (columns: {', '.join(layout['columns'][:20])})")
+                print(f"import-csv: {csvimport.DELIMITERS[layout['delimiter']]} separated, {layout['encoding']}, "
+                      f"map {csvimport.describe(mapping, layout['columns']) or '(nothing)'}")
                 stats = csvimport.import_file(conn, args.file, zones, actor="cli", name=args.file.name,
-                                              work_dir=settings.db_path.parent)
+                                              work_dir=settings.db_path.parent, mapping=mapping, layout=layout)
             except (ValueError, csvimport.TooLarge, OSError) as e:
                 print(f"import-csv: {e}", file=sys.stderr)
                 return 1
