@@ -286,3 +286,14 @@ def test_session_list_and_revoke(settings):
         assert not signed_in(a)
     assert {"session ended (self)", "sessions ended (self)", "session ended (admin)", "sessions ended (admin)"} <= {
         x["action"] for x in audit(settings)}
+
+
+def test_deleting_a_user_drops_their_places(settings):
+    seen(settings, "pia", SE, "SE", 30)
+    post_login(client(settings, US), "pia")   # a waiting row too
+    pia = uid(settings, "pia")
+    with db.connect(settings.db_path) as c:
+        users.delete(c, pia)
+        left = [c.execute(f"SELECT COUNT(*) FROM {t} WHERE user_id = ?", (pia,)).fetchone()[0]
+                for t in ("signin_history", "signin_pending")]
+    assert left == [0, 0]

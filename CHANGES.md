@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Deleting a user drops their sign-in places
+
+- Deleting a user also deletes their sign-in history and waiting sign-ins, so a new user who gets the same id
+  starts without the old user's places.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Screenshots: sessions and Logging views
 
 - `scripts/screenshots.py` also shoots `sessions` (My account, Sessions card) and `settings-logging`.

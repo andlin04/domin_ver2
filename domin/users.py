@@ -139,7 +139,8 @@ def set_disabled(conn: sqlite3.Connection, user_id: int, disabled: bool) -> None
 
 
 def delete(conn: sqlite3.Connection, user_id: int) -> None:
-    conn.execute("DELETE FROM grants WHERE user_id = ?", (user_id,))
+    for table in ("grants", "signin_history", "signin_pending"):   # a reused id must not inherit places
+        conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     admin.end_user_sessions(conn, user_id)
 
