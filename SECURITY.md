@@ -84,6 +84,13 @@ a public issue for it.
 - **Privacy:** no visitor IP addresses are stored; visitors are a daily-salted hash, scan clients a salted hash kept
   24 hours. Signed-in users only: each session keeps its address, country and user agent until it ends or expires,
   and each sign-in's address and country are kept for the new-place days (default 90) for sign-in protection.
+- **Syslog** (`domin/syslog.py`, Settings > Logging; off by default): audit and security events (sign-ins,
+  failures with the typed user name, rule hits, admin changes) leave the host in RFC 5424 to the configured server,
+  with user, address and country, never a password or code. UDP and TCP are plain text on the network: use TLS
+  (certificate checked against the system CAs) when the path to the server is not trusted. Sending never blocks a
+  request; a slow or dead server drops events (counted, last error in Settings), so syslog is a copy, not the
+  record: the audit log in the database stays authoritative. Only admins see or change the settings (POST with
+  CSRF); the test button sends to the saved server only.
 - **Sign-in protection** (`domin/guard.py`, checked after the password, before the code): one session per user;
   a new place (country, or /24 / IPv6 /48 when the country is unknown, not seen in N days) needs the code from
   two-factor users and an admin's approval for the others; impossible travel (over 900 km/h between country

@@ -12,7 +12,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
-from . import db
+from . import db, syslog
 
 LEVELS = ("viewer", "admin")   # per-domain grant levels, least to most
 LEVEL_LABELS = {"viewer": "viewer", "admin": "maintainer"}
@@ -319,9 +319,15 @@ def revoke_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: di
     audit(conn, actor["name"], "revoke-viewer", target["name"], domain)
 
 
-def audit(conn: sqlite3.Connection, actor: str, action: str, target: str, detail: str = "") -> None:
+def audit(conn: sqlite3.Connection, actor: str, action: str, target: str, detail: str = "",
+          forward: bool = True) -> None:
+    """One audit entry (Users, Changes); also forwarded to syslog when Settings > Logging has a server (forward=False:
+    the caller sends its own, richer event)."""
     conn.execute("INSERT INTO audit (at, actor, action, target, detail) VALUES (?, ?, ?, ?, ?)",
                  (db.now(), actor, action, target, detail[:1000]))
+    if forward:
+        syslog.emit(conn, "notice", "audit", f"{actor}: {action} {target}".strip(), actor=actor, action=action,
+                    target=target, detail=detail[:200])
 
 
 def audit_recent(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:

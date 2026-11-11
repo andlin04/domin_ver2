@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Syslog forwarding (Settings > Logging)
+
+- New `domin/syslog.py` and Settings > Logging (admin): server, port, UDP / TCP / TLS, facility, app-name, and
+  "Send a test message". The options follow wg-admin's Logging (server, port 514, UDP or TCP) plus TLS.
+- Sends RFC 5424 events: sign-ins, failures, sign-outs, sign-in protection hits, every audit entry (admin
+  changes); structured data `[domin@32473 ...]` with user, address, country, rule.
+- Non-blocking: a bounded queue and a background thread per process; a failed send is dropped and counted, the last
+  error shows in Settings. Off by default (empty server).
+- Rollback: `git revert` this commit and run update.sh. The kv keys `syslog` and `syslog:status` stay unused.
+
 ## 2026-11-11: Sign-in protection and session list
 
 - **Sign-in protection** (`domin/guard.py`; Settings > General, "Sign-in protection"; each rule on by default):

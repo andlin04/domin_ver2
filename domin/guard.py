@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from . import access, admin, db, users
+from . import access, admin, db, syslog, users
 
 KEY = "signin_guard"
 DEFAULTS = {"one_session": True, "new_place": True, "new_place_days": 90, "travel": True, "trusted": []}
@@ -217,9 +217,11 @@ def check(conn: sqlite3.Connection, user: dict, ip: str, cc: str, agent: str, is
 
 def event(conn: sqlite3.Connection, actor: str, action: str, target: str, ip: str, cc: str, rule: str,
           detail: str = "") -> None:
-    """One sign-in protection event in the audit log (Users, Changes)."""
+    """One sign-in protection event in the audit log (Users, Changes) and, when set, syslog."""
     text = f"address {ip or '?'}, country {cc.upper() or '?'}, rule {rule}" + (f"; {detail}" if detail else "")
-    access.audit(conn, actor, action, target, text)
+    access.audit(conn, actor, action, target, text, forward=False)
+    syslog.emit(conn, "warning", "signin-rule", f"{action} for {target}", user=target, by=actor, action=action,
+                rule=rule, ip=ip, country=cc.upper(), detail=detail)
 
 
 # --- approvals (Users) --------------------------------------------------------------------------------------------

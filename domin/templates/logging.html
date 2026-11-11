@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Logging · Settings · domin{% endblock %}
+{% block page %}settings{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Logging</h1>
+  <p class="muted">Send audit and security events to a syslog server (RFC 5424): sign-ins, sign-in failures and
+    sign-outs, sign-in protection hits, and every change in the audit log (users, settings). Sending never slows a
+    page: events wait in a queue; when the server is slow or down they are dropped and counted below.</p></div></section>
+{% set sub = "logging" %}{% include "_settings_nav.html" %}
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+{% if test %}<p class="note ok" role="status">{{ test }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<section class="card" id="syslog">
+  <h2>Syslog server {% if cfg.host %}<span class="pill done">on</span>{% else %}<span class="pill fix-no">off</span>{% endif %}</h2>
+  <form method="post" action="{{ base }}/settings/logging" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Syslog server <small class="muted">host name or IP address; empty = off</small>
+      <input type="text" name="host" value="{{ cfg.host }}" maxlength="253" placeholder="syslog.example.org"
+             autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+    <label>Port <input type="number" name="port" value="{{ cfg.port }}" min="1" max="65535" required></label>
+    <label>Protocol <select name="proto">{% for p in protocols %}<option value="{{ p }}"{% if p == cfg.proto %} selected{% endif %}>{{ p|upper }}</option>{% endfor %}</select></label>
+    <label>Facility <select name="facility">{% for f in facilities %}<option value="{{ f }}"{% if f == cfg.facility %} selected{% endif %}>{{ f }}</option>{% endfor %}</select></label>
+    <label>App-name <input type="text" name="app_name" value="{{ cfg.app_name }}" maxlength="48" required
+             pattern="[A-Za-z0-9._-]{1,48}" autocomplete="off" spellcheck="false"></label>
+    <p class="muted small-print">UDP: one datagram per event (up to 2048 bytes). TCP and TLS: octet-counted frames
+      (RFC 6587, RFC 5425); TLS checks the server's certificate against the system's CAs. Usual ports: 514 (UDP, TCP),
+      6514 (TLS).</p>
+    <p><button class="btn primary" type="submit">Save</button></p>
+  </form>
+  <form method="post" action="{{ base }}/settings/logging/test" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit" {% if not cfg.host %}disabled title="Save a server first"{% endif %}>Send a test message</button></form>
+</section>
+
+<section class="card">
+  <h2>Delivery</h2>
+  <p>Dropped events: <b>{{ state.dropped }}</b></p>
+  <p>Last error: {% if state.last_error %}<span class="bad-text">{{ state.last_error }}</span>
+    <span class="muted">({{ state.error_at[:16].replace('T', ' ') }})</span>{% else %}<span class="muted">none</span>{% endif %}</p>
+</section>
+{% endblock %}

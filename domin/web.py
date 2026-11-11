@@ -51,6 +51,7 @@ from . import (
     proxy,
     reports,
     schedules,
+    syslog,
     tags,
     tools,
     totp,
@@ -902,7 +903,13 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             target = nxt or base
         resp = back(target)
         set_session(resp, c, u["id"], request)
+        sec_event(request, c, "info", "signin", f"sign-in of {u['name']}", u["name"])
         return resp
+
+    def sec_event(request: Request, c, severity: str, msgid: str, text: str, user: str) -> None:
+        """A sign-in event for syslog (Settings > Logging): user, address, country."""
+        ip, cc, _ = where_from(request, c)
+        syslog.emit(c, severity, msgid, text, user=user[:64], ip=ip, country=cc)
 
     def guard_check(request: Request, c, u: dict) -> guard.Decision:
         ip, cc, agent = where_from(request, c)
@@ -915,11 +922,15 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         with conn() as c:
             who = admin.client_key(c, client_ip(request))
             if admin.login_blocked(c, who):
+                sec_event(request, c, "warning", "signin-blocked", "sign-in refused: too many failures",
+                          data.get("name", ""))
                 return priv(page(request, "login.html", 429, base=base, any_user=users.count(c) > 0,
                                  error="Too many failed sign-ins; wait 15 minutes.", next=nxt))
             u = users.verify_password(c, data.get("name", ""), data.get("password", ""))
             if not u:
                 admin.login_failed(c, who)
+                sec_event(request, c, "warning", "signin-fail", "sign-in failed: wrong user name or password",
+                          data.get("name", ""))
                 return priv(page(request, "login.html", 401, base=base, any_user=users.count(c) > 0,
                                  error="Wrong user name or password.", next=nxt))
             dec = guard_check(request, c, u)
@@ -965,6 +976,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return priv(page(request, "totp.html", 503, base=base, error=users.TOTP_UNAVAILABLE))
             if not ok:
                 admin.login_failed(c, who)
+                sec_event(request, c, "warning", "signin-fail", "sign-in failed: wrong two-factor code", u["name"])
                 return priv(page(request, "totp.html", 401, base=base, error="Wrong code."))
             conn_del(c, f"login2fa:{admin._token_hash(token)}")   # one use
             resp = signed_in(c, u, safe_next(pend.get("next")), request)
@@ -978,6 +990,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if s:
                 admin.end_session(c, request.cookies.get(COOKIE))
+                if u:
+                    sec_event(request, c, "info", "signout", f"sign-out of {u['name']}", u["name"])
         resp = back()
         resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return resp
@@ -1591,6 +1605,59 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 return settings_view(request, c, u, s, users.get_scope(c), 422, str(exc))
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
+
+    # --- logging (domin.syslog): forward audit and security events to a syslog server (admin only) ---------------
+
+    def logging_view(request, c, u, s, status: int = 200, error: str = "", cfg: dict | None = None, test: str = ""):
+        return shell(request, "logging.html", u, s, status, cfg=cfg or syslog.config(c), state=syslog.status(c),
+                     protocols=syslog.PROTOCOLS, facilities=list(syslog.FACILITIES), error=error, test=test)
+
+    @app.get(base + "/settings/logging", response_class=HTMLResponse, include_in_schema=False)
+    def logging_page(request: Request):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            return logging_view(request, c, u, s)
+
+    @app.post(base + "/settings/logging", include_in_schema=False)
+    async def logging_save(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            old = syslog.config(c)
+            try:
+                new = syslog.save(c, data)
+            except ValueError as exc:
+                return logging_view(request, c, u, s, 422, str(exc), cfg={**old, **{k: data.get(k, "") for k in old}})
+            if changed := [f"{k} {new[k]}" for k in new if new[k] != old[k]]:
+                access.audit(c, u["name"], "logging", "settings", "; ".join(changed))
+        return back(base + "/settings/logging", "saved")
+
+    @app.post(base + "/settings/logging/test", include_in_schema=False)
+    async def logging_test(request: Request):
+        """Send one harmless message to the saved server, synchronously, and show the result."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            cfg = syslog.config(c)
+            if not cfg["host"]:
+                return logging_view(request, c, u, s, 422, "Set and save a syslog server first.")
+            payload = syslog.format_message(cfg, "info", "test", f"domin test message from {u['name']}",
+                                            {"user": u["name"]})
+        try:
+            await run_in_threadpool(syslog.send_now, cfg, payload)
+            where = f"{cfg['host']}:{cfg['port']} ({cfg['proto'].upper()})"
+            result, status, error = f"Test message sent to {where}.", 200, ""
+        except (OSError, ValueError) as exc:
+            result, status, error = "", 502, f"The test message was not sent: {type(exc).__name__}: {exc}"
+        with conn() as c:
+            access.audit(c, u["name"], "logging test", "settings", result or error)
+            return logging_view(request, c, u, s, status, error, test=result)
 
     # --- components (domin.components): which installed parts are on (admin only) ---------------------------------
 

@@ -248,6 +248,11 @@ bash deploy/install.sh --components inventory,posture        # later: add the mi
   - **Break-glass:** the last enabled admin is never blocked, only stepped up (without two-factor it must enrol
     right after the sign-in); `admin-password` still works.
   - Every hit is in the audit log (Users, Changes) with user, address, country and rule.
+- **Syslog** (Settings > Logging, admin; off until a server is set): forwards sign-ins, failures, sign-outs,
+  sign-in protection hits and every audit entry (admin changes) as RFC 5424 to a server: host, port, UDP / TCP /
+  TLS (octet-counted frames; TLS checks the certificate), facility, app-name. "Send a test message" sends one
+  harmless message and shows the result. Events wait in a bounded queue sent by a background thread; when the
+  server is slow or down they are dropped and counted, and the last error shows on the page.
 - **Sessions:** My account lists your sessions (created, address, country, browser): Sign out one, or Sign out all
   others. Admins see and end a user's sessions on the user's page (Users, Edit).
 - **Countries:** [DB-IP](https://db-ip.com) IP to Country Lite (CC BY 4.0), downloaded by the installer; re-run the
