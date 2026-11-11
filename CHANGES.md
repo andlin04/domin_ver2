@@ -2,6 +2,22 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Scheduled rescans in Posture · Scans, route check, header and table fixes
+
+- Scheduled rescans moved to a section of Posture · Scans: domain, name, recurrence, what runs, next and last run,
+  status; edit, run now, enable/disable and delete where the user is domain admin, other rows read-only. Admins see
+  every schedule, power users only those of domains they hold a grant on. "Add a schedule" picks the domain from the
+  user's domain-admin domains (hidden when there are none). The domain page keeps a short list with a link; the
+  Operations card is a count with a link.
+- Route check: a posture profile whose route is a proxy, Tor or Mullvad, on an internal domain or with private host
+  addresses, gets a note at the profile pick, a refusal on save (409, "Save anyway" to keep it) and a warning in the
+  list. Discovery needs no check (internal domains always run direct, public sweeps only global addresses).
+- Header: the account item shows "My account" with the user name below it (ellipsis), so they never overlap; below
+  640 px the menu wraps to its own row.
+- Discovery profiles list: the command line and note wrap, the Updated column shows in full.
+- `scripts/screenshots.py`: header shots at 390 px (phone frame), schedules and route-warning shots.
+- No migration. Rollback: `git revert` this commit and re-run install.sh (templates, CSS and web code only).
+
 ## 2026-11-11: Graphite colour scheme (look test)
 
 - New palette: graphite/stone base, petrol accent (dark `#4cb5c0`, light `#0e6f7b`); severity colours set per theme

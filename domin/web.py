@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -330,7 +330,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
                     posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
                     tag_counts=dict(sorted(tag_counts.items())), tag=tag, sched_rows=sched_rows,
-                    sched_opts=sched_opts, new_schedule=new_schedule(sched_opts), discovered=discovered,
+                    sched_opts=sched_opts, discovered=discovered,
                     domain_internal=internal, notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -615,13 +615,27 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "discovery-open": "A scan of this domain is already queued or running; it keeps its own parameters."}
 
 
-def schedule_opts(c, domain: str) -> dict:
-    """The choices of the schedule form for one domain."""
-    hosts = posture.host_list(c, domain)
+def schedule_opts(c, domain: str, internal: bool = False) -> dict:
+    """The choices of the schedule form for one domain ('' = not picked yet: no host or tag choices). via: the posture
+    profiles whose route is a proxy or VPN (name -> route), for the route note next to the profile pick."""
+    hosts = posture.host_list(c, domain) if domain else []
+    via = {}
+    for p in posture.profiles(c):
+        if r := schedules.posture_route(c, p["name"]):
+            kind = proxy.KINDS[r["kind"]]
+            named = r["kind"] == "custom" or kind.lower() in r["name"].lower()   # no "Tor (Tor)"
+            via[p["name"]] = r["name"] if named else f"{r['name']} ({kind})"
+    private = internal or any(not proxy.public_address(ip) for h in hosts for ip in h["ips"] if _is_ip(ip))
+    note = ""
+    if via and (private or not domain):
+        where = f"{domain} has private addresses" if domain else "on internal domains and private addresses"
+        note = (f"Route check: {where}; posture scans with {', '.join(via)} fail there (Tor and Mullvad never "
+                "carry a private address, a proxy usually cannot reach one). Pick a profile with route Direct.")
     return {"posture": posture.profiles(c), "discovery": discovery.profiles(c), "hosts": hosts,
             "tags": sorted({t for h in hosts for t in h["tags"] + h["net_tags"]}), "freqs": schedules.FREQS,
             "weekdays": schedules.WEEKDAYS, "host_modes": schedules.HOST_MODES,
-            "default_discovery": discovery.get_default(c)}
+            "default_discovery": discovery.get_default(c), "via": via, "route_note": note,
+            "internal": internal}
 
 
 def new_schedule(opts: dict | None) -> dict:
@@ -1121,7 +1135,28 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                        report=rep, profiles=posture.profiles(c), route_names=proxy.names(routes, proxy.tests(c)),
                        scan_route=proxy.label(routes, default.get("route", "")),
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
+            if ctx["tab"] == "scans":
+                ctx.update(schedule_section(c, grants, dom))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
+
+    def internal_check(c):
+        zones = admin.effective(settings, c).internal_zones
+        return lambda name: is_internal(name, zones)
+
+    def schedule_rows(c, rows: list[dict]) -> list[dict]:
+        """Schedules for a list, each with its route warning (route_warn, '' = none)."""
+        inside = internal_check(c)
+        return [{**r, "route_warn": schedules.route_warning(c, r, inside(r["domain"]))} for r in rows]
+
+    def schedule_section(c, grants: access.Scope, dom: str) -> dict:
+        """Posture · Scans, Scheduled rescans: the schedules of the domains in the scope (dom: that one only); the add
+        form's domain picker lists the domains this user is domain admin of (none: no form)."""
+        rows = [r for r in schedules.listing(c, grants) if not dom or r["domain"] == dom]
+        mine = [d for d in posture.domains(c, grants) if grants.manages(d)]
+        pick = dom if dom in mine else ""
+        opts = schedule_opts(c, pick, internal_check(c)(pick) if pick else False) if mine else None
+        return {"sched_rows": schedule_rows(c, rows), "sched_domains": mine, "sched_pick": pick,
+                "sched_opts": opts, "new_schedule": new_schedule(opts)}
 
     @app.post(base + "/security/dismiss-notice", include_in_schema=False)
     async def dismiss_notice(request: Request):
@@ -1483,12 +1518,23 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             raise HTTPException(404, "No such schedule")
         return sc
 
-    def schedule_view(request, c, u, s, dom: str, sid: int | None, sf: dict, status: int = 200, error: str = ""):
+    def schedule_view(request, c, u, s, dom: str, sid: int | None, sf: dict, status: int = 200, error: str = "",
+                      route_warn: str = ""):
         grants = request.state.scope
         rows = [r for r in schedules.for_domain(c, dom) if r["id"] == sid] if sid else []
         return shell(request, "schedule.html", u, s, status, error=error, sf=sf, sf_id=sid, sched_domain=dom,
-                     sched_rows=rows, can_manage=grants.manages(dom),
-                     sched_opts=schedule_opts(c, dom) if grants.manages(dom) else None)
+                     sched_rows=schedule_rows(c, rows), can_manage=grants.manages(dom), route_warn=route_warn,
+                     sched_opts=schedule_opts(c, dom, internal_check(c)(dom)) if grants.manages(dom) else None)
+
+    def schedules_page(dom: str = "") -> str:
+        """Posture · Scans, Scheduled rescans (filtered to dom)."""
+        return f"{base}/security/scans" + (f"?domain={quote(dom)}" if dom else "") + "#schedules"
+
+    def route_refused(c, dom: str, p: dict, data: dict) -> str:
+        """The route warning that stops a save until "Save anyway" is ticked ('' = save)."""
+        if data.get("route_ack") in ("1", "on"):
+            return ""
+        return schedules.route_warning(c, {**p, "domain": dom}, internal_check(c)(dom))
 
     def schedule_rights(request, c, dom: str) -> None:
         grants = request.state.scope
@@ -1518,9 +1564,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             p, error = schedules.check(c, dom, data)
             if not p:
                 return schedule_view(request, c, u, s, dom, None, refused_form(data), 422, error)
+            if warn := route_refused(c, dom, p, data):
+                return schedule_view(request, c, u, s, dom, None, refused_form(data), 409, route_warn=warn)
             sid = schedules.create(c, dom, p, u["name"])
             access.audit(c, u["name"], "schedule-create", dom, f"#{sid} {p['name']}")
-        return back(f"/d/{dom}#schedules", "schedule-saved")
+        return back(schedules_page(dom), "schedule-saved")
 
     @app.post(base + "/schedules/{sid}", include_in_schema=False)
     async def schedule_update(request: Request, sid: PathId):
@@ -1534,9 +1582,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             p, error = schedules.check(c, sc["domain"], data)
             if not p:
                 return schedule_view(request, c, u, s, sc["domain"], sid, refused_form(data), 422, error)
+            if warn := route_refused(c, sc["domain"], p, data):
+                return schedule_view(request, c, u, s, sc["domain"], sid, refused_form(data), 409, route_warn=warn)
             schedules.update(c, sid, p, u["name"])
             access.audit(c, u["name"], "schedule-update", sc["domain"], f"#{sid} {p['name']}")
-        return back(f"/d/{sc['domain']}#schedules", "schedule-saved")
+        return back(schedules_page(sc["domain"]), "schedule-saved")
 
     @app.post(base + "/schedules/{sid}/{action}", include_in_schema=False)
     async def schedule_action(request: Request, sid: PathId, action: str):
@@ -1565,8 +1615,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             access.audit(c, u["name"], f"schedule-{action}", dom, f"#{sid} {sc['name']}"
                          + (f": {run['result']}" if action == "run" else f" on={data.get('on')}" if action == "enabled"
                             else ""))
-        where = data.get("from") or ""
-        return back(f"{base}#schedules" if where == "ops" else f"/d/{dom}#schedules", notice)
+        # back to the list the action came from: Posture · Scans with its domain filter (view; * = all domains), else
+        # filtered to this domain
+        view = data.get("view") or dom
+        return back(schedules_page("" if view == "*" else view), notice)
 
     # --- routes: named scan routes and the shared route settings (admin only; URL kept from "Scan settings") ------
 

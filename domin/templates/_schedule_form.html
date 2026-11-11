@@ -1,9 +1,17 @@
-{# The schedule form: domain page (new) and the schedule page (edit, or a refused save). Needs sf (form values),
-   sf_id (None = new), sched_domain, sched_opts {posture, discovery, hosts, tags, freqs, weekdays, host_modes}. #}
+{# The schedule form: Posture · Scans (new; sched_domains = the domain picker) and the schedule page (edit, or a
+   refused save). Needs sf (form values), sf_id (None = new), sched_domain ('' = picked here), sched_opts {posture,
+   discovery, hosts, tags, freqs, weekdays, host_modes, via, route_note, internal}; route_warn: a save stopped by the
+   route check (offers "Save anyway"). #}
 {% set chosen = sf.get('chosen', []) %}
 <form method="post" action="{{ admin_base }}/schedules{% if sf_id %}/{{ sf_id }}{% endif %}" class="schedule-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <input type="hidden" name="domain" value="{{ sched_domain }}">
+  {% if route_warn %}<div class="note bad route-warn" role="alert"><p>{{ route_warn }}</p>
+    <label class="tick"><input type="checkbox" name="route_ack"> Save anyway</label></div>{% endif %}
+  {% if sched_domains and not sf_id %}
+  <label class="field">Domain <small>the domains you are domain admin of</small>
+    <select name="domain" required>{% if not sched_domain %}<option value="">Pick a domain…</option>{% endif %}
+      {% for d in sched_domains %}<option value="{{ d }}" {% if d == sched_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
+  {% else %}<input type="hidden" name="domain" value="{{ sched_domain }}">{% endif %}
   <div class="grid g3">
     <label class="field">Name
       <input name="name" value="{{ sf.get('name', '') }}" required maxlength="60"></label>
@@ -25,12 +33,14 @@
       <label class="field">Discovery profile <small>nmap stage after DNS; none = DNS only</small>
         <select name="discovery_profile"><option value="">None (DNS only)</option>
           {% for p in sched_opts.discovery %}<option value="{{ p.name }}" {% if sf.get('discovery_profile', '') == p.name %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+      {% if sched_opts.internal %}<small class="muted">Internal domain: the nmap stage always runs direct; a profile's route is not used.</small>{% endif %}
     </div>
     <div class="field">
       <label class="tick"><input type="checkbox" name="posture" {% if sf.get('posture') in ('1', 'on', 1) %}checked{% endif %}>
         Posture scan <small class="muted">after the inventory scan when both</small></label>
       <label class="field">Posture profile
-        <select name="posture_profile">{% for p in sched_opts.posture %}<option value="{{ p.name }}" {% if sf.get('posture_profile', 'default') == p.name %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+        <select name="posture_profile">{% for p in sched_opts.posture %}<option value="{{ p.name }}" {% if sf.get('posture_profile', 'default') == p.name %}selected{% endif %}>{{ p.name }}{% if sched_opts.via.get(p.name) %} · via {{ sched_opts.via[p.name] }}{% endif %}</option>{% endfor %}</select></label>
+      {% if sched_opts.route_note %}<small class="bad-text route-note">{{ sched_opts.route_note }}</small>{% endif %}
     </div>
     <div class="field">
       <label class="field">Posture hosts
@@ -50,7 +60,7 @@
         <td class="host">{{ h.host }}{% if h.skip %} <small class="muted">{{ h.skip }}</small>{% endif %}</td>
         <td class="mono">{{ h.ips|join(', ') }}</td>
         <td>{% for t in h.tags + h.net_tags %}<span class="pill">{{ t }}</span>{% endfor %}</td></tr>
-      {% else %}<tr><td colspan="4" class="muted">No host name with an address in the latest inventory scan</td></tr>{% endfor %}</tbody>
+      {% else %}<tr><td colspan="4" class="muted">{% if sched_domain %}No host name with an address in the latest inventory scan{% else %}Filter the page to one domain (Domain, above) to pick hosts or a tag{% endif %}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
   <p><label class="tick"><input type="checkbox" name="enabled" {% if sf.get('enabled', '1') in ('1', 'on', 1) %}checked{% endif %}> Enabled</label>

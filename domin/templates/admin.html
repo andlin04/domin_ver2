@@ -97,9 +97,8 @@
 </section>
 
 <section class="card" id="schedules">
-  <h2>Scheduled rescans <small>{{ sched_rows|length }} · {{ sched_rows|selectattr('enabled')|list|length }} enabled ·
-    add one on a domain page</small></h2>
-  {% with show_domain=true %}{% include "_schedules_list.html" %}{% endwith %}
+  <div class="card-head"><h2>Scheduled rescans <small>{{ sched_rows|length }} · {{ sched_rows|selectattr('enabled')|list|length }} enabled</small></h2>
+    <a class="btn small" href="{{ base }}/security/scans#schedules">Open in Posture · Scans</a></div>
 </section>
 
 <section class="card">

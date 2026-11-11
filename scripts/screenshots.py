@@ -5,8 +5,8 @@
 
 Creates a throw-away database in a temporary directory, fills it with mock data through domin's own functions
 (documentation domains and address ranges only: example.com/.org/.net/.test, 192.0.2.0/24, 198.51.100.0/24,
-203.0.113.0/24, 2001:db8::/32, private-use ASNs), runs the app on a free port of 127.0.0.1 and saves one
-headless-browser PNG per view.
+203.0.113.0/24, 2001:db8::/32, private-use ASNs; 10.20.0.0/24 for a private lab domain), runs the app on a free
+port of 127.0.0.1 and saves one headless-browser PNG per view.
 
 Signing in: a demo admin signs in through the app's own sign-in form (POST /admin/login, in-process); the session
 cookie it gets back is added to every browser request by a small ASGI wrapper (the cookie is Secure and the demo
@@ -22,6 +22,8 @@ import argparse
 import base64
 import hashlib
 import hmac
+import html
+import ipaddress
 import json
 import os
 import random
@@ -35,6 +37,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -47,6 +50,7 @@ from domin.config import Settings  # noqa: E402
 from domin.web import COOKIE, HERE, create_app  # noqa: E402
 
 DEMO_PASSWORD = "demo-password-not-real"
+DEMO_PUBLIC = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
 EDGE_DEFAULT = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 NOW = datetime.now().replace(microsecond=0)
 RNG = random.Random(20261101)
@@ -310,6 +314,16 @@ def seed_schedules(c) -> None:
                  last_result = 'posture: 2 address(es) queued with profile web; hosts no longer in the domain, '
                  || 'skipped: old.example.com' WHERE id = 2""", (stamp(11, 2),))
     c.execute("UPDATE schedules SET enabled = 0 WHERE id = 4")
+    # a lab domain on private addresses with a posture schedule on the default route (Office proxy): the route check
+    db.save_scan(c, "lab.example.test", stamp(1, 4), "scan", [
+        {"host": "nas.lab.example.test", "ip": "10.20.0.5"}, {"host": "printer.lab.example.test", "ip": "10.20.0.9"}])
+    p, err = schedules.check(c, "lab.example.test", {"name": "NAS posture", "enabled": "", "posture": "on",
+                                                     "posture_profile": "default", "host_mode": "all",
+                                                     "freq": "weekly", "weekday": "2", "at_time": "04:00",
+                                                     "monthday": "1", "every": "1"})
+    if not p:
+        raise SystemExit(f"demo schedule NAS posture: {err}")
+    schedules.create(c, "lab.example.test", p, "alice", now=now)
 
 
 def seed_settings(c) -> str:
@@ -392,16 +406,35 @@ def seed_settings(c) -> str:
 
 # ---- the app behind a wrapper ------------------------------------------------------------------------------------
 
-SHOT = {"cookie": "", "theme": "dark", "js": ""}   # the current shot: session cookie ('' = signed out), theme, script
+# the current shot: session cookie ('' = signed out), theme, script, and a phone width (0 = the browser window)
+SHOT = {"cookie": "", "theme": "dark", "js": "", "phone": 0}
 
 
 def wrap(app):
-    """Session cookie and theme on each request of the current shot, and its script injected into HTML pages."""
+    """Session cookie and theme on each request of the current shot, and its script injected into HTML pages.
+
+    Phone widths: headless Edge keeps its window at least ~500 px wide, so a phone shot loads /__phone, a page with
+    the view in an iframe of that width (the frame-blocking headers are dropped for this demo server only)."""
     theme_js = (HERE / "static" / "theme.js").read_bytes()
 
     async def asgi(scope, receive, send):
         if scope["type"] != "http":
             return await app(scope, receive, send)
+        if scope["path"] == "/__phone":
+            src = html.escape(unquote(scope["query_string"].decode().removeprefix("src=")))
+            body = (f'<!doctype html><body style="margin:0;background:#888"><iframe src="{src}" '
+                    f'style="width:{SHOT["phone"]}px;height:100vh;border:0;display:block"></iframe></body>').encode()
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"text/html"), (b"cache-control", b"no-store")]})
+            return await send({"type": "http.response.body", "body": body})
+        if SHOT["phone"]:
+            inner = send
+
+            async def send(msg):
+                if msg["type"] == "http.response.start":
+                    msg = {**msg, "headers": [h for h in msg["headers"]
+                                              if h[0].lower() not in (b"x-frame-options", b"content-security-policy")]}
+                return await inner(msg)
         headers = [h for h in scope["headers"] if h[0] != b"cookie"]
         if SHOT["cookie"]:
             headers.append((b"cookie", f"{COOKIE}={SHOT['cookie']}".encode()))
@@ -470,9 +503,15 @@ OPEN_CVE = ("setTimeout(() => { for (const s of ['details.posture-detail', 'deta
             " { const d = document.querySelector('#posture-hosts ' + s); if (d) d.open = true; } }, 500);")
 
 OPEN_SCHEDULE = "document.querySelector('details.add-schedule').open = true;"
+# the add form on lab.example.test with a posture scan, sent once: the answer is the form with the route warning
+SUBMIT_LAB = ("if (!sessionStorage.getItem('shot-sent')) { sessionStorage.setItem('shot-sent', '1');"
+              " const f = document.querySelector('details.add-schedule form'); f.elements.name.value = 'NAS weekly';"
+              " f.elements.posture.checked = true; f.submit(); }"
+              " else " + show_from("#schedule-form"))
 
 # name: (path, signed in: True = the demo admin, a name = that power user, False = signed out, height, script)
 SHOTS = {
+    "header": ("/admin/security", True, 380, "document.querySelector('details.nav-menu').open = true;"),
     "signin": ("/admin", False, 760, ""),
     "overview": ("/", True, 1400, ""),
     "domain": ("/d/example.com", True, 1950, ""),
@@ -496,11 +535,17 @@ SHOTS = {
     "posture-power": ("/admin/security/analysis", "carol", 1500, ""),
     "account": ("/admin/account", True, 900, ""),
     "discovery-profiles": ("/admin/security/discovery-profiles", True, 1300, ""),
-    "domain-schedules": ("/d/example.com", True, 1500, OPEN_SCHEDULE + from_card("Scheduled rescans")),
+    "discovery-profiles-list": ("/admin/security/discovery-profiles", True, 520, from_card("Profiles")),
+    "domain-schedules": ("/d/example.com", True, 420, from_card("Scheduled rescans")),
     "schedule-edit": ("/admin/schedules/2", True, 1250, "document.querySelector('details.host-pick').open = true;"),
-    "operations-schedules": ("/admin", True, 700, from_card("Scheduled rescans")),
+    "posture-schedules": ("/admin/security/scans", True, 1500, OPEN_SCHEDULE + from_card("Scheduled rescans")),
+    "posture-schedules-power": ("/admin/security/scans", "carol", 1300,
+                                OPEN_SCHEDULE + from_card("Scheduled rescans")),
+    "operations-schedules": ("/admin", True, 300, from_card("Scheduled rescans")),
+    "schedule-route-warning":("/admin/security/scans?domain=lab.example.test", True, 1000, SUBMIT_LAB),
 }
-LIGHT = ("overview", "posture-overview")   # also shot in the light theme: NAME-light.png
+LIGHT = ("overview", "posture-overview", "header")   # also shot in the light theme: NAME-light.png
+PHONE, PHONE_WIDTH = ("header",), 390   # also shot at a phone width, dark and light: NAME-390[-light].png
 
 
 def find_browser(arg: str) -> str:
@@ -558,6 +603,9 @@ def main() -> int:
             del os.environ[k]
         os.environ["DOMIN_DB"] = "data/domin.db"
         settings = Settings.from_env()
+        # the demo's documentation ranges stand for public addresses (the route check would call them private)
+        real_public = proxy.public_address
+        proxy.public_address = lambda ip: real_public(ip) or any(ipaddress.ip_address(ip) in n for n in DEMO_PUBLIC)
         db.init(settings.db_path)
         with db.connect(settings.db_path) as c:
             secret = seed_settings(c)
@@ -590,14 +638,17 @@ def main() -> int:
         thread.start()
         while not server.started:
             time.sleep(0.1)
-        shots = [(n, "dark", n) for n in SHOTS] + [(n, "light", f"{n}-light") for n in LIGHT]
-        for view, theme, name in shots:
+        shots = [(n, "dark", n, 0) for n in SHOTS] + [(n, "light", f"{n}-light", 0) for n in LIGHT]
+        shots += [(n, t, f"{n}-{PHONE_WIDTH}" + ("-light" if t == "light" else ""), PHONE_WIDTH)
+                  for n in PHONE for t in ("dark", "light")]
+        for view, theme, name, phone in shots:
             if only and name not in only:
                 continue
             path, signed_in, height, script = SHOTS[view]
-            SHOT.update(cookie=tokens[signed_in], theme=theme, js=script)
+            SHOT.update(cookie=tokens[signed_in], theme=theme, js=script, phone=phone)
             png = out / f"{name}.png"
-            run_edge(browser, f"http://127.0.0.1:{port}{path}", args.width, height, args.wait, png)
+            url = f"http://127.0.0.1:{port}" + (f"/__phone?src={quote(path, safe='/')}" if phone else path)
+            run_edge(browser, url, phone + 20 if phone else args.width, height, args.wait, png)
             print(f"{png.name}: {png.stat().st_size // 1024} KB" if png.exists() else f"{png.name}: missing")
         server.should_exit = True
         thread.join(timeout=10)

@@ -72,6 +72,10 @@ h2 small, h3 small { color: var(--muted); font-weight: 400; margin-left: .35rem;
   padding: .3rem 0; }
 .topbar nav .nav-drop a { padding: .55rem .9rem; border-bottom: 0; border-left: 3px solid transparent; }
 .topbar nav .nav-drop a.active { border-bottom: 0; border-left-color: var(--accent); }
+/* My account: the label, then the signed-in name on its own line, cut with an ellipsis when long */
+.topbar nav .nav-drop a.nav-acct { flex-direction: column; align-items: flex-start; line-height: 1.3; }
+.nav-acct small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.nav-drop { max-width: min(16rem, calc(100vw - 1rem)); }
 .jump { margin-left: auto; position: relative; display: flex; align-items: center; }
 .jump svg { position: absolute; left: .7rem; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; pointer-events: none; }
 .jump input { width: 300px; padding-left: 2.1rem; padding-right: 2rem; }
@@ -292,6 +296,18 @@ td form { margin: 0; }
   td.text { min-width: 7rem; max-width: 60vw; }
 }
 
+/* phones: the menu gets its own full-width rows under the logo and theme button and wraps instead of overflowing;
+   the Admin drop-down hangs from the bar's right edge */
+@media (max-width: 640px) {
+  .topbar-in { flex-wrap: wrap; row-gap: 0; }
+  .topbar nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; padding-left: 0; border-left: 0;
+    border-top: 1px solid var(--border); font-size: .85rem; }
+  .topbar nav a, .nav-menu > summary { padding: 0 .4rem; min-height: 2.5rem; }
+  .topbar nav .nav-sep { margin: 0 .1rem; }
+  .nav-menu { position: static; }
+  .nav-drop { top: 100%; right: .5rem; left: auto; }
+}
+
 /* signed-in area: users, account, settings, security */
 .nav-sep { align-self: center; width: 1px; height: 1.1rem; background: var(--border); margin: 0 .35rem; }
 form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 0; }
@@ -299,12 +315,24 @@ form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: 
 .wrap > * { min-width: 0; }   /* grid items: a wide table scrolls inside its card instead of widening the page */
 td.wrap-cell { white-space: normal; min-width: 22rem; }
 td.note-cell { white-space: normal; min-width: 12rem; }
+/* Discovery profiles: long cells wrap so the table fits its card (it still scrolls on a phone) */
+table.fit-table td.cmd-cell { white-space: normal; overflow-wrap: anywhere; min-width: 14rem; }
+table.fit-table td.cell-wrap { white-space: normal; min-width: 7rem; }
+table.fit-table td.note-cell { min-width: 9rem; }
+/* domain page: the short schedules list; route checks in the schedule form and list */
+.sched-short { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.route-note { display: block; margin-top: .3rem; white-space: normal; }
+details.route-warn { max-width: 22rem; margin-top: .2rem; }
+details.route-warn > summary { cursor: pointer; }
+table.schedules td.name { min-width: 8rem; }
+.note.route-warn { margin-bottom: .9rem; }
+.note.route-warn p { margin: 0 0 .4rem; }
 details.add-schedule { margin-top: .75rem; }
 /* schedules: text cells wrap, the four actions stay on one line */
 table.schedules td { white-space: normal; }
-table.schedules td.when { min-width: 11rem; max-width: 16rem; }
-table.schedules td.runs { min-width: 12rem; }
-table.schedules td.last { min-width: 11rem; max-width: 16rem; }
+table.schedules td.when { min-width: 8rem; max-width: 12rem; }
+table.schedules td.runs { min-width: 11rem; }
+table.schedules td.last { min-width: 9rem; max-width: 13rem; }
 table.schedules td.mono, table.schedules .row-actions { white-space: nowrap; flex-wrap: nowrap; }
 .grant { display: inline-block; white-space: nowrap; margin: .1rem .6rem .1rem 0; }
 .codeblock { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-ctl); padding: .6rem .8rem;
@@ -471,3 +499,4 @@ ul.kinds { margin: .75rem 0 1.1rem; padding: 0; list-style: none; display: grid;
 ul.kinds .pill { min-width: 7.5rem; text-align: center; margin-right: .4rem; }
 table.checks td:first-child { font-weight: 600; white-space: nowrap; }
 table.checks td:last-child { white-space: normal; min-width: 18rem; }
+.schedule-form > label.field { max-width: 24rem; }

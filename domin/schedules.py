@@ -19,7 +19,7 @@ import time
 from datetime import date, datetime, timedelta, tzinfo
 from datetime import time as dtime
 
-from . import access, db, discovery, jobs, posture, tags, users
+from . import access, db, discovery, jobs, posture, proxy, tags, users
 
 log = logging.getLogger("domin.schedules")
 
@@ -259,6 +259,58 @@ def pick_hosts(conn: sqlite3.Connection, s: dict) -> tuple[set[str] | None, list
         return {e["host"] for e in posture.host_list(conn, s["domain"])
                 if s["tag"] in (e.get("tags") or []) + (e.get("net_tags") or [])}, []
     return None, []
+
+
+# --- route check: private targets through a proxy or VPN route ----------------------------------------------------
+
+def posture_route(conn: sqlite3.Connection, profile_name: str) -> dict | None:
+    """The proxy or VPN route a posture profile's scans take (None = direct, or the profile or route is gone)."""
+    prof = posture.profile(conn, profile_name or posture.DEFAULT_PROFILE)
+    if not prof:
+        return None
+    cfg = proxy.get(conn)
+    rid = prof.get("route") or cfg["posture"]
+    return None if rid == proxy.DIRECT else proxy.find(cfg, rid)
+
+
+def private_addresses(conn: sqlite3.Connection, s: dict) -> list[str]:
+    """The private (non-global) addresses among the hosts a schedule's posture part covers (latest inventory)."""
+    names, _ = pick_hosts(conn, s)
+    out: dict[str, None] = {}
+    for h in posture.host_list(conn, s["domain"]):
+        if names is None or h["host"] in names:
+            for ip in h["ips"]:
+                try:
+                    if not proxy.public_address(ip):
+                        out[ip] = None
+                except ValueError:
+                    continue
+    return list(out)
+
+
+def route_warning(conn: sqlite3.Connection, s: dict, internal: bool) -> str:
+    """Why a schedule's posture scans fail (Tor, Mullvad) or likely fail (a custom proxy) on its profile's route: an
+    internal domain, or private addresses among its hosts ('' = no problem). s: a saved schedule, or check()'s
+    fields with "domain" added."""
+    if not s.get("posture"):
+        return ""
+    r = posture_route(conn, s["posture_profile"])
+    if not r:
+        return ""
+    private = private_addresses(conn, s)
+    if not private and not internal:
+        return ""
+    if private:
+        shown = ", ".join(private[:3]) + (", ..." if len(private) > 3 else "")
+        what = f"{len(private)} private address(es) of {s['domain']} ({shown})"
+    else:
+        what = f"the addresses of {s['domain']} (an internal domain)"
+    if r["kind"] == "custom":
+        return (f"Posture profile {s['posture_profile']} goes through the proxy {r['name']}, which usually cannot "
+                f"reach {what}; those scans may fail. Pick a profile with route Direct.")
+    kind = proxy.KINDS[r["kind"]]
+    return (f"Posture profile {s['posture_profile']} goes through {r['name']} ({kind}): scans of {what} fail with "
+            f"\"private address can't go through {kind}\". Pick a profile with route Direct.")
 
 
 def posture_part(conn: sqlite3.Connection, s: dict) -> str:

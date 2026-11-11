@@ -122,10 +122,10 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 | Action | admin | domain admin of the domain | viewer of the domain | outside the grants |
 | --- | --- | --- | --- | --- |
-| see the domain's schedules | yes | yes | yes (read-only) | 404 |
+| see the domain's schedules (Posture · Scans list) | yes | yes | yes (read-only) | not listed; 404 |
 | add / edit / delete / enable / run now | yes | yes | 403 | 404 |
+| the domain in the add form's domain picker | yes | yes | no | no |
 | "Scan with nmap" on the domain page | yes | yes | 403 | 404 |
-| all schedules (Operations page) | yes | 404 | 404 | 404 |
 | discovery profiles: read | yes | yes | yes | yes (no domain data) |
 | discovery profiles: add / edit / delete / default | yes | 403 | 403 | 403 |
 
@@ -135,10 +135,29 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 ## UI
 
-- Domain page, signed in: "Schedules" card (list, add/edit form, Run now, enable toggle, next/last run, last job)
-  and "Scan with nmap" (profile picker). Discovery results card when the shown scan had the stage.
+- Posture · Scans, "Scheduled rescans" section (below the scan activity): the schedules of the domains in the
+  user's scope (admins: all; the page's Domain filter narrows it), with Edit, Run now, Enable/Disable and Delete on
+  the domains the user is domain admin of (viewer rows read-only), and "Add a schedule" with a domain picker of
+  those domains (hidden when there are none). Filter the page to one domain to pick single hosts or a tag.
+  Actions return to the list with the filter they came from.
+- Edit page `/admin/schedules/<id>`: the schedule and its form.
+- Domain page, signed in: a short list (name, status, recurrence, next run) and a link to the section filtered to
+  the domain; "Scan with nmap" (profile picker). Discovery results card when the shown scan had the stage.
+- Operations: a count and a link to the section.
 - Settings · Discovery profiles: list with command line, add/edit form, delete, default picker.
-- Operations: "Scheduled rescans" list of all schedules.
+
+## Route check
+
+A posture scan of a private address fails on a Tor or Mullvad route ("private address can't go through Mullvad");
+a custom proxy usually cannot reach one. Private = the domain is under Settings · Internal zones, or a non-global
+address among the hosts the schedule's posture part covers (latest inventory).
+
+- Form: the posture profile picker names each profile's proxy or VPN route; a note under it lists the profiles that
+  would fail on the domain (on any internal or private domain when none is picked).
+- Save (add or edit): with a warning the form comes back (409) with the reason and a "Save anyway" box.
+- List: a schedule with the problem shows the reason under "Runs".
+- Discovery profiles: no check; an internal domain's nmap stage always runs direct, and a public domain's sweeps
+  only public addresses.
 
 ## Migration (db.init, idempotent)
 

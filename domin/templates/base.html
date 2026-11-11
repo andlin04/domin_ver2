@@ -30,7 +30,7 @@
           {% if user.role == 'admin' %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
           <a href="{{ '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' }}" {{ here('settings') }}>Settings</a>
           {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
-          <a href="/admin/account" {{ here('account') }}>My account <small class="muted">{{ user.name }}</small></a>
+          <a class="nav-acct" href="/admin/account" {{ here('account') }} title="Signed in as {{ user.name }}"><span>My account</span><small class="muted">{{ user.name }}</small></a>
         </div>
       </details>
       {% if no_login %}<a class="pill fix-no" href="/admin/settings" title="Sign-in is turned off (Settings)">sign-in off</a>{% endif %}

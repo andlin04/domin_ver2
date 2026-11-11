@@ -66,14 +66,16 @@
 
 <section class="card">
   <h2>Profiles <small>{{ profiles|length }}</small></h2>
-  <div class="table-wrap"><table>
+  {# fits the card: long cells wrap, Updated is date and time with the user under it; still scrolls when it can't #}
+  <div class="table-wrap"><table class="fit-table">
     <thead><tr><th>Name</th><th>Command line</th><th>Route</th><th>Used by</th><th>Note</th><th>Updated</th><th></th></tr></thead>
     <tbody>{% for p in profiles %}<tr>
       <td><b>{{ p.name }}</b>{% if p.name == default %} <span class="pill">default</span>{% endif %}</td>
-      <td class="mono wrap-cell">{{ p.command }}</td>
-      <td>{{ route_names.get(p.route, 'a deleted route') }}</td>
-      <td>{% for s in p.used_by %}<div>{{ s }}</div>{% else %}<span class="muted">–</span>{% endfor %}</td>
-      <td class="note-cell">{{ p.note }}</td><td>{{ p.updated }}{% if p.updated_by %} by {{ p.updated_by }}{% endif %}</td>
+      <td class="mono cmd-cell">{{ p.command }}</td>
+      <td class="cell-wrap">{{ route_names.get(p.route, 'a deleted route') }}</td>
+      <td class="cell-wrap">{% for s in p.used_by %}<div>{{ s }}</div>{% else %}<span class="muted">–</span>{% endfor %}</td>
+      <td class="note-cell">{{ p.note }}</td>
+      <td><span class="mono">{{ p.updated[:16].replace('T', ' ') }}</span>{% if p.updated_by %}<br><small class="muted">by {{ p.updated_by }}</small>{% endif %}</td>
       <td><div class="row-actions">{% if user.role == 'admin' %}
         <a class="btn small" href="?edit={{ p.name|urlencode }}#profile-form">Edit</a>{% endif %}
         {% if user.role == 'admin' and p.name != 'default' %}

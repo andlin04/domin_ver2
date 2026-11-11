@@ -11,7 +11,7 @@ from datetime import time as dtime
 import pytest
 from fastapi.testclient import TestClient
 
-from domin import access, db, discovery, jobs, posture, schedules, users
+from domin import access, db, discovery, jobs, posture, proxy, schedules, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
@@ -318,26 +318,45 @@ def login(h, name):
     return re.search(r'name="csrf" value="([^"]+)"', h.get("/admin/account").text).group(1)
 
 
+SCANS = "/admin/security/scans"
+
+
+def section(page: str) -> str:
+    """The Scheduled rescans section of the Posture · Scans page."""
+    m = re.search(r'<section class="card" id="schedules">(.*?)</section>', page, re.S)
+    assert m, "no schedules section"
+    return m.group(1)
+
+
 def test_domain_admin_manages_schedules_on_its_domain(settings):
     with client(settings) as h:
         csrf = login(h, "pia")
-        page = h.get("/d/beta.example").text
-        assert 'id="schedules"' in page and "Add a schedule" in page and 'name="h:db.beta.example"' in page
+        sec = section(h.get(SCANS).text)
+        assert "Add a schedule" in sec
+        picker = re.search(r'<select name="domain" required>(.*?)</select>', sec, re.S).group(1)
+        assert "beta.example" in picker and "alpha.example" not in picker   # domain admin domains only
+        sec = section(h.get(SCANS + "?domain=beta.example").text)
+        assert 'name="h:db.beta.example"' in sec and '<option value="beta.example" selected>' in sec
         r = h.post("/admin/schedules", data={**FORM, "csrf": csrf, "domain": "beta.example"}, follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"] == "/d/beta.example?ok=schedule-saved#schedules"
+        assert r.status_code == 303
+        assert r.headers["location"] == SCANS + "?domain=beta.example&ok=schedule-saved#schedules"
         assert "Schedule saved" in h.get(r.headers["location"]).text
         with db.connect(settings.db_path) as c:
             sid = c.execute("SELECT id FROM schedules").fetchone()[0]
-        assert "nightly" in h.get("/d/beta.example").text
+        assert "nightly" in section(h.get(SCANS).text)
+        dom_page = h.get("/d/beta.example").text   # the domain page: a short list and a link, no editor
+        assert "nightly" in dom_page and SCANS + "?domain=beta.example#schedules" in dom_page
+        assert 'class="schedule-form"' not in dom_page and f"/admin/schedules/{sid}/run" not in dom_page
         assert h.get(f"/admin/schedules/{sid}").status_code == 200
         r = h.post(f"/admin/schedules/{sid}", data={**FORM, "csrf": csrf, "name": "weekly", "freq": "weekly"},
                    follow_redirects=False)
         assert r.status_code == 303
         assert h.post(f"/admin/schedules/{sid}", data={**FORM, "csrf": csrf, "at_time": "hello"}).status_code == 422
-        assert h.post(f"/admin/schedules/{sid}/run", data={"csrf": csrf}, follow_redirects=False).status_code == 303
+        r = h.post(f"/admin/schedules/{sid}/run", data={"csrf": csrf, "view": "*"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == SCANS + "?ok=schedule-run#schedules"
         assert h.post(f"/admin/schedules/{sid}/run", data={"csrf": csrf}).status_code == 409   # still queued
-        assert h.post(f"/admin/schedules/{sid}/enabled", data={"csrf": csrf, "on": "0"},
-                      follow_redirects=False).status_code == 303
+        r = h.post(f"/admin/schedules/{sid}/enabled", data={"csrf": csrf, "on": "0"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == SCANS + "?domain=beta.example&ok=schedule-off#schedules"
         assert h.post(f"/admin/schedules/{sid}/delete", data={"csrf": csrf}, follow_redirects=False).status_code == 303
     with db.connect(settings.db_path) as c:
         assert c.execute("SELECT COUNT(*) FROM schedules").fetchone()[0] == 0
@@ -346,14 +365,40 @@ def test_domain_admin_manages_schedules_on_its_domain(settings):
         assert acts == ["schedule-delete", "schedule-enabled", "schedule-run", "schedule-update", "schedule-create"]
 
 
+def test_scans_section_lists_only_allowed_schedules_per_role_and_level(settings):
+    with db.connect(settings.db_path) as c:
+        a = make(c, dom="alpha.example", name="alpha-run")   # pia: viewer
+        b = make(c, dom="beta.example", name="beta-run")     # pia: domain admin
+        g = make(c, dom="gamma.example", name="gamma-run")   # pia: no grant
+    with client(settings) as h:   # power user: granted domains only; actions only where domain admin
+        login(h, "pia")
+        sec = section(h.get(SCANS).text)
+        assert "alpha-run" in sec and "beta-run" in sec and "gamma-run" not in sec and "gamma.example" not in sec
+        assert f"/admin/schedules/{b}/run" in sec and f"/admin/schedules/{b}/delete" in sec
+        assert f"/admin/schedules/{a}/run" not in sec and f"/admin/schedules/{a}/delete" not in sec
+        assert f'href="/admin/schedules/{a}"' not in sec and "read-only" in sec
+        sec = section(h.get(SCANS + "?domain=alpha.example").text)   # filtered to one domain
+        assert "alpha-run" in sec and "beta-run" not in sec
+        assert section(h.get(SCANS + "?domain=gamma.example").text).count("gamma-run") == 0   # outside: all granted
+    with client(settings) as h:   # power user without grants: an empty list and no add form
+        login(h, "nob")
+        sec = section(h.get(SCANS).text)
+        assert "No schedules" in sec and "Add a schedule" not in sec
+        assert not any(f"{n}-run" in sec for n in ("alpha", "beta", "gamma"))
+    with client(settings) as h:   # admin: everything, with actions; Operations only links here
+        login(h, "boss")
+        sec = section(h.get(SCANS).text)
+        assert all(f"/admin/schedules/{x}/run" in sec for x in (a, b, g)) and "Add a schedule" in sec
+        ops = h.get("/admin").text
+        assert "Scheduled rescans" in ops and SCANS + "#schedules" in ops and f"/admin/schedules/{g}/run" not in ops
+
+
 def test_viewers_read_only_and_outside_answers_404(settings):
     with db.connect(settings.db_path) as c:
         a = make(c, dom="alpha.example")
         g = make(c, dom="gamma.example")
     with client(settings) as h:
         csrf = login(h, "pia")
-        page = h.get("/d/alpha.example").text
-        assert "nightly" in page and "Add a schedule" not in page and f"/admin/schedules/{a}/run" not in page
         view = h.get(f"/admin/schedules/{a}")
         assert view.status_code == 200 and 'class="schedule-form"' not in view.text
         assert h.post("/admin/schedules", data={**FORM, "csrf": csrf, "domain": "alpha.example"}).status_code == 403
@@ -362,20 +407,74 @@ def test_viewers_read_only_and_outside_answers_404(settings):
             assert h.post(f"/admin/schedules/{g}{action}", data={**FORM, "csrf": csrf}).status_code == 404, action
         assert h.get(f"/admin/schedules/{g}").status_code == 404 and h.get("/admin/schedules/999").status_code == 404
         assert h.post("/admin/schedules", data={**FORM, "csrf": csrf, "domain": "gamma.example"}).status_code == 404
-        r = h.get("/admin", follow_redirects=False)   # the Operations list is the admins'
+        r = h.get("/admin", follow_redirects=False)   # Operations is the admins'
         assert r.status_code == 303
     with client(settings) as h:
         csrf = login(h, "nob")
         assert h.get(f"/admin/schedules/{a}").status_code == 404
         assert h.post(f"/admin/schedules/{a}/run", data={"csrf": csrf}).status_code == 404
-    with client(settings) as h:   # admins: everything, and the Operations list
+    with client(settings) as h:   # admins: everything
         csrf = login(h, "boss")
-        ops = h.get("/admin").text
-        assert "Scheduled rescans" in ops and "gamma.example" in ops and "alpha.example" in ops
-        assert h.post(f"/admin/schedules/{g}/run", data={"csrf": csrf, "from": "ops"},
-                      follow_redirects=False).headers["location"].startswith("/admin")
+        r = h.post(f"/admin/schedules/{g}/run", data={"csrf": csrf, "view": "gamma.example"}, follow_redirects=False)
+        assert r.headers["location"] == SCANS + "?domain=gamma.example&ok=schedule-run#schedules"
     with db.connect(settings.db_path) as c:
         assert [r["domain"] for r in c.execute("SELECT domain FROM jobs")] == ["gamma.example"]
+
+
+# --- route check: private targets through Tor, Mullvad or a proxy ---------------------------------------------------
+
+def mullvad_default(c, kind="mullvad"):
+    """A Mullvad (or Tor / custom proxy) route as the default posture route."""
+    proxy.put(c, {**proxy.DEFAULT, "routes": [{**proxy.ROUTE_DEFAULT, "id": "r1", "name": "VPN", "kind": kind,
+                                                "host": "proxy.example"}], "next": 2, "posture": "r1"})
+
+
+def test_route_warning_for_private_hosts_through_a_vpn_route(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "lan.example", db.now(), "scan", [{"host": "nas.lan.example", "ip": "10.0.0.5"},
+                                                         {"host": "www.lan.example", "ip": "9.9.4.1"}])
+        p = {**schedules.check(c, "lan.example", {**FORM, "posture": "on"})[0], "domain": "lan.example"}
+        assert schedules.route_warning(c, p, internal=False) == ""   # direct: fine
+        mullvad_default(c)
+        warn = schedules.route_warning(c, p, internal=False)
+        assert "10.0.0.5" in warn and "private address can't go through Mullvad" in warn
+        assert schedules.route_warning(c, {**p, "posture": 0}, internal=False) == ""   # inventory only: no posture
+        chosen = {**p, "host_mode": "list", "hosts": json.dumps(["www.lan.example"])}
+        assert schedules.route_warning(c, chosen, internal=False) == ""   # only the public host chosen
+        assert "internal domain" in schedules.route_warning(c, {**chosen, "hosts": "[]"} | {"host_mode": "tag",
+                                                                                          "tag": "none"}, True)
+        pub = {**schedules.check(c, "beta.example", {**FORM, "posture": "on"})[0], "domain": "beta.example"}
+        assert schedules.route_warning(c, pub, internal=False) == ""   # public addresses: Mullvad carries them
+        mullvad_default(c, "custom")
+        assert "usually cannot reach" in schedules.route_warning(c, p, internal=False)
+        posture.save_profile(c, {"name": "lan", "ports": "22", "intensity": 0, "timing": 4, "timeout": 60,
+                                 "route": proxy.DIRECT}, "", "boss")
+        assert schedules.route_warning(c, {**p, "posture_profile": "lan"}, internal=False) == ""
+
+
+def test_route_warning_on_save_in_the_form_and_in_the_list(settings):
+    with db.connect(settings.db_path) as c:
+        db.save_scan(c, "beta.example", db.now(), "scan", [{"host": "nas.beta.example", "ip": "10.0.0.5"}])
+        mullvad_default(c)
+    post = {**FORM, "posture": "on", "domain": "beta.example"}
+    with client(settings) as h:
+        csrf = login(h, "pia")
+        sec = section(h.get(SCANS + "?domain=beta.example").text)
+        assert "route-note" in sec and "default · via VPN (Mullvad)" in sec   # the note next to the profile pick
+        r = h.post("/admin/schedules", data={**post, "csrf": csrf})
+        assert r.status_code == 409 and "private address can&#39;t go through Mullvad" in r.text
+        assert 'name="route_ack"' in r.text and 'class="schedule-form"' in r.text
+        with db.connect(settings.db_path) as c:
+            assert c.execute("SELECT COUNT(*) FROM schedules").fetchone()[0] == 0   # not saved yet
+        r = h.post("/admin/schedules", data={**post, "csrf": csrf, "route_ack": "on"}, follow_redirects=False)
+        assert r.status_code == 303
+        sec = section(h.get(SCANS).text)
+        assert '<details class="route-warn">' in sec and "10.0.0.5" in sec   # the list flags the saved schedule
+        with db.connect(settings.db_path) as c:
+            sid = c.execute("SELECT id FROM schedules").fetchone()[0]
+        assert h.post(f"/admin/schedules/{sid}", data={**post, "csrf": csrf}).status_code == 409   # edit: again
+        r = h.post(f"/admin/schedules/{sid}", data={**post, "csrf": csrf, "posture": ""}, follow_redirects=False)
+        assert r.status_code == 303   # inventory only: no posture scan, no warning
 
 
 def test_profiles_in_use_by_a_schedule_cannot_be_deleted(settings):

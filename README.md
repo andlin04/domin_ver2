@@ -53,9 +53,11 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   a discovery profile (Settings · Discovery profiles: probe method, port check, timing, rate, retries, host timeout,
   reverse DNS, route; the command line is shown). A public domain sweeps only its own addresses; an internal domain
   the hosts of Settings · Internal networks.
-- **Scheduled rescans:** per domain (domain page; all of them on the admin dashboard): an inventory scan with or
-  without a discovery profile and/or posture scans with a profile, on all hosts, chosen hosts or a tag; daily,
-  weekly, monthly or every N hours/days, server local time; Run now, enable/disable, next and last run.
+- **Scheduled rescans:** per domain, listed and added in Posture · Scans (each user sees the schedules of the domains
+  they hold a grant on): an inventory scan with or without a discovery profile and/or posture scans with a profile,
+  on all hosts, chosen hosts or a tag; daily, weekly, monthly or every N hours/days, server local time; Run now,
+  enable/disable, next and last run; a warning when a posture profile's Tor, Mullvad or proxy route meets private
+  addresses.
 - **Routes:** Direct, Tor, Mullvad (WireGuard tunnel, entry country/city), custom proxy (SOCKS5, SOCKS4, HTTP);
   separate route choice for posture scans, inventory jobs and CVE look-ups; DoH server.
 - **Scope:** posture scope (CIDR allow/deny, country allow/deny from the inventory's countries), never-scan

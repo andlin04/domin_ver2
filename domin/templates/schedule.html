@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Schedule · {{ sched_domain }} · domin{% endblock %}
-{% block page %}domain{% endblock %}
+{% block page %}security{% endblock %}
 {% block content %}
 <section class="hero"><div>
-  <p class="crumbs"><a href="/">Overview</a> / <a href="/d/{{ sched_domain }}#schedules">{{ sched_domain }}</a> /</p>
+  <p class="crumbs"><a href="{{ base }}/security">Posture</a> / <a href="{{ base }}/security/scans?domain={{ sched_domain|urlencode }}#schedules">Scheduled rescans</a> /
+    <a href="/d/{{ sched_domain }}">{{ sched_domain }}</a> /</p>
   <h1>{% if sf_id %}Schedule {{ sf.get('name', '') }}{% else %}New schedule{% endif %}</h1>
   <p class="muted">Scheduled rescan of {{ sched_domain }}. Queued like any scan: same limits, scope and sandbox. A run
     missed while the server was down runs once; a run whose previous one is still open is skipped.</p></div></section>
