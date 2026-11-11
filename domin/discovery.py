@@ -176,7 +176,7 @@ def delete(conn: sqlite3.Connection, name: str) -> str:
         return f"{name} is used by schedule(s) {', '.join(uses)}: pick another profile there first."
     if not conn.execute("DELETE FROM discovery_profiles WHERE name = ?", (name,)).rowcount:
         return "No such profile."
-    if get_default(conn) == name:
+    if admin.kv_get(conn, DEFAULT_KEY) == name:   # the raw value: get_default() no longer sees the deleted profile
         admin.kv_set(conn, DEFAULT_KEY, "")
     return ""
 

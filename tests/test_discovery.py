@@ -106,6 +106,15 @@ def conn(tmp_path):
         yield c
 
 
+def test_deleting_the_default_profile_clears_the_default(conn):
+    discovery.save(conn, prof(name="lab"), "admin")
+    discovery.set_default(conn, "lab")
+    assert discovery.delete(conn, "lab") == ""
+    assert discovery.admin.kv_get(conn, discovery.DEFAULT_KEY) == ""
+    discovery.save(conn, prof(name="lab"), "admin")   # a new profile with that name is not the default again
+    assert discovery.get_default(conn) == ""
+
+
 def fake_run(seen, xml="<nmaprun></nmaprun>"):
     def run(args, timeout, via=None):
         seen.append({"args": args, "targets": Path(args[-1]).read_text().split(), "via": via})
