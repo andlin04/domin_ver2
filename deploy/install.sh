@@ -534,7 +534,7 @@ if [ "$INTERNAL" = 1 ]; then
       ( eval "$CLI user-add $ADMIN_USER --role admin" ) | sed "s|at: /admin|at: https://$DOMAIN/admin|"
     fi
   fi
-  echo "site: https://$DOMAIN/ (sign-in /admin) for $SOURCES; users: $CLI user-add NAME --role admin|analyst|viewer"
+  echo "site: https://$DOMAIN/ (sign-in /admin) for $SOURCES; users: $CLI user-add NAME --role admin|power, user-grant NAME DOMAIN viewer|admin"
 else
 echo "domin: web $(systemctl is-active domin), worker $(systemctl is-active domin-worker || true)," \
   "HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/)"

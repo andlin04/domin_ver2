@@ -56,7 +56,10 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   entry point.
 
 ## Users and admin
-- **Roles:** viewer (reads reports), analyst (also runs scans and tuning), admin (also users and settings).
+- **Roles:** admin (every domain, users, grants, settings, operations; several allowed, never fewer than one) and
+  power user (only the domains granted to it). Per domain a grant is viewer (reads inventory, posture, CVEs,
+  reports) or domain admin (also posture scans and host tags there); a grant covers the domains under it. Changes
+  to users, roles and grants are logged on the Users page.
 - **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role.
 - **Admin dashboard:** visits per day, recent visits, usage statistics without stored IP addresses, scan jobs
   (cancel, stop, retry), tuning without restart.
@@ -144,7 +147,8 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   cd /opt/domin/app && set -a && . /etc/domin.env && runuser -u domin -- /opt/domin/venv/bin/python -m domin user-add you --role admin
   ```
 
-  Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <role>`, `user-2fa-reset <name>`,
+  Other commands: `user-list`, `user-passwd <name>`, `user-role <name> <admin|power>`,
+  `user-grant <name> <domain|*> <viewer|admin|none>`, `user-2fa-reset <name>`,
   `admin-password` (the `admin` user's password). An existing single `admin_password` becomes an `admin` user on
   first start.
 - **Usage statistics:** visitors, page views, visit length and page order, top pages, domains, CSV downloads, tools,

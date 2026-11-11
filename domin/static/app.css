@@ -298,6 +298,7 @@ td form { margin: 0; }
 .nav-sep { align-self: center; width: 1px; height: 1.1rem; background: var(--border); margin: 0 .35rem; }
 form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 0; }
 .row-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.grant { display: inline-block; white-space: nowrap; margin: .1rem .6rem .1rem 0; }
 .codeblock { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-ctl); padding: .6rem .8rem;
   font-family: ui-monospace, Consolas, monospace; font-size: .82rem; white-space: pre-wrap; word-break: break-all; }
 .codes { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .3rem;

@@ -2,6 +2,24 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Delegation: power users with per-domain grants, several admins
+
+- Roles are now admin and power user (docs/delegation.md). Admins: every domain, users, grants, settings,
+  operations, tuning, scan profiles, address fingerprints; several allowed, the last enabled one cannot be
+  demoted, disabled or deleted (web and CLI).
+- A power user sees only its granted domains, per domain as viewer (inventory, posture, CVEs, changes, reports) or
+  domain admin (also posture scans, host tags, host-name fingerprints and CVE look-ups). A grant covers the domains
+  under it; `*` = every domain.
+- One scope filter in every list, search, CSV, drill data, chart, count, Changes panel, posture page and API; an
+  out-of-scope domain, scan, job or host answers 404 like an unknown one. Visitors without a session still see the
+  public inventory.
+- Users page: grants per user, an edit page per user (`/admin/users/<id>`), and an audit of user, role and grant
+  changes (new `audit` table). CLI: `user-grant <name> <domain|*> <viewer|admin|none>`.
+- Migration on start (idempotent): viewer -> power user + `*` viewer, analyst -> power user + `*` domain admin;
+  require-2FA for either old role carries over to power users. New tables `grants`, `audit`.
+- Rollback: restore the pre-update database backup, or run `UPDATE users SET role = 'viewer' WHERE role = 'power'`
+  first (older code lets every signed-in user read all posture), then `git revert` and re-run install.sh.
+
 ## 2026-11-11: Sandboxed root helpers, on-prem HSTS and firewall, dependency audit
 
 - The Tor switch, Mullvad and public import services run sandboxed (`systemd-analyze security` 3.0 / 4.3 / 3.4,

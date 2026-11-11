@@ -1,5 +1,5 @@
 """CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-public <db>|refresh-fixes|
-user-add|user-list|user-passwd|user-role|user-2fa-reset|admin-password}."""
+user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password}."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import admin, cve, db, importer, jobs, posture, publicsync, tools, users
+from . import access, admin, cve, db, importer, jobs, posture, publicsync, tools, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -46,13 +46,18 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
     ua =sub.add_parser("user-add", help="create a user and print a one-time set-password link")
     ua.add_argument("name")
-    ua.add_argument("--role", choices=users.ROLES, default="viewer")
+    ua.add_argument("--role", choices=users.ROLES, default="power")
     sub.add_parser("user-list", help="list users")
     up = sub.add_parser("user-passwd", help="set a user's password (asked twice, or one line on stdin)")
     up.add_argument("name")
     ur = sub.add_parser("user-role", help="change a user's role")
     ur.add_argument("name")
     ur.add_argument("role", choices=users.ROLES)
+    ug = sub.add_parser("user-grant", help="give a power user a level on a domain (and the domains under it; "
+                                           "* = every domain), or take it away with 'none'")
+    ug.add_argument("name")
+    ug.add_argument("domain")
+    ug.add_argument("level", choices=(*access.LEVELS, "none"))
     u2 = sub.add_parser("user-2fa-reset", help="turn a user's two-factor off")
     u2.add_argument("name")
     sub.add_parser("admin-password", help="set the 'admin' user's password (kept for one release)")
@@ -103,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         with db.connect(settings.db_path) as conn:
             for u in users.listing(conn):
                 flags = ",".join(f for f, on in (("2fa", u["has_totp"]), ("disabled", u["disabled"])) if on) or "-"
-                print(f"{u['name']}\t{u['role']}\t{flags}\t{u['last_login'] or 'never'}")
+                grants = " ".join(f"{g['domain']}={g['level']}" for g in access.grants(conn, u["id"]))
+                print(f"{u['name']}\t{u['role']}\t{flags}\t{u['last_login'] or 'never'}\t{grants or '-'}")
     elif args.cmd == "user-passwd":
         with db.connect(settings.db_path) as conn:
             u = users.by_name(conn, args.name)
@@ -125,7 +131,30 @@ def main(argv: list[str] | None = None) -> int:
                 print("this is the last admin; make another user an admin first", file=sys.stderr)
                 return 2
             users.set_role(conn, u["id"], args.role)
+            access.audit(conn, "cli", "role", u["name"], f"{u['role']} -> {args.role}")
         print(f"{args.name} is now {args.role}")
+    elif args.cmd == "user-grant":
+        with db.connect(settings.db_path) as conn:
+            u = users.by_name(conn, args.name)
+            if not u:
+                print(f"no such user: {args.name}", file=sys.stderr)
+                return 2
+            wanted = {g["domain"]: g["level"] for g in access.grants(conn, u["id"])}
+            dom = args.domain.strip().lower().rstrip(".")
+            if args.level == "none":
+                wanted.pop(dom, None)
+            else:
+                wanted[dom] = args.level
+            try:
+                diff = access.set_grants(conn, u["id"], wanted, "cli")
+            except ValueError as exc:
+                print(exc, file=sys.stderr)
+                return 2
+            detail = "; ".join(f"{k} {', '.join(v)}" for k, v in diff.items() if v)
+            if detail:
+                access.audit(conn, "cli", "grants", u["name"], detail)
+        note = " (admins see every domain anyway)" if u["role"] == "admin" else ""
+        print(f"{args.name}: {dom} {args.level}{note}")
     elif args.cmd == "user-2fa-reset":
         with db.connect(settings.db_path) as conn:
             u = users.by_name(conn, args.name)

@@ -1,4 +1,4 @@
-{# Posture report: rep = posture.report(...) (+ charts.trend); renew_base = admin base; can_run = analyst or admin; csrf.
+{# Posture report: rep = posture.report(...) (+ charts.trend); renew_base = admin base; can_run = may renew (domain admin of each row's domain); csrf.
    Two depths: show_domain (all domains) = KPIs, change counters, trends, one row per domain (domain_rows);
    a picked domain = KPIs, changes with rows, trends, the host table with a CVEs tab (host_list), address details.
    Order: alarms (KPIs), what changed, trends, then the list to act on.
@@ -58,7 +58,7 @@
   <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
     <div class="chart h260"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
   {% if rep.charts.footprint is defined %}
-  <div class="card"><h2>Public footprint over time <small>all inventoried domains: each one's latest scan as of the day, summed</small></h2>
+  <div class="card"><h2>Public footprint over time <small>{{ 'your granted' if not access.sees_all else 'all inventoried' }} domains: each one's latest scan as of the day, summed</small></h2>
     <div class="chart h260"><canvas id="pc-footprint" role="img" aria-label="Host names, resolving host names and addresses across all domains per scan day"></canvas></div></div>
   {% endif %}
   {% endif %}
@@ -130,7 +130,7 @@
       <span class="muted small-print">{% if p.status == 'done' %}{{ p.open_ports }} port(s) · {{ p.cves }} CVE(s){% endif %}
         · {{ (p.finished or p.created)[:16].replace('T', ' ') }}{% if p.stale %} <em class="flat">stale</em>{% endif %}
         {% if p.pending %} · <em>renew {{ p.pending }}</em>{% endif %}</span>
-      {% if can_run and not p.pending and p.status not in ('queued', 'running') %}
+      {% if can_run and access.manages(p.domain) and not p.pending and p.status not in ('queued', 'running') %}
       <form method="post" action="{{ renew_base }}/security/posture" class="inline renew" data-posture-run>
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ p.domain }}">
         <input type="hidden" name="ip" value="{{ p.ip }}"><input type="hidden" name="profile" value="{{ p.profile or 'default' }}">

@@ -42,7 +42,7 @@ sys.path.insert(0, str(REPO))
 import uvicorn  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from domin import admin, cve, db, jobs, posture, proxy, users  # noqa: E402
+from domin import access, admin, cve, db, jobs, posture, proxy, users  # noqa: E402
 from domin.config import Settings  # noqa: E402
 from domin.web import COOKIE, HERE, create_app  # noqa: E402
 
@@ -270,16 +270,25 @@ def seed_posture(c, cve_file: Path) -> None:
 def seed_settings(c) -> str:
     """Users, scan profiles, routes and scope; returns the demo admin's TOTP secret."""
     alice = users.create(c, "alice", "admin", DEMO_PASSWORD)
-    bob = users.create(c, "bob", "analyst", DEMO_PASSWORD)
-    carol = users.create(c, "carol", "viewer", DEMO_PASSWORD)
-    dave = users.create(c, "dave", "viewer", DEMO_PASSWORD)
+    erin = users.create(c, "erin", "admin", DEMO_PASSWORD)
+    bob = users.create(c, "bob", "power", DEMO_PASSWORD)
+    carol = users.create(c, "carol", "power", DEMO_PASSWORD)
+    dave = users.create(c, "dave", "power", DEMO_PASSWORD)
+    access.set_grants(c, bob, {"*": "admin"}, "alice")
+    access.set_grants(c, carol, {"example.com": "admin", "example.org": "viewer"}, "alice")
+    access.set_grants(c, dave, {"example.net": "viewer"}, "alice")
+    for actor, action, target, detail in (("alice", "user-add", "carol", "role power"),
+                                          ("alice", "grants", "carol", "added example.com=admin, example.org=viewer"),
+                                          ("alice", "user-add", "erin", "role admin"),
+                                          ("alice", "disable", "dave", "")):
+        access.audit(c, actor, action, target, detail)
     from domin import totp
-    secret = totp.new_secret()   # alice and bob use 2FA (required for analysts and admins below)
+    secret = totp.new_secret()   # alice and bob use 2FA (required for admins below)
     for uid, s in ((alice, secret), (bob, totp.new_secret())):
         codes = json.dumps([totp.hash_recovery(x) for x in totp.new_recovery_codes()])
         c.execute("UPDATE users SET totp_secret = ?, recovery = ? WHERE id = ?", (s, codes, uid))
     users.set_disabled(c, dave, True)
-    for uid, days in ((bob, 1), (carol, 6)):
+    for uid, days in ((bob, 1), (carol, 6), (erin, 2)):
         c.execute("UPDATE users SET last_login = ? WHERE id = ?", (stamp(days, 9), uid))
     for p, note in (({"name": "web", "ports": "80,443,8080,8443", "intensity": 5, "timing": 3, "timeout": 180,
                       "route": "r1"}, "Web servers, deeper version probes"),
@@ -307,7 +316,7 @@ def seed_settings(c) -> str:
                  domains_deny=["internal.example.com"],
                  ip_allow=["192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"],
                  ip_deny=["203.0.113.200/29"], countries_deny=["United States"],
-                 require_2fa={"viewer": False, "analyst": True, "admin": True},
+                 require_2fa={"power": False, "admin": True},
                  net_tags=[{"net": "192.0.2.0/25", "tag": "cloud", "note": "Example Cloud tenancy"},
                            {"net": "198.51.100.128/25", "tag": "datacenter", "note": "Colocation racks"}])
     scope["posture_exclude"] = [{"host": "autodiscover.", "owner": "placeholder-cdn",
@@ -415,7 +424,7 @@ def hide_card(heading: str) -> str:
 OPEN_CVE = ("setTimeout(() => { for (const s of ['details.posture-detail', 'details.svc-group', 'details.cve-item'])"
             " { const d = document.querySelector('#posture-hosts ' + s); if (d) d.open = true; } }, 500);")
 
-# name: (path, signed in, height, script)
+# name: (path, signed in: True = the demo admin, a name = that power user, False = signed out, height, script)
 SHOTS = {
     "signin": ("/admin", False, 760, ""),
     "overview": ("/", True, 1400, ""),
@@ -435,7 +444,9 @@ SHOTS = {
     "routes": ("/admin/security/scan-settings", True, 1050, hide_card("This host")),
     "settings": ("/admin/settings", True, 1000, ""),
     "settings-posture": ("/admin/settings", True, 1250, from_card("Security posture scope")),
-    "users": ("/admin/users", True, 900, ""),
+    "users": ("/admin/users", True, 1100, ""),
+    "user-edit": ("/admin/users/4", True, 760, ""),   # carol (4th user): two domain grants
+    "posture-power": ("/admin/security/analysis", "carol", 1500, ""),
     "account": ("/admin/account", True, 900, ""),
 }
 LIGHT = ("overview", "posture-overview")   # also shot in the light theme: NAME-light.png
@@ -515,6 +526,12 @@ def main() -> int:
         token = r.cookies.get(COOKIE)
         if r.status_code != 303 or not token:
             raise SystemExit(f"demo sign-in failed at the second factor: {r.status_code}")
+        tokens = {True: token, False: ""}
+        for name in {s[1] for s in SHOTS.values() if isinstance(s[1], str)}:   # power users: no second factor
+            r = client.post("/admin/login", data={"name": name, "password": DEMO_PASSWORD}, follow_redirects=False)
+            if r.status_code != 303 or not r.cookies.get(COOKIE):
+                raise SystemExit(f"demo sign-in of {name} failed: {r.status_code}")
+            tokens[name] = r.cookies.get(COOKIE)
         port = free_port()
         server = uvicorn.Server(uvicorn.Config(wrap(app), host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)
@@ -526,7 +543,7 @@ def main() -> int:
             if only and name not in only:
                 continue
             path, signed_in, height, script = SHOTS[view]
-            SHOT.update(cookie=token if signed_in else "", theme=theme, js=script)
+            SHOT.update(cookie=tokens[signed_in], theme=theme, js=script)
             png = out / f"{name}.png"
             run_edge(browser, f"http://127.0.0.1:{port}{path}", args.width, height, args.wait, png)
             print(f"{png.name}: {png.stat().st_size // 1024} KB" if png.exists() else f"{png.name}: missing")

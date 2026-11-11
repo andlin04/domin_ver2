@@ -188,6 +188,7 @@ def settings(tmp_path):
     s = replace(Settings.from_env(), db_path=tmp_path / "t.db", admin_ips=("127.0.0.1",))
     db.init(s.db_path)
     with db.connect(s.db_path) as c:
+        users.create(c, "adm", "admin", PW)
         users.create(c, "ana", "analyst", PW)
         users.create(c, "vee", "viewer", PW)
     return s
@@ -218,7 +219,7 @@ def test_viewer_cannot_run_a_scan(settings):
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/scan",
                    data={"csrf": csrf, "kind": "cpe", "vendor": "proxmox", "product": "pve", "version": "8.1.4"})
-    assert r.status_code == 403 and "analyst role" in r.text and "CVE-2024-9999" not in r.text
+    assert r.status_code == 403 and "domain admin rights" in r.text and "CVE-2024-9999" not in r.text
 
 
 def test_bad_input_is_reported(settings):

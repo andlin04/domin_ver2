@@ -617,7 +617,7 @@ def test_delete_is_refused_while_a_route_is_in_use(settings):
         r = h.post("/admin/security/scan-settings/routes/r2/delete", data={"csrf": csrf})
         assert r.status_code == 409 and "Germany is in use (scan profile viade)" in r.text
     with app_client(settings) as h:
-        csrf = sign_in(h, "ana")   # analysts pick routes in profiles; the list shows each profile's route
+        csrf = sign_in(h, "adm")   # admins pick routes in profiles; the list shows each profile's route
         assert h.post("/admin/security/profiles", data={"csrf": csrf, "name": "viade", "ports": "22", "intensity": "2",
                                                         "timing": "3", "timeout": "60", "route": "r9"}
                       ).status_code == 422

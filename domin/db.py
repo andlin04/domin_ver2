@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL DEFAULT '',   -- scrypt$log_n$salt$hash; '' until the first set-password
-    role TEXT NOT NULL DEFAULT 'viewer',       -- viewer | analyst | admin
+    role TEXT NOT NULL DEFAULT 'power',        -- power (per-domain grants) | admin (old: viewer, analyst)
     totp_secret TEXT NOT NULL DEFAULT '',      -- '' = no second factor
     totp_required INTEGER NOT NULL DEFAULT 0,
     totp_last_step INTEGER NOT NULL DEFAULT -1,   -- last accepted TOTP step: a code works only once
@@ -138,6 +138,22 @@ CREATE TABLE IF NOT EXISTS host_tags (   -- analyst labels per discovered host n
     PRIMARY KEY (host, tag)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS host_tags_tag ON host_tags(tag, host);
+CREATE TABLE IF NOT EXISTS grants (   -- delegation: a power user's domains (domin.access)
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    domain TEXT NOT NULL,                 -- a domain name (covers the domains under it) or '*' = every domain
+    level TEXT NOT NULL,                  -- viewer | admin (domain admin: that domain's actions too)
+    added TEXT NOT NULL,
+    added_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (user_id, domain)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS audit (    -- who changed users, roles and grants
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT ''
+);
 """
 
 RECORD_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
@@ -199,6 +215,7 @@ def init(path: Path) -> None:
                      (DEFAULT_PORTS, "Common services, light version probes", now()))
         from . import users  # local import: users -> admin -> db
         users.migrate_legacy_admin(conn)
+        users.migrate_roles(conn)
 
 
 def domain_id(conn: sqlite3.Connection, name: str, added: str | None = None) -> int:
@@ -255,42 +272,53 @@ JOIN (SELECT domain_id, MAX(started) AS started FROM scans WHERE status = 'done'
 """
 
 
-def domains_overview(conn: sqlite3.Connection, query: str = "") -> list[dict]:
-    """Every domain with its latest scan's counts and its number of scans."""
+def in_scope(scope, column: str) -> tuple[str, list]:
+    """The delegation filter (domin.access.Scope.sql) on a domain-name column; None = every domain."""
+    return scope.sql(column) if scope is not None else ("1", [])
+
+
+def domains_overview(conn: sqlite3.Connection, query: str = "", scope=None) -> list[dict]:
+    """Every domain (in scope) with its latest scan's counts and its number of scans."""
+    f, fa = in_scope(scope, "d.name")
     sql = f"""
     SELECT d.name, d.added, l.id AS scan_id, l.started AS last_scan, l.hosts, l.resolved, l.ips, l.asns,
            l.countries, (SELECT COUNT(*) FROM scans x WHERE x.domain_id = d.id AND x.status = 'done') AS scans
     FROM domains d LEFT JOIN ({LATEST}) l ON l.domain_id = d.id
-    WHERE d.name LIKE ? ORDER BY d.name"""
-    return [dict(r) for r in conn.execute(sql, (f"%{query}%",))]
+    WHERE d.name LIKE ? AND {f} ORDER BY d.name"""
+    return [dict(r) for r in conn.execute(sql, (f"%{query}%", *fa))]
 
 
-def totals(conn: sqlite3.Connection) -> dict:
+def totals(conn: sqlite3.Connection, scope=None) -> dict:
+    f, fa = in_scope(scope, "d.name")
     row = conn.execute(f"""
-        SELECT (SELECT COUNT(*) FROM domains) AS domains,
-               (SELECT COUNT(*) FROM scans WHERE status = 'done') AS scans,
-               (SELECT MIN(started) FROM scans) AS first_scan,
-               (SELECT MAX(started) FROM scans) AS last_scan,
+        SELECT (SELECT COUNT(*) FROM domains d WHERE {f}) AS domains,
+               (SELECT COUNT(*) FROM scans s JOIN domains d ON d.id = s.domain_id
+                WHERE s.status = 'done' AND {f}) AS scans,
+               (SELECT MIN(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE {f}) AS first_scan,
+               (SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE {f}) AS last_scan,
                COALESCE(SUM(l.hosts), 0) AS hosts, COALESCE(SUM(l.ips), 0) AS ips
-        FROM ({LATEST}) l""").fetchone()
+        FROM ({LATEST}) l JOIN domains d ON d.id = l.domain_id WHERE {f}""", fa * 5).fetchone()
     return dict(row)
 
 
-def top_latest(conn: sqlite3.Connection, field: str, limit: int = 12) -> list[dict]:
+def top_latest(conn: sqlite3.Connection, field: str, limit: int = 12, scope=None) -> list[dict]:
     """Across every domain's latest scan: distinct addresses per country / netname / ASN, and how many domains."""
     assert field in ("country", "netname", "asn")
+    f, fa = in_scope(scope, "d.name")
     sql = f"""
     SELECT r.{field} AS label, COUNT(DISTINCT r.ip) AS ips, COUNT(DISTINCT l.domain_id) AS domains
-    FROM records r JOIN ({LATEST}) l ON l.id = r.scan_id
-    WHERE r.ip != '' AND r.{field} != ''
+    FROM records r JOIN ({LATEST}) l ON l.id = r.scan_id JOIN domains d ON d.id = l.domain_id
+    WHERE r.ip != '' AND r.{field} != '' AND {f}
     GROUP BY r.{field} ORDER BY ips DESC LIMIT ?"""
-    return [dict(r) for r in conn.execute(sql, (limit,))]
+    return [dict(r) for r in conn.execute(sql, (*fa, limit))]
 
 
-def scans_per_day(conn: sqlite3.Connection) -> list[dict]:
-    sql = """SELECT substr(started, 1, 10) AS day, COUNT(*) AS scans, COUNT(DISTINCT domain_id) AS domains
-             FROM scans WHERE status = 'done' GROUP BY day ORDER BY day"""
-    return [dict(r) for r in conn.execute(sql)]
+def scans_per_day(conn: sqlite3.Connection, scope=None) -> list[dict]:
+    f, fa = in_scope(scope, "d.name")
+    sql = f"""SELECT substr(s.started, 1, 10) AS day, COUNT(*) AS scans, COUNT(DISTINCT s.domain_id) AS domains
+              FROM scans s JOIN domains d ON d.id = s.domain_id WHERE s.status = 'done' AND {f}
+              GROUP BY day ORDER BY day"""
+    return [dict(r) for r in conn.execute(sql, fa)]
 
 
 def domain(conn: sqlite3.Connection, name: str) -> dict | None:
@@ -319,11 +347,16 @@ def records(conn: sqlite3.Connection, scan_id: int) -> list[dict]:
 SEARCH_FIELDS = ("host", "ip", "asn", "prefix", "netname", "descr", "country")
 
 
+def like_escape(text: str) -> str:
+    """text for a LIKE pattern with ESCAPE '\\': its wildcards and the escape character matched literally."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _like(text: str) -> str:
-    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    return "%" + like_escape(text) + "%"
 
 
-def _matching(q: str, field: str, history: bool, columns: dict[str, str] | None) -> tuple[str, list]:
+def _matching(q: str, field: str, history: bool, columns: dict[str, str] | None, scope=None) -> tuple[str, list]:
     """FROM ... WHERE ... for the records of a search: r = record, s = its scan, d = its domain. q matches field (any
     field when empty), each column in columns (domain or a SEARCH_FIELDS name -> text) must match its text too;
     the latest scan per domain, or with history every finished scan."""
@@ -338,17 +371,19 @@ def _matching(q: str, field: str, history: bool, columns: dict[str, str] | None)
         expr = {"domain": "d.name", "eu": EU_EXPR}.get(col, f"COALESCE(r.{col}, '')")
         where += f" AND {expr} {'NOT ' if negate else ''}LIKE ? ESCAPE '\\'"
         args.append(_like(text)[1:] if col == "eu" else _like(text))   # EU: from the start, so "eu" isn't "Non-EU"
+    f, fa = in_scope(scope, "d.name")
     scans = "scans s" if history else f"({LATEST}) s"
     done = "s.status = 'done' AND " if history else ""
     return (f"FROM records r JOIN {scans} ON s.id = r.scan_id JOIN domains d ON d.id = s.domain_id"
-            f" WHERE {done}({where})"), args
+            f" WHERE {done}{f} AND ({where})"), [*fa, *args]
 
 
 def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
-           limit: int = 100, offset: int = 0, columns: dict[str, str] | None = None) -> tuple[list[dict], int]:
+           limit: int = 100, offset: int = 0, columns: dict[str, str] | None = None,
+           scope=None) -> tuple[list[dict], int]:
     """A page of the records that match (see _matching); with history folded to one row per domain, host and
     address with first and last seen. Returns (page of rows, total matches)."""
-    frm, args = _matching(q, field, history, columns)
+    frm, args = _matching(q, field, history, columns, scope)
     cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS) + f", {EU_EXPR} AS eu"
     if history:
         sql = f"""SELECT d.name AS domain, {cols}, MIN(s.started) AS first_seen, MAX(s.started) AS last_seen,
@@ -362,9 +397,9 @@ def search(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool
 
 
 def search_summary(conn: sqlite3.Connection, q: str = "", field: str = "", history: bool = False,
-                   columns: dict[str, str] | None = None, top: int = 10) -> dict:
+                   columns: dict[str, str] | None = None, top: int = 10, scope=None) -> dict:
     """Counts and the top countries / networks / ASNs (distinct addresses) of the records that match."""
-    frm, args = _matching(q, field, history, columns)
+    frm, args = _matching(q, field, history, columns, scope)
     row = conn.execute(f"""SELECT COUNT(DISTINCT r.host) AS hosts, COUNT(DISTINCT NULLIF(r.ip, '')) AS ips,
         COUNT(DISTINCT s.domain_id) AS domains, COUNT(DISTINCT NULLIF(r.asn, '')) AS asns,
         COUNT(DISTINCT NULLIF(r.country, '')) AS countries {frm}""", args).fetchone()
@@ -378,11 +413,11 @@ def search_summary(conn: sqlite3.Connection, q: str = "", field: str = "", histo
     return out
 
 
-def drill_columns(conn: sqlite3.Connection, history: bool = False) -> dict:
+def drill_columns(conn: sqlite3.Connection, history: bool = False, scope=None) -> dict:
     """Every record of the latest scans (history: one row per domain, host and address) column by column, for the
     Drilldown filtered in the browser. A column with many repeats is sent as its distinct values ("d") plus one
     index per row ("i"): about 1.7 MB gzip'd for 163k records."""
-    frm, args = _matching("", "", history, None)
+    frm, args = _matching("", "", history, None, scope)
     cols = ", ".join(f"r.{f}" for f in RECORD_FIELDS)
     keys = ["domain", *RECORD_FIELDS, "last_seen"]
     if history:
@@ -465,14 +500,16 @@ def eu_pct(eu: int, known: int) -> float | None:
 FOOTPRINT = ("hosts", "resolved", "ips")
 
 
-def footprint_per_day(conn: sqlite3.Connection, since: str = "") -> list[dict]:
+def footprint_per_day(conn: sqlite3.Connection, since: str = "", scope=None) -> list[dict]:
     """The public footprint across all domains per day with a finished scan: each domain's latest finished scan as of
     that day (carried forward), summed: domains, host names, host names with an address, addresses. Days from since
     (YYYY-MM-DD) on; earlier scans still count as the state a domain was in."""
     latest: dict[int, tuple] = {}
     out: dict[str, dict] = {}
-    for r in conn.execute("""SELECT domain_id, substr(started, 1, 10) AS day, hosts, resolved, ips FROM scans
-                             WHERE status = 'done' ORDER BY started"""):
+    f, fa = in_scope(scope, "d.name")
+    for r in conn.execute(f"""SELECT s.domain_id, substr(s.started, 1, 10) AS day, s.hosts, s.resolved, s.ips
+                              FROM scans s JOIN domains d ON d.id = s.domain_id
+                              WHERE s.status = 'done' AND {f} ORDER BY s.started""", fa):
         latest[r["domain_id"]] = (r["hosts"] or 0, r["resolved"] or 0, r["ips"] or 0)
         if r["day"] >= since:
             out[r["day"]] = {"day": r["day"], "domains": len(latest),
@@ -480,11 +517,13 @@ def footprint_per_day(conn: sqlite3.Connection, since: str = "") -> list[dict]:
     return list(out.values())
 
 
-def eu_per_day(conn: sqlite3.Connection) -> list[dict]:
+def eu_per_day(conn: sqlite3.Connection, scope=None) -> list[dict]:
     """Share of addresses in the EU across all scans per day, as the old version's EU changes report."""
-    sql = """SELECT substr(started, 1, 10) AS day, SUM(eu) AS eu, SUM(eu_known) AS known FROM scans
-             WHERE status = 'done' GROUP BY day HAVING known > 0 ORDER BY day"""
-    return [{"day": r["day"], "pct": eu_pct(r["eu"], r["known"])} for r in conn.execute(sql)]
+    f, fa = in_scope(scope, "d.name")
+    sql = f"""SELECT substr(s.started, 1, 10) AS day, SUM(s.eu) AS eu, SUM(s.eu_known) AS known
+              FROM scans s JOIN domains d ON d.id = s.domain_id
+              WHERE s.status = 'done' AND {f} GROUP BY day HAVING known > 0 ORDER BY day"""
+    return [{"day": r["day"], "pct": eu_pct(r["eu"], r["known"])} for r in conn.execute(sql, fa)]
 
 
 def diff(old: list[dict], new: list[dict]) -> dict:

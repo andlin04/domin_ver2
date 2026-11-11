@@ -36,7 +36,7 @@
 <div id="posture" class="posture-block">
   <div class="card-head">
     <h2 class="section-title">Security posture <small>summary · hosts, CVEs and changes in Posture</small></h2>
-    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name|urlencode }}">Open in Posture{% if user.role in ('admin', 'analyst') %} · scan / renew{% endif %}</a>
+    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name|urlencode }}">Open in Posture{% if access.manages(domain.name) %} · scan / renew{% endif %}</a>
   </div>
   {% with pp_base=admin_base, pp_domain=domain.name, pp_pending=posture_report.kpi.pending %}
   {% include "_posture_progress.html" %}
@@ -138,7 +138,7 @@
         <th data-sort="text" data-match="start">EU</th><th data-sort="text">Country</th>
         {% if user %}<th data-sort="text">Tags</th>{% endif %}</tr></thead>
       <tbody>
-      {% set tagger = user and user.role in ('admin', 'analyst') %}
+      {% set tagger = user and access.manages(domain.name) %}
       {% for r in rows %}{% set eu = eu_status(r.country) %}
         <tr><td class="host">{{ r.host }}</td><td class="mono">{{ r.ip or '—' }}</td><td class="num">{{ r.asn }}</td>
           <td class="mono">{{ r.prefix }}</td><td class="text net">{{ r.netname }}</td>

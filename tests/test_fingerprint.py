@@ -186,6 +186,7 @@ def settings(tmp_path):
     s = replace(Settings.from_env(), db_path=tmp_path / "t.db", admin_ips=("127.0.0.1",))
     db.init(s.db_path)
     with db.connect(s.db_path) as c:
+        users.create(c, "adm", "admin", PW)
         users.create(c, "ana", "analyst", PW)
         users.create(c, "vee", "viewer", PW)
     return s
@@ -203,19 +204,23 @@ def sign_in(h, name):
     return re.search(r'name="csrf" value="([^"]+)"', page.text).group(1)
 
 
-def test_analyst_runs_host_fingerprint(settings, monkeypatch):
+def test_admin_runs_host_fingerprint_and_a_power_user_may_not_on_an_address(settings, monkeypatch):
     monkeypatch.setattr(fingerprint, "run_nmap", lambda *a, **k: SCAN_XML)
     with app_client(settings) as h:
-        csrf = sign_in(h, "ana")
+        csrf = sign_in(h, "adm")
         r = h.post("/admin/security/scan", data={"csrf": csrf, "kind": "host", "target": "172.20.4.50"})
     assert r.status_code == 200 and "22/tcp" in r.text and "CVE-2024-9999" in r.text
+    with app_client(settings) as h:   # a domain admin of every domain: host names only, no addresses
+        csrf = sign_in(h, "ana")
+        r = h.post("/admin/security/scan", data={"csrf": csrf, "kind": "host", "target": "172.20.4.50"})
+    assert r.status_code == 403 and "addresses: admins only" in r.text
 
 
 def test_host_out_of_scope_is_refused(settings):
     with db.connect(settings.db_path) as c:
         users.save_scope(c, {**users.get_scope(c), "ip_allow": ["10.0.0.0/8"]})
     with app_client(settings) as h:
-        csrf = sign_in(h, "ana")
+        csrf = sign_in(h, "adm")
         r = h.post("/admin/security/scan", data={"csrf": csrf, "kind": "host", "target": "172.20.4.50"})
     assert r.status_code == 403 and "outside the posture scope" in r.text
 
@@ -231,7 +236,7 @@ def test_viewer_cannot_fingerprint(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/scan", data={"csrf": csrf, "kind": "host", "target": "172.20.4.50"})
-    assert r.status_code == 403 and "analyst role" in r.text
+    assert r.status_code == 403 and "domain admin rights" in r.text
 
 
 def test_no_answer_flags_potentially_blocked_addresses():

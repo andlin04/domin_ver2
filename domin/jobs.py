@@ -94,8 +94,10 @@ def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return job
 
 
-def recent(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    return [_public(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))]
+def recent(conn: sqlite3.Connection, limit: int = 10, scope=None) -> list[dict]:
+    f, fa = db.in_scope(scope, "domain")
+    return [_public(r) for r in conn.execute(f"SELECT * FROM jobs WHERE {f} ORDER BY id DESC LIMIT ?",
+                                             (*fa, limit))]
 
 
 def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) -> int:
