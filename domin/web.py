@@ -24,11 +24,14 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi import Path as PathParam
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     access,
@@ -283,7 +286,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     async def headers(request: Request, call_next):
         path = request.url.path
         if (path == ADMIN or path.startswith(ADMIN + "/")) and not net_ok(request):
-            resp = JSONResponse({"detail": "Not Found"}, status_code=404)   # same answer as a path that doesn't exist
+            resp = await run_in_threadpool(not_found, request)   # the same answer as a path that doesn't exist
         else:
             resp = await run_in_threadpool(signin_gate, request) or await call_next(request)
         resp.headers.update(SECURITY_HEADERS)
@@ -296,6 +299,20 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             except Exception:
                 log.exception("visit not recorded")
         return resp
+
+    def not_found(request: Request) -> Response:
+        """An unknown path, and a hidden one (the admin area from outside DOMIN_ADMIN_IPS), answer exactly alike:
+        a browser page (HTML accepted, not /api/) gets the styled 404, everything else the framework's JSON."""
+        if not request.url.path.startswith("/api/") and "text/html" in request.headers.get("accept", ""):
+            return page(request, "error.html", 404, message="Not Found", code=404)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def routing_error(request: Request, exc: StarletteHTTPException):
+        """Errors raised by the router itself (no such path, wrong method): unknown paths via not_found."""
+        if exc.status_code == 404:
+            return not_found(request)
+        return await http_exception_handler(request, exc)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
@@ -767,6 +784,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         request.state.scope = access.for_user(c, u)   # what this user may see and act on
         return s, u
 
+    def qr_markup(uri: str) -> Markup | str:
+        """The pending enrolment's QR code: inline SVG from segno (attributes only, nothing user-typed inside)."""
+        return Markup(totp.qr_svg(uri)) if uri else ""
+
     def priv(resp):
         resp.headers.update(PRIVATE)
         return resp
@@ -918,7 +939,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             pending = users.enrol_pending(c, u["id"])
             uri = totp.provisioning_uri(pending["secret"], u["name"]) if pending else ""
             must_setup = users.needs_totp_setup(c, u)
-        return shell(request, "account.html", u, s, enrol=pending, otpauth=uri, must_setup=must_setup, error="")
+        return shell(request, "account.html", u, s, enrol=pending, otpauth=uri, qr=qr_markup(uri),
+                     must_setup=must_setup, error="")
 
     @app.post(base + "/account/password", include_in_schema=False)
     async def account_password(request: Request):
@@ -958,7 +980,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if codes is None:
                 pending = users.enrol_pending(c, u["id"])
                 uri = totp.provisioning_uri(pending["secret"], u["name"]) if pending else ""
-                return shell(request, "account.html", u, s, 422, enrol=pending, otpauth=uri,
+                return shell(request, "account.html", u, s, 422, enrol=pending, otpauth=uri, qr=qr_markup(uri),
                              must_setup=users.needs_totp_setup(c, u), error="Wrong code; try the current one.")
             u = users.get(c, u["id"])
         return shell(request, "account.html", u, s, enrol=None, otpauth="", must_setup=False, error="",
@@ -1211,6 +1233,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u, redirect = admin_only(request, c, data)
             if redirect:
                 return redirect
+        if not publicsync.installed():
+            raise HTTPException(409, "Public database sync is not installed on this host (install.sh --public-sync).")
         publicsync.request_sync(settings.db_path.parent)
         return back(base + "/settings", "sync-requested")
 

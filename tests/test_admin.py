@@ -57,12 +57,25 @@ def test_asset_links_are_relative(settings):
 
 
 def test_admin_only_for_allowlisted_addresses(settings):
-    with client(settings, ip="198.51.100.7") as h:   # not on the list: no link, and /admin* looks like it doesn't exist
-        unknown = h.get("/no-such-page")
-        for path in (BASE, BASE + "/", BASE + "/jobs/1/cancel"):
-            r = h.get(path)
-            assert (r.status_code, r.text) == (unknown.status_code, unknown.text) == (404, unknown.text)
-        assert h.post(BASE + "/login", data={"password": PW}).status_code == 404
+    def answer(r):
+        return r.status_code, {k: v for k, v in r.headers.items() if k != "date"}, r.content
+
+    html, api = {**UA, "accept": "text/html,application/xhtml+xml,*/*;q=0.8"}, {"accept": "application/json"}
+    for inventory, posture in ((False, False), (True, False), (True, True)):   # public site: inventory open
+        with db.connect(settings.db_path) as c:
+            users.set_signin_required(c, inventory, posture)
+        with client(settings, ip="198.51.100.7") as h:   # not on the list: no link, /admin* looks like it doesn't exist
+            for headers in (html, api, {}):
+                unknown = h.get("/no-such-page", headers=headers)
+                assert unknown.status_code == 404
+                for path in (BASE, BASE + "/", BASE + "/jobs/1/cancel", BASE + "/account"):
+                    assert answer(h.get(path, headers=headers)) == answer(unknown), (path, headers)
+            assert "Back to the overview" in h.get("/no-such-page", headers=html).text   # the styled page
+            if not inventory:   # else the API asks for a sign-in first
+                assert h.get("/api/no-such", headers=html).json() == {"detail": "Not Found"}
+            assert h.get("/no-such-page", headers=api).json() == {"detail": "Not Found"}
+            assert h.post(BASE + "/login", data={"password": PW}).status_code == 404
+    with client(settings, ip="198.51.100.7") as h:
         assert 'href="/admin"' not in h.get("/").text
     with client(settings, ip="192.0.2.50") as h:
         assert 'href="/admin"' in h.get("/").text and h.get(BASE).status_code == 200

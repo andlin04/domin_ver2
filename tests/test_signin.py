@@ -200,3 +200,25 @@ def test_admin_requires_two_factor_for_one_user(settings):
         assert not u["has_totp"] and not u["totp_required"]
     with client(settings) as h:
         assert login(h, "pia").headers["location"] == BASE
+
+
+def test_two_factor_setup_shows_the_uri_as_a_qr_code(settings):
+    import html
+
+    import segno
+    pia = uid(settings, "pia")
+    with client(settings) as h:
+        login(h, "pia")
+        assert 'class="qr' not in h.get(BASE + "/account").text   # no enrolment pending: no QR
+        h.post(BASE + "/account/2fa/start", data={"csrf": csrf_of(h)})
+        r = h.get(BASE + "/account")
+        assert r.headers["cache-control"] == "no-store"
+        with db.connect(settings.db_path) as c:
+            secret = users.enrol_pending(c, pia)["secret"]
+        uri = totp.provisioning_uri(secret, "pia")
+        assert html.escape(uri) in r.text
+        svg = re.search(r'<div class="qr"[^>]*>(<svg.*?</svg>)</div>', r.text, re.S).group(1)
+        assert svg == totp.qr_svg(uri)   # the same symbol segno makes for this URI
+        assert segno.make(uri, error="m").svg_inline(scale=4, border=4, dark="#000", light="#fff",
+                                                     svgclass="qr-code", lineclass=None) == svg
+        assert "style" not in svg and "script" not in svg and 'fill="#fff"' in svg and 'stroke="#000"' in svg

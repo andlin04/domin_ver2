@@ -19,6 +19,12 @@ STATUS_FILE = "public-sync.status"
 FLOOR_KEY = "public_sync:max_scan"   # scans above this id are this instance's own (kept over a sync)
 INFO_KEY = "public_sync:last"
 TABLES = ("domains", "scans", "records", "ip_cache", "geo")
+UNIT = Path("/etc/systemd/system/domin-public-sync.path")   # installed by install.sh --public-sync only
+
+
+def installed() -> bool:
+    """Whether this host has the sync at all (without it the inventory is this instance's own scans only)."""
+    return UNIT.exists()
 
 
 def request_sync(state_dir: Path) -> Path:
@@ -33,7 +39,7 @@ def request_sync(state_dir: Path) -> Path:
 def status(state_dir: Path, conn: sqlite3.Connection) -> dict:
     """{pending, at, ok, message, received (the copy's time), imported, latest, scans, records, own} from the
     import script's status file and the last import's figures; empty values when it has not run."""
-    out: dict = {"pending": (Path(state_dir) / REQUEST_FILE).exists()}
+    out: dict = {"installed": installed(), "pending": (Path(state_dir) / REQUEST_FILE).exists()}
     try:
         got = json.loads((Path(state_dir) / STATUS_FILE).read_text(encoding="utf-8")[:4000])
         if isinstance(got, dict):

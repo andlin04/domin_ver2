@@ -139,6 +139,8 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
   write the result to `/etc/domin/tls.crt`, re-run `bash deploy/install.sh` (turns on HSTS). The key never leaves
   the host.
 - **Firewall:** `--firewall` turns on ufw: SSH (`--ssh-from` to limit it), HTTP/HTTPS only from `--admin-sources`.
+- **Database:** a new install starts with an empty database. `--public-sync` adds Settings > Public database > Sync
+  (imports a copy of a public server's database delivered to this host; kept for later runs).
 - **Scan reach:** public addresses, `--scan-nets` (this host's own addresses refused) and the `--internal-dns`
   servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
 - **HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first (sudo:

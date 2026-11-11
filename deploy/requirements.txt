@@ -22,6 +22,7 @@ pillow==13.0.0
 pycountry==26.2.16
 pydantic==2.14.2
 pydantic_core==2.50.2
+segno==1.6.6
 socksio==1.0.0
 starlette==1.10.0
 typing-inspection==0.4.4

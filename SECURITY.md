@@ -45,7 +45,7 @@ a public issue for it.
 ## Supply chain
 - Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time"), the full
   dependency set. Check them for known vulnerabilities (PyPI advisory database / OSV) before each release:
-  `pip-audit -r deploy/requirements.txt --disable-pip --no-deps`; 2026-11-11: none found.
+  `pip-audit -r deploy/requirements.txt --disable-pip --no-deps`; 2026-11-11 (with segno 1.6.6): none found.
 - amass: a pinned release, checked against its SHA-256 before it is installed.
 - System packages come from the distribution; install.sh turns on daily security updates (unattended-upgrades, no
   automatic reboot) unless the host has its own apt setup or `AUTO_UPDATES=off`.
@@ -54,6 +54,8 @@ a public issue for it.
 ## Network
 - `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list (kept for later runs). On-prem, HTTP and
   HTTPS are open only to `--admin-sources` (unless `any`), so the firewall and nginx both enforce that list.
+- The package and the repository hold no database; a new install starts empty. Only `--public-sync` installs the
+  root unit that imports a delivered copy of a public database (domin-public-sync.path).
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.
 

@@ -2,6 +2,23 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Two-factor QR code, styled not-found page, public sync only on request
+
+- My account > Two-factor setup: the otpauth link is also shown as a QR code, inline SVG made on the server
+  (new dependency `segno` 1.6.6, pure Python; pip-audit: no known vulnerabilities). Black on a white quiet zone, so
+  it scans in both themes; only while an enrolment is pending, on a `no-store` page; no inline style or script.
+- Unknown pages: a browser (HTML accepted, not /api/) gets the styled 404 page with a link to the overview instead
+  of `{"detail":"Not Found"}`; /api/ and non-HTML requests keep the JSON. The admin area hidden from addresses
+  outside DOMIN_ADMIN_IPS gives the same bytes as an unknown path for the same request (tested with sign-in on and
+  off, HTML and JSON).
+- install.sh: the public database sync (domin-public-sync.path) is installed only with the new `--public-sync`
+  flag, kept in /etc/domin.env as DOMIN_PUBLIC_SYNC=1; a host that already has the unit keeps it. Without it
+  Settings > Public database says "Not installed" and the Sync request is refused (409). The package and the
+  repository hold no database (tested); a new install starts empty. `deploy/update.sh` installs segno, as it does
+  for every change to deploy/requirements.txt, and leaves the sync unit alone.
+- Rollback: `git revert` this commit and re-run install.sh (or update.sh); segno can stay installed. A host that
+  should keep the sync after the revert keeps its unit (the old install.sh installs it unconditionally).
+
 ## 2026-11-11: Network-graph backdrop back, Graphite colours on browser-drawn controls
 
 - Signed-in pages: the faint network-graph backdrop is back (as before the Graphite scheme: the text colour at 3.5 %,

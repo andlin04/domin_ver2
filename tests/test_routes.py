@@ -899,3 +899,28 @@ def test_routes_page_offers_ready_made_routes(settings, monkeypatch):
         assert "Mullvad (automatic) — disabled</option>" in page and "Tor — last test failed</option>" in page
         with db.connect(settings.db_path) as c:
             assert len(proxy.get(c)["routes"]) == 2   # not created twice
+
+
+def test_install_sets_up_the_public_sync_only_with_its_flag():
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    assert "    --public-sync) PUBSYNC=1 ;;" in install and "  PUBSYNC=0" in install
+    assert '[ "$PUBSYNC" != 1 ] || setenv DOMIN_PUBLIC_SYNC 1' in install   # kept for later runs
+    assert "[ ! -f /etc/systemd/system/domin-public-sync.path ] || PUBSYNC=1" in install   # older installs keep it
+    enable = [ln for ln in install.splitlines() if "enable" in ln and "domin-public-sync" in ln]
+    assert enable == ['[ "$PUBSYNC" != 1 ] || systemctl enable -q --now domin-public-sync.path']
+    unit = install.index('install -m 644 "$APP/app/deploy/domin-public-sync.path"')
+    assert install.rindex('if [ "$PUBSYNC" = 1 ]; then', 0, unit) > install.rindex("\nfi\n", 0, unit)
+    assert "/var/lib/domin-sync" not in install   # the inbox exists only where a copy is delivered
+
+
+def test_the_tree_and_the_archive_hold_no_database():
+    import io
+    import tarfile
+    root = Path(__file__).parent.parent
+    try:
+        files = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True).stdout
+        tar = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=root, capture_output=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("not a git checkout")
+    names = files.split() + tarfile.open(fileobj=io.BytesIO(tar.stdout)).getnames()
+    assert not [n for n in names if n.endswith((".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm"))]

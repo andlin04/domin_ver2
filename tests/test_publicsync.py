@@ -82,7 +82,21 @@ def test_a_bad_copy_leaves_everything_as_it_was(settings, tmp_path):
         assert counts(c) == before and admin.kv_get(c, publicsync.FLOOR_KEY) is None
 
 
-def test_sync_button_is_admin_only_and_drops_a_request(settings, pub_copy):
+def test_without_the_unit_the_section_says_not_installed(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(publicsync, "UNIT", tmp_path / "absent.path")
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        page = h.get("/admin/settings").text
+        assert "Not installed on this host" in page and ">Sync</button>" not in page
+        r = h.post("/admin/settings/public-sync", data={"csrf": csrf}, follow_redirects=False)
+        assert r.status_code == 409
+    assert not (settings.db_path.parent / publicsync.REQUEST_FILE).exists()
+
+
+def test_sync_button_is_admin_only_and_drops_a_request(settings, pub_copy, tmp_path, monkeypatch):
+    unit = tmp_path / "domin-public-sync.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setattr(publicsync, "UNIT", unit)
     state = settings.db_path.parent
     with app_client(settings) as h:
         csrf = sign_in(h, "adm")

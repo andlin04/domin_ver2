@@ -130,6 +130,10 @@
   <h2>Public database</h2>
   <p class="muted">Replaces the inventory here with the newest copy of the public server's database. This instance's
     own scans stay; users, settings, posture scans and queued jobs are not touched, and nothing starts scanning.</p>
+  {% if not sync.installed %}
+  <p class="note">Not installed on this host: the inventory holds this instance's own scans only. Install it with
+    <code>install.sh --public-sync</code>.</p>
+  {% else %}
   <dl class="facts">
     <dt>Copy on this host</dt><dd>{{ sync.received or "none received yet" }}</dd>
     <dt>Last sync</dt><dd>{% if sync.imported %}{{ sync.imported }}: {{ sync.scans }} public scans (newest
@@ -142,6 +146,7 @@
     {% if sync.pending %}<p class="muted">Sync running.</p>{% else %}
     <p><button class="btn primary" type="submit">Sync</button></p>{% endif %}
   </form>
+  {% endif %}
 </section>
 
 <section class="card" id="signin">

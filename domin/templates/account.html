@@ -48,7 +48,8 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="btn" type="submit">Turn off</button></form>
     {% elif enrol %}
-    <p class="muted">Add this secret to your authenticator app, then enter a code to confirm.</p>
+    <p class="muted">Scan this code or add the secret to your authenticator app, then enter a code to confirm.</p>
+    {% if qr %}<div class="qr" role="img" aria-label="QR code for the authenticator app">{{ qr }}</div>{% endif %}
     <p>Secret: <code class="mono">{{ enrol.secret }}</code></p>
     <p class="muted small-print">Or paste this into the app:</p>
     <pre class="codeblock">{{ otpauth }}</pre>

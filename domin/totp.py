@@ -61,6 +61,14 @@ def provisioning_uri(secret: str, account: str, issuer: str = ISSUER) -> str:
     return f"otpauth://totp/{label}?{query}"
 
 
+def qr_svg(uri: str) -> str:
+    """The URI as an inline SVG QR code (segno): black modules on a white quiet zone, so it scans in either theme.
+    Attributes only, no style or script, so the page CSP holds."""
+    import segno
+    return segno.make(uri, error="m").svg_inline(scale=4, border=4, dark="#000", light="#fff", svgclass="qr-code",
+                                                 lineclass=None)
+
+
 def new_recovery_codes(n: int = RECOVERY_CODES) -> list[str]:
     """Human-friendly one-time codes (shown once at enrolment); only their hashes are stored."""
     return ["-".join(secrets.token_hex(2) for _ in range(3)) for _ in range(n)]
