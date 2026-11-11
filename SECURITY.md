@@ -36,26 +36,31 @@ a public issue for it.
   run at most two at a time per web process (others wait briefly, then get 503).
 - **Headers:** a Content-Security-Policy that allows only the site's own files (no inline script), `X-Frame-Options`,
   `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
-  `Cross-Origin-Resource-Policy`; HSTS on the Origin CA (Cloudflare) setup.
+  `Cross-Origin-Resource-Policy`; HSTS with Let's Encrypt, on the Origin CA (Cloudflare) setup and on-prem once the
+  certificate is CA-signed.
 - **Output:** templates escape everything; script-built HTML escapes third-party text; CSV cells that a spreadsheet
   would run as a formula are prefixed with `'`.
 - **Privacy:** no IP addresses are stored; visitors are a daily-salted hash, scan clients a salted hash kept 24 hours.
 
 ## Supply chain
-- Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time").
+- Python packages: the exact versions in `deploy/requirements.txt` (no "newest at install time"), the full
+  dependency set. Check them for known vulnerabilities (PyPI advisory database / OSV) before each release:
+  `pip-audit -r deploy/requirements.txt --disable-pip --no-deps`; 2026-11-11: none found.
 - amass: a pinned release, checked against its SHA-256 before it is installed.
 - System packages come from the distribution; install.sh turns on daily security updates (unattended-upgrades, no
   automatic reboot) unless the host has its own apt setup or `AUTO_UPDATES=off`.
 - Chart.js is vendored; pages load nothing from other sites.
 
 ## Network
-- `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list.
+- `--firewall`: ufw with HTTP, HTTPS and SSH; `--ssh-from` limits SSH to the networks you list. On-prem, HTTP and
+  HTTPS are open only to `--admin-sources` (unless `any`), so the firewall and nginx both enforce that list.
 - Behind Cloudflare with `--origin-cert`, nginx accepts HTTPS only with Cloudflare's client certificate and refuses
   unknown host names in the TLS handshake; close port 80 to the internet once Cloudflare connects on 443.
 
 ## On-prem install (`--internal`)
 - HTTPS only (port 80 just redirects); TLS 1.2/1.3, EC P-256 key in `/etc/domin/tls.key` (root, 600), read only by
-  nginx's master process, never by the app. Self-signed until you install a CA-signed certificate from the CSR.
+  nginx's master process, never by the app. Self-signed until you install a CA-signed certificate from the CSR;
+  re-run install.sh after that to turn on HSTS (never sent with a self-signed certificate).
 - nginx answers only `--admin-sources` (default the private ranges); the sign-in, roles and optional two-factor
   govern `/admin` on top.
 - The scan sandbox still refuses every non-public address except `--scan-nets` and `--internal-dns`, written as a
@@ -69,3 +74,6 @@ a public issue for it.
   `/opt/domin`. Tor is installed but off until an admin turns it on.
 - `/var/lib/domin` belongs to the app user, so those scripts read only one validated word or no-secret JSON from it,
   skip symlinks, and write only through fresh `mktemp` files renamed into place (never a fixed temporary name).
+- The helper services are sandboxed (`systemd-analyze security`: 3.0 Tor, 3.4 import, 4.3 Mullvad, from 9.6):
+  read-only system except the paths each one writes, a short capability list, no new privileges, private /tmp and
+  devices; the Tor switch and the import also have no network.

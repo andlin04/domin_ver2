@@ -17,7 +17,7 @@ case $want in
 esac
 case $want in
   on) systemctl enable -q --now tor ;;
-  off) systemctl disable -q --now tor 2>/dev/null || true ;;
+  off) if systemctl cat tor >/dev/null 2>&1; then systemctl disable -q --now tor; fi ;;   # a failure stops here
   *) echo "tor-switch: on or off, not '$want'" >&2; exit 2 ;;
 esac
 tmp=$(mktemp "$DIR/.tor.state.XXXXXX")

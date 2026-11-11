@@ -525,6 +525,15 @@ def test_services_are_sandboxed_with_limits():
     assert '" 2G 200 "' in install and '" 16G 2000' in install
 
 
+def test_internal_install_hsts_only_when_ca_signed_and_firewall_follows_admin_sources():
+    install = (Path(__file__).parent.parent / "deploy" / "install.sh").read_text()
+    assert "selfsigned /etc/domin/tls.crt || HSTS='add_header Strict-Transport-Security" in install
+    assert "ssl_session_tickets off;\n    $HSTS\n" in install
+    fw = install[install.index('if [ "$FIREWALL" = 1 ]'):]
+    assert 'if [ "$INTERNAL" = 1 ] && [ "$SOURCES" != any ]' in fw
+    assert 'ufw allow from "$net" to any port 80,443 proto tcp' in fw
+
+
 def test_amass_runs_passive_then_active(monkeypatch):
     calls = []
 

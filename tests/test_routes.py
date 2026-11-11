@@ -471,6 +471,18 @@ def test_install_leaves_tor_off_and_root_scripts_write_only_fresh_temp_files():
     assert ".public-import.db" not in (deploy / "public-sync.sh").read_text()
 
 
+def test_root_helper_units_are_sandboxed_and_a_failed_tor_switch_shows():
+    deploy = Path(__file__).parent.parent / "deploy"
+    for name in ("tor", "mullvad", "public-sync"):
+        unit = (deploy / f"domin-{name}.service").read_text()
+        for line in ("ProtectSystem=strict", "NoNewPrivileges=true", "PrivateTmp=true", "ProtectHome=true",
+                     "ReadWritePaths=/var/lib/domin", "CapabilityBoundingSet=CAP_"):
+            assert line in unit, (name, line)
+        assert ("PrivateNetwork=true" in unit) == (name != "mullvad")   # only Mullvad talks to the internet
+    assert "/etc/rc2.d" in (deploy / "domin-tor.service").read_text()   # tor's SysV links (update-rc.d)
+    assert "disable -q --now tor 2>/dev/null || true" not in (deploy / "tor-switch.sh").read_text()
+
+
 def test_only_admins_reach_the_route_endpoints(settings):
     with db.connect(settings.db_path) as c:
         proxy.save_route(c, route_form())

@@ -1,8 +1,31 @@
 # domin: turn the tor service on or off as asked on the Routes page (started by domin-tor.path).
 # tor-switch.sh removes the request file first and writes /var/lib/domin/tor.state for the page and for install.sh.
+# Sandbox: no network, writes only /var/lib/domin and the SysV links; systemctl reaches the service manager over its local socket.
 [Unit]
 Description=domin: turn the Tor service on or off
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /opt/domin/app/deploy/tor-switch.sh apply
+ProtectSystem=strict
+# tor also ships a SysV script: systemctl enable/disable runs update-rc.d, which links in /etc/rc?.d
+ReadWritePaths=/var/lib/domin -/etc/rc0.d -/etc/rc1.d -/etc/rc2.d -/etc/rc3.d -/etc/rc4.d -/etc/rc5.d -/etc/rc6.d -/etc/rcS.d
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native

@@ -9,7 +9,7 @@
 #   --history FILE      SQLite database with existing scan history (copy it here with scp first); loaded only when
 #                       the server has no database yet, unless --replace-history (the old one is kept as .bak)
 #   --no-worker         install the scan worker but don't start it (pages and tools only, no scans)
-#   --firewall          enable ufw with SSH (22), HTTP and HTTPS only
+#   --firewall          enable ufw with SSH (22), HTTP and HTTPS only (on-prem: HTTP/HTTPS from --admin-sources)
 #   --ssh-from CIDRS    with --firewall: SSH only from these networks (comma-separated; default any)
 #   --admin-ip CIDRS    client addresses that get the admin page /admin (comma-separated); without it, and without
 #                       DOMIN_ADMIN_IPS in /etc/domin.env, there is no admin page
@@ -327,7 +327,7 @@ unit domin-worker "domin scan worker" "$APP/venv/bin/python -m domin worker" 16G
 if [ "$INTERNAL" = 1 ]; then
   # On-prem TLS (as wg-admin): the key never leaves this host and only nginx's master process (root) reads it.
   # Self-signed (825 days) until /etc/domin/tls.crt is replaced with a certificate your CA signed from tls.csr
-  # (left while the certificate is self-signed or has under 30 days left), then reload nginx.
+  # (left while the certificate is self-signed or has under 30 days left), then re-run install.sh (adds HSTS).
   [ -d /etc/domin ] || install -d -m 755 /etc/domin
   [ -f /etc/domin/tls.key ] || (umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
     -out /etc/domin/tls.key 2>/dev/null)
@@ -353,6 +353,9 @@ if [ "$INTERNAL" = 1 ]; then
   } > /etc/nginx/domin-sources.conf
   # nginx 1.25.1+ deprecates "listen ... http2" (Debian 13: 1.26); Ubuntu 24.04's 1.24 has only that form
   if dpkg --compare-versions "$(dpkg-query -W -f='${Version}' nginx)" ge 1.25.1; then H2L="" H2="http2 on;"; else H2L=" http2" H2=""; fi
+  # HSTS only with a CA-signed certificate: on a self-signed one browsers would lock users out of the warning page.
+  # Installed the CA certificate? Re-run install.sh to turn it on.
+  HSTS=""; selfsigned /etc/domin/tls.crt || HSTS='add_header Strict-Transport-Security "max-age=31536000" always;'
   cat > /etc/nginx/sites-available/domin <<EOF
 limit_req_zone \$binary_remote_addr zone=domin_api:10m rate=2r/s;
 limit_req_zone \$binary_remote_addr zone=domin_pages:10m rate=10r/s;
@@ -373,6 +376,7 @@ server {   # any name or address on this host: on-prem users often type the IP
     ssl_certificate_key /etc/domin/tls.key;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_tickets off;
+    $HSTS
     include /etc/nginx/domin-sources.conf;
     include /etc/nginx/domin-site.conf;
 }
@@ -501,7 +505,12 @@ if [ "$FIREWALL" = 1 ]; then
   else
     ufw allow 22/tcp >/dev/null
   fi
-  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+  if [ "$INTERNAL" = 1 ] && [ "$SOURCES" != any ]; then   # on-prem: the web ports only from --admin-sources
+    ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 443/tcp >/dev/null 2>&1 || true
+    for net in ${SOURCES//,/ }; do ufw allow from "$net" to any port 80,443 proto tcp >/dev/null; done
+  else
+    ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+  fi
   ufw --force enable >/dev/null
 fi
 

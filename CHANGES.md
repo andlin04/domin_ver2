@@ -2,6 +2,17 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Sandboxed root helpers, on-prem HSTS and firewall, dependency audit
+
+- The Tor switch, Mullvad and public import services run sandboxed (`systemd-analyze security` 3.0 / 4.3 / 3.4,
+  from 9.6): read-only system except the paths each writes, short capability lists, no new privileges; the Tor
+  switch and the import have no network. Update: install.sh copies the units (an existing install: re-run install.sh).
+- `tor-switch.sh`: a failed `systemctl disable` now fails the switch instead of reporting "off" with tor running.
+- On-prem: HSTS once `/etc/domin/tls.crt` is CA-signed (re-run install.sh after installing it); `--firewall`
+  opens HTTP/HTTPS only to `--admin-sources`.
+- `pip-audit` of `deploy/requirements.txt`: no known vulnerabilities; the command is in SECURITY.md.
+- Rollback: `git revert` this commit and re-run install.sh (units back to unsandboxed, ufw rules back to any).
+
 ## 2026-11-11: README and screenshots
 
 - README: both parts (domain inventory, security posture) as lists, screenshots with made-up demo data

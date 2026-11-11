@@ -120,7 +120,9 @@ bash deploy/install.sh --internal --domain scanner.corp.example --scan-nets 10.0
 - **Web UI:** `https://<name>/` on 443 (80 redirects), only from `--admin-sources` (default: the private ranges;
   `any` = no network limit). `--admin-user` prints a one-time link to set the first admin's password (24 h).
 - **TLS:** self-signed (`/etc/domin/tls.crt`, 825 days) until replaced: sign `/etc/domin/tls.csr` with your CA,
-  write the result to `/etc/domin/tls.crt`, `systemctl reload nginx`. The key never leaves the host.
+  write the result to `/etc/domin/tls.crt`, re-run `bash deploy/install.sh` (turns on HSTS). The key never leaves
+  the host.
+- **Firewall:** `--firewall` turns on ufw: SSH (`--ssh-from` to limit it), HTTP/HTTPS only from `--admin-sources`.
 - **Scan reach:** public addresses, `--scan-nets` (this host's own addresses refused) and the `--internal-dns`
   servers. `--raw` allows nmap SYN scans (raw sockets for the worker only).
 - **HTTP proxy:** in a root shell `export https_proxy=http://proxy:3128 http_proxy=$https_proxy` first (sudo:

@@ -1,8 +1,29 @@
 # domin: import the newest copy of the public database (started by domin-public-sync.path).
 # public-sync.sh removes the request file first and writes /var/lib/domin/public-sync.status for the page.
+# Sandbox: no network, writes only the two data directories; runuser drops to the app user for the import.
 [Unit]
 Description=domin: import the public database copy
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /opt/domin/app/deploy/public-sync.sh import
+ProtectSystem=strict
+ReadWritePaths=/var/lib/domin -/var/lib/domin-sync
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native

@@ -1,5 +1,7 @@
 # domin: apply the Mullvad tunnel settings saved on the Routes page (Settings) (started by domin-mullvad.path).
 # mullvad-tunnel.sh removes the request file first and writes /var/lib/domin/mullvad.status for the page.
+# Sandbox: writes only /var/lib/domin, /etc/wireguard and the domin units' drop-ins; the tunnel itself runs in
+# wg-quick@mullvad, started through the service manager.
 [Unit]
 Description=domin: apply the Mullvad tunnel settings
 After=network-online.target
@@ -11,3 +13,22 @@ Type=oneshot
 # Mullvad's API); the script never prints them
 EnvironmentFile=-/etc/domin.env
 ExecStart=/bin/bash /opt/domin/app/deploy/mullvad-tunnel.sh apply
+ProtectSystem=strict
+ReadWritePaths=/var/lib/domin -/etc/wireguard /etc/systemd/system
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE CAP_NET_ADMIN
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
