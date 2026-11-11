@@ -234,7 +234,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             user, csrf = viewer(request)
         admin_csrf = csrf if user and user["role"] == "admin" else ""   # admins can drop a domain from a public page
         grants = getattr(request.state, "scope", None) or (scope_of(request) if user else access.NONE)
-        ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, "csrf": csrf,
+        ctx = {"signed_in_hint": COOKIE in request.cookies,
+               "net_ok": net_ok(request) and not settings.hide_signin_link, "user": user, "csrf": csrf,
                "admin_base": ADMIN, "admin_csrf": admin_csrf, "access": grants, "role_labels": users.ROLE_LABELS,
                "comps": comps_on(request), **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)

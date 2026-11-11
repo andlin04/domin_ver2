@@ -52,6 +52,7 @@ class Settings:
     cve_db_path: str = ""         # shared mode: the database file to read; own mode: defaults next to db_path
     cve_ttl_days: int = 7         # own mode: re-query a target whose cached result is older than this
     nvd_api_key: str = ""         # optional, raises the NVD rate limit
+    hide_signin_link: bool = False  # no "Sign in" link in the menu (public sites); /admin still works by URL
     allow_no_login: bool = False  # dev/lab only: Settings may turn sign-in off (every visitor acts as that admin)
     install_mode: str = "public"  # install.sh: "internal" (on-prem, --internal) or "public"
     scan_nets: tuple[str, ...] = ()   # on-prem: private networks the scans may reach (install --scan-nets)
@@ -113,6 +114,7 @@ class Settings:
             cve_db_path=env("DOMIN_CVE_DB_PATH", "").strip(),
             cve_ttl_days=int(env("DOMIN_CVE_TTL_DAYS", "7")),
             nvd_api_key=env("DOMIN_NVD_API_KEY", "").strip(),
+            hide_signin_link=env("DOMIN_HIDE_SIGNIN_LINK", "").strip().lower() in ("1", "true", "yes", "on"),
             allow_no_login=env("DOMIN_ALLOW_NO_LOGIN", "").strip().lower() in ("1", "true", "yes", "on"),
             install_mode="internal" if env("DOMIN_INSTALL_MODE", "").strip().lower() == "internal" else "public",
             scan_nets=tuple(x.strip() for x in env("DOMIN_SCAN_NETS", "").split(",") if x.strip()),

@@ -89,6 +89,12 @@ def test_neither_keeps_the_public_inventory_and_posture_behind_sign_in(settings)
         assert "Sign in</a>" in h.get("/").text
 
 
+def test_hide_signin_link_hides_only_the_link(settings):
+    with client(replace(settings, hide_signin_link=True)) as h:
+        assert "Sign in</a>" not in h.get("/").text
+        assert h.get(BASE, follow_redirects=False).status_code == 200      # the sign-in page still answers by URL
+
+
 # --- inventory required ------------------------------------------------------------------------------------------
 
 def test_inventory_needs_sign_in_when_ticked(settings):

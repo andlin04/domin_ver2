@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Optional hidden sign-in link
+
+- `DOMIN_HIDE_SIGNIN_LINK=1` in /etc/domin.env drops the "Sign in" link from the menu (public sites); /admin still
+  works by URL for the admin networks.
+- Rollback: remove the key and `systemctl restart domin`; code: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Backdrop on every page
 
 - The faint network-graph backdrop now shows on public pages too, not only after sign-in.
