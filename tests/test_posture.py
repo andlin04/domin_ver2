@@ -491,9 +491,8 @@ def test_posture_page_has_progress_dialog_and_no_auto_reload(settings):
         page = h.get(f"/admin/security/scans?domain={DOM}").text
         assert "data-pp-reopen>" in page and "show progress" in page
         dom_page = h.get(f"/d/{DOM}").text
-    for html in (page, dom_page):
-        assert 'id="posture-progress"' in html
-        assert "http-equiv" not in html.lower() and "reload the page to see progress" not in html
+    assert 'id="posture-progress"' in page and 'id="posture-progress"' not in dom_page   # Posture only
+    assert "http-equiv" not in page.lower() and "reload the page to see progress" not in page
 
 
 def test_posture_needs_csrf(settings):
@@ -755,11 +754,11 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert f'href="/admin/security/analysis?domain={DOM}">{DOM}</a>' in doms and doms.count("<tr") == 2   # head + 1
         assert f'<tr data-domain="{DOM}">' in doms
         assert 'id="posture-hosts"' not in every and 'class="svc posture-detail"' not in every
-        # the domain page: a summary card, the details stay in Posture
+        # the domain page is DNS inventory only: no posture summary, chart or link
         dom_page = h.get(f"/d/{DOM}").text
-        assert dom_page.index("Security posture") < dom_page.index("Records <small>")
-        assert 'id="pc-trend"' in dom_page and 'class="svc posture-detail"' not in dom_page
-        assert 'id="posture-cves"' not in dom_page and "Open in Posture" in dom_page
+        assert "Records <small>" in dom_page and "Security posture" not in dom_page
+        assert 'id="pc-trend"' not in dom_page and 'class="svc posture-detail"' not in dom_page
+        assert 'id="posture-cves"' not in dom_page and "Open in Posture" not in dom_page
         assert "CVE look-up" not in page and 'aria-label="Settings sections"' not in page   # moved under Settings
         look = h.get("/admin/security/lookup").text
         assert "Product (CPE)" in look and 'aria-label="Settings sections"' in look
@@ -921,10 +920,9 @@ def test_posture_page_carries_trend_data(settings):
         add_done(c, "172.20.4.50", "2026-10-02T10:00:00", [])
     with app_client(settings) as h:
         sign_in(h, "vee")
-        for url in (f"/admin/security?domain={DOM}", f"/d/{DOM}"):
-            raw = re.search(r'id="posture-data">(.*?)</script>', h.get(url).text).group(1)
-            data = json.loads(raw)
-            assert [t["critical"] for t in data["trend"]] == [1, 0]
+        raw = re.search(r'id="posture-data">(.*?)</script>', h.get(f"/admin/security?domain={DOM}").text).group(1)
+        assert [t["critical"] for t in json.loads(raw)["trend"]] == [1, 0]
+        assert 'id="posture-data"' not in h.get(f"/d/{DOM}").text   # the inventory page carries no posture data
 
 
 def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
@@ -979,8 +977,8 @@ def test_report_on_ticked_domains(settings, nmap):
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
         assert h.post("/admin/security/report", data={"csrf": csrf, "domains": "nope.example"}).status_code == 422
         # the KPI tiles follow the Filter: all domains narrowed to the domains it finds, one domain to its host names
-        assert "data-kpis" in page and 'id="pc-footprint"' in page and '"footprint": [' in page
-        assert 'id="pc-footprint"' not in h.get("/admin/security", params={"domain": other}).text
+        # Posture shows posture data only: the inventory footprint chart is not here
+        assert "data-kpis" in page and 'id="pc-footprint"' not in page and '"footprint"' not in page
         every = h.get("/admin/security/kpis").text
         assert "<span>Filter</span>" not in every and "<span>Critical CVEs</span>" in every and "<i>of 1</i>" not in every
         corp2 = h.get("/admin/security/kpis", params={"q": "corp2"}).text

@@ -2,6 +2,22 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: DNS inventory and posture are separate areas
+
+- Inventory pages (`/`, `/all`, `/d/...`, compare, `/tools`) show DNS-scan data only and link only to inventory
+  pages. Removed from the domain page: the security posture summary and its progress bar, "Open in Posture", the
+  Scheduled rescans card, the nmap discovery card and the "Scan with nmap" form. Tag suggestions there come from
+  the host names only, no longer from posture services. The Viewers panel and host tags stay.
+- Posture is reached through its top-bar entry (users with the Posture or Scans right). Posture · Scans with one
+  domain picked now holds the nmap discovery card: "Scan with nmap" (profile picker) and the latest scan with the
+  stage; the form returns there.
+- Posture pages link to the inventory only through "View DNS records" (one domain picked) and a schedule's last
+  job; the schedules table's domain links stay in Posture; the schedule page's domain crumb is plain text. The
+  "Public footprint over time" chart (inventory data) is gone from Posture.
+- Inventory API (`/api/scan`, `/api/jobs/...`, `/api/domains/.../history`, `/api/scans/...`) and the domain page's
+  chart data no longer carry `discovery`, `discovery_params` or `schedule_id`.
+- Rollback: `git revert` this commit and run update.sh; no database change.
+
 ## 2026-11-11: security audit fixes (sign-in, scan targets, deploy scripts)
 
 - Two-factor sign-in: the `__Host-domin_2fa` cookie between the password and the code was set with Path=/admin;

@@ -540,7 +540,7 @@ SHOTS = {
     "account": ("/admin/account", True, 900, ""),
     "discovery-profiles": ("/admin/security/discovery-profiles", True, 1300, ""),
     "discovery-profiles-list": ("/admin/security/discovery-profiles", True, 520, from_card("Profiles")),
-    "domain-schedules": ("/d/example.com", True, 420, from_card("Scheduled rescans")),
+    "posture-discovery": ("/admin/security/scans?domain=example.com", True, 700, from_card("nmap discovery")),
     "schedule-edit": ("/admin/schedules/2", True, 1250, "document.querySelector('details.host-pick').open = true;"),
     "posture-schedules": ("/admin/security/scans", True, 1500, OPEN_SCHEDULE + from_card("Scheduled rescans")),
     "posture-schedules-power": ("/admin/security/scans", "carol", 1300,

@@ -47,9 +47,10 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   new, fixed and gone CVEs). A search narrows the domain list by host, address, ASN, provider, country, tag, product
   or CVE id.
 - **Scans tab:** posture scans and scan activity.
-- **Domain page:** a security posture summary block for signed-in users.
+- **Separate areas:** the inventory pages show DNS-scan data only; Posture (top bar, users with the right) holds
+  posture results, schedules and nmap discovery, and links back through "View DNS records".
 - **Scan profiles:** ports, version intensity, timing, note.
-- **nmap discovery (optional):** "Scan with nmap" on a domain page adds an nmap stage to an inventory scan, tuned by
+- **nmap discovery (optional):** "Scan with nmap" in Posture · Scans (one domain picked) adds an nmap stage to an inventory scan, tuned by
   a discovery profile (Settings · Discovery profiles: probe method, port check, timing, rate, retries, host timeout,
   reverse DNS, route; the command line is shown). A public domain sweeps only its own addresses; an internal domain
   the hosts of Settings · Internal networks.

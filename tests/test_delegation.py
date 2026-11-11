@@ -132,11 +132,14 @@ def test_out_of_scope_objects_answer_404_like_unknown_ones(settings):
         assert h.get("/d/gamma.example").status_code == 200 and h.get(f"/api/jobs/{job}").status_code == 200
 
 
-def test_domain_page_offers_scans_only_where_the_user_is_domain_admin(settings):
+def test_posture_scans_offer_scans_only_where_the_user_is_domain_admin(settings):
     with client(settings) as h:
         login(h, "pia")
-        assert "scan / renew" in h.get("/d/beta.example").text
-        assert "scan / renew" not in h.get("/d/alpha.example").text
+        beta = h.get(BASE + "/security/scans", params={"domain": "beta.example"}).text
+        alpha = h.get(BASE + "/security/scans", params={"domain": "alpha.example"}).text
+        assert "data-posture-run" in beta and "Scan with nmap" in beta
+        assert 'id="discovery"' in alpha and "data-posture-run" not in alpha and "Scan with nmap" not in alpha
+        assert BASE + "/security" not in h.get("/d/beta.example").text.split("<main")[1]   # the inventory page
 
 
 # --- the posture pages and their aggregates ----------------------------------------------------------------------

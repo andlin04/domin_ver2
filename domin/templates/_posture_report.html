@@ -57,10 +57,6 @@
     <div class="chart h260"><canvas id="pc-surface" role="img" aria-label="Open ports and addresses scanned per day with a finished scan"></canvas></div></div>
   <div class="card"><h2>Exposed services <small>open ports by service</small></h2>
     <div class="chart h260"><canvas id="pc-services" role="img" aria-label="Open ports by service"></canvas></div></div>
-  {% if rep.charts.footprint is defined %}
-  <div class="card"><h2>Public footprint over time <small>{{ 'your granted' if not access.sees_all else 'all inventoried' }} domains: each one's latest scan as of the day, summed</small></h2>
-    <div class="chart h260"><canvas id="pc-footprint" role="img" aria-label="Host names, resolving host names and addresses across all domains per scan day"></canvas></div></div>
-  {% endif %}
   {% endif %}
 </section>
 {% if tab == 'overview' %}{% include "_posture_cves.html" %}{% endif %}

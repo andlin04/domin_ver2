@@ -72,6 +72,14 @@ DRILL_FORMAT = 2   # layout of /data/drill.json; raise it when the columns chang
 SEARCH_CSV_MAX = 100_000   # rows in a search download
 SEARCH_LABELS = {"host": "Host name", "ip": "Address", "asn": "ASN", "prefix": "Prefix", "netname": "Network",
                  "descr": "Description", "country": "Country"}
+POSTURE_KEYS = ("discovery", "discovery_params", "schedule_id")   # nmap stage and schedule: Posture's, not inventory's
+
+
+def dns_only(row: dict) -> dict:
+    """A job or scan row for the inventory pages and API: without the nmap discovery and schedule fields."""
+    return {k: v for k, v in row.items() if k not in POSTURE_KEYS}
+
+
 PathId = Annotated[int, PathParam(ge=0, le=MAX_ID)]
 QueryId = Annotated[int, Query(ge=0, le=MAX_ID)]
 ADMIN = "/admin"   # shown and served only to DOMIN_ADMIN_IPS
@@ -380,23 +388,19 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             open_job = c.execute("SELECT id FROM jobs WHERE domain = ? AND status IN ('queued', 'running')",
                                  (name,)).fetchone()
         change = db.diff(prev_rows, rows) if previous else None
-        charts = {"history": done, "churn": churn, "current": current["id"],
+        charts = {"history": [dns_only(h) for h in done], "churn": churn, "current": current["id"],
                   "countries": db.breakdown(rows, "country", 8), "netnames": db.breakdown(rows, "netname", 10),
                   "asns": db.breakdown(rows, "asn", 10), "map": db.country_map(rows)}
         user, csrf = viewer(request)
-        posture_rows, posture_trend, host_tags, suggested, tag_counts, net_tags = [], [], {}, {}, {}, {}
+        host_tags, suggested, tag_counts, net_tags = {}, {}, {}, {}
         tag = request.query_params.get("tag", "")
-        # posture results, host tags and schedules are signed-in reports, each behind its feature right
-        see_posture, see_tags, see_scans = (bool(user) and scope.can(f) for f in ("posture", "tags", "scans"))
-        if see_posture:
-            with conn() as c:
-                posture_rows = posture.current(c, d["name"])
-                posture_trend = posture.trend(c, d["name"])
-        if see_tags:
+        # DNS inventory only: posture results, schedules and nmap discovery are in Posture. Host tags are signed-in,
+        # behind their feature right; suggestions come from the host names alone (not from posture services).
+        if user and scope.can("tags"):
             with conn() as c:
                 host_tags = tags.for_hosts(c, sorted({r["host"] for r in rows}))
                 rules = users.get_scope(c)["net_tags"]
-            suggested = tags.suggestions(rows, posture_rows, host_tags)
+            suggested = tags.suggestions(rows, [], host_tags)
             if rules:   # Settings > Network tags: shown beside the hand-set tags, not removable here
                 ips: dict[str, list[str]] = {}
                 for r in rows:
@@ -408,27 +412,16 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 rows = [r for r in rows if tag in host_tags.get(r["host"], []) + net_tags.get(r["host"], [])]
             else:
                 tag = ""
-        posture_report = posture.report(posture_rows)
-        posture_report["charts"]["trend"] = posture_trend
-        sched_rows, sched_opts, discovered, internal, viewers = [], None, [], False, None
-        if see_scans:   # schedules and the nmap discovery stage: signed-in, like posture
-            with conn() as c:
-                sched_rows = schedules.for_domain(c, d["name"])
-                if scope.acts("scans", d["name"]):
-                    sched_opts = schedule_opts(c, d["name"])
-                if current.get("discovery"):
-                    discovered = db.discovery_results(c, current["id"])
-                internal = is_internal(d["name"], admin.effective(settings, c).internal_zones)
+        viewers = None
         if user and scope.manages(d["name"]):   # domain admins (and admins) grant viewer here
             with conn() as c:
                 viewers = access.viewers_panel(c, d["name"], user)
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
-                    posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
-                    tag_counts=dict(sorted(tag_counts.items())), tag=tag, sched_rows=sched_rows,
-                    sched_opts=sched_opts, discovered=discovered, viewers=viewers,
-                    domain_internal=internal, notice=NOTICES.get(request.query_params.get("ok", ""), ""))
+                    host_tags=host_tags, suggested=suggested, net_tags=net_tags,
+                    tag_counts=dict(sorted(tag_counts.items())), tag=tag, viewers=viewers,
+                    notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
         """Host names added / removed at each scan versus the one before it."""
@@ -610,7 +603,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             who = admin.client_key(c, client_ip(request))
             limits_off = settings.scan_limits_off or users.get_scope(c).get("scan_limits_off", False)
             if peer_in(request, internal_nets) or limits_off:   # trusted clients, or limits disabled in Settings
-                return jobs.enqueue(c, name, client=who)
+                return dns_only(jobs.enqueue(c, name, client=who))
             last = c.execute("SELECT MAX(s.started) FROM scans s JOIN domains d ON d.id = s.domain_id WHERE d.name = ?",
                              (name,)).fetchone()[0]
             if s.once_per_day and last and last[:10] == db.now()[:10]:
@@ -623,7 +616,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 raise HTTPException(503, "The day's scans are used up; try again tomorrow")
             if jobs.queued(c) >= s.queue_max:
                 raise HTTPException(503, "The scan queue is full; try again later")
-            return jobs.enqueue(c, name, client=who)
+            return dns_only(jobs.enqueue(c, name, client=who))
 
     @app.get("/api/jobs/{job_id}")
     def api_job(job_id: PathId, request: Request):
@@ -631,7 +624,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             job = jobs.get(c, job_id)
         if not job or not scope_of(request).sees(job["domain"]):
             raise HTTPException(404, "No such job")
-        return job
+        return dns_only(job)
 
     @app.get("/api/domains")
     def api_domains(request: Request, q: str = ""):
@@ -644,7 +637,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         scope = scope_of(request)
         with conn() as c:
             domain_or_404(c, name, scope)
-            return db.history(c, name)
+            return [dns_only(h) for h in db.history(c, name)]
 
     @app.get("/api/scans/{scan_id}")
     def api_scan_records(scan_id: PathId, request: Request):
@@ -653,7 +646,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             s = db.scan(c, scan_id)
             if not s or not scope.sees(s["domain"]):
                 raise HTTPException(404, "No such scan")
-            return {"scan": s, "records": db.records(c, scan_id)}
+            return {"scan": dns_only(s), "records": db.records(c, scan_id)}
 
     @app.get("/scans/{scan_id}.csv")
     def scan_csv(scan_id: PathId, request: Request):
@@ -1414,9 +1407,6 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             host = host if host in hosts else ""
             rep = posture.report(posture.current(c, dom, scope=grants), host)
             rep["charts"]["trend"] = posture.trend(c, dom, host, grants)
-            if not dom:   # all domains: the public footprint over time (inventory scans)
-                since = (datetime.now() - timedelta(days=posture.TREND_DAYS)).strftime("%Y-%m-%d")
-                rep["charts"]["footprint"] = db.footprint_per_day(c, since, grants)
             rep["changes"] = posture.changes(c, dom, host, scope=grants)
             at = json.loads(admin.kv_get(c, jobs.CVE_REFRESH_KEY) or "{}").get("at")
             rep["cve_refreshed"] = datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M") if at else ""
@@ -1436,6 +1426,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                        show_notice=not admin.kv_get(c, f"dismiss:auth-notice:{u['id']}"))
             if ctx["tab"] == "scans":
                 ctx.update(schedule_section(c, grants, dom))
+                if dom:
+                    ctx.update(discovery_section(c, grants, dom))
         return shell(request, "security.html", u, s, ctx.pop("status", 200), **ctx)
 
     def internal_check(c):
@@ -1456,6 +1448,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         opts = schedule_opts(c, pick, internal_check(c)(pick) if pick else False) if mine else None
         return {"sched_rows": schedule_rows(c, rows), "sched_domains": mine, "sched_pick": pick,
                 "sched_opts": opts, "new_schedule": new_schedule(opts)}
+
+    def discovery_section(c, grants: access.Scope, dom: str) -> dict:
+        """Posture · Scans, nmap discovery of one domain: the latest inventory scan that ran the stage, what it found,
+        and the "Scan with nmap" form's profiles (domain admin of the domain only)."""
+        last = next((h for h in reversed(db.history(c, dom)) if h["status"] == "done" and h["discovery"]), None)
+        return {"disc_scan": last, "discovered": db.discovery_results(c, last["id"]) if last else [],
+                "disc_opts": schedule_opts(c, dom) if grants.acts("scans", dom) else None,
+                "disc_internal": internal_check(c)(dom)}
 
     @app.post(base + "/security/dismiss-notice", include_in_schema=False)
     async def dismiss_notice(request: Request):
@@ -1790,7 +1790,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.post(base + "/discovery/scan", include_in_schema=False)
     async def discovery_scan(request: Request):
-        """"Scan with nmap" on a domain page: an inventory scan with a discovery stage (domain admin of the domain)."""
+        """"Scan with nmap" in Posture · Scans: an inventory scan with a discovery stage (domain admin only)."""
         data = await form(request)
         dom = (data.get("domain") or "").strip().lower()
         with conn() as c:
@@ -1812,7 +1812,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             job = jobs.enqueue(c, dom, client="admin", discovery=name)
             access.audit(c, u["name"], "discovery-scan", dom, f"profile {name}, job {job['id']}"
                          + (" (joined the open job)" if busy else ""))
-        return back(f"/d/{dom}", "discovery-open" if busy else "discovery-queued")
+        return back(f"{base}/security/scans?domain={quote(dom)}#discovery",
+                    "discovery-open" if busy else "discovery-queued")
 
     # --- schedules (domin.schedules): domain admins on their domains, viewers read, outside = 404 ------------------
 

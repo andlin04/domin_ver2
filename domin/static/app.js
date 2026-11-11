@@ -991,10 +991,6 @@ function postureCharts() {
   }
   lines("pc-surface", [["ports", "Open ports", css("--accent")],
                        ["addresses", "Addresses scanned", css("--sev-unknown"), true]]);
-  if (d.footprint) {
-    lines("pc-footprint", [["hosts", "Host names", css("--accent")], ["resolved", "Resolving", css("--sev-medium")],
-                           ["ips", "Addresses", css("--sev-unknown")]], d.footprint);
-  }
 
   // what is listening: ranked bars, one hue
   const svc = d.services || [];

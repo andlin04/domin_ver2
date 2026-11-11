@@ -300,8 +300,10 @@ def test_power_users_read_profiles_but_cannot_change_them(settings):
 def test_scan_with_nmap_queues_a_job_with_the_profile_for_domain_admins_only(settings):
     with client(settings) as h:
         csrf = login(h, "pia")
-        assert 'action="/admin/discovery/scan"' in h.get("/d/beta.example").text
-        assert 'action="/admin/discovery/scan"' not in h.get("/d/alpha.example").text   # viewer
+        scans = "/admin/security/scans"
+        assert 'action="/admin/discovery/scan"' in h.get(scans, params={"domain": "beta.example"}).text
+        assert 'action="/admin/discovery/scan"' not in h.get(scans, params={"domain": "alpha.example"}).text  # viewer
+        assert 'action="/admin/discovery/scan"' not in h.get("/d/beta.example").text   # not on the inventory page
 
         def post(dom, p="default"):
             return h.post("/admin/discovery/scan", data={"csrf": csrf, "domain": dom, "profile": p},
@@ -311,6 +313,7 @@ def test_scan_with_nmap_queues_a_job_with_the_profile_for_domain_admins_only(set
         assert post("beta.example", "hello").status_code == 422
         r = post("beta.example")
         assert r.status_code == 303 and "ok=discovery-queued" in r.headers["location"]
+        assert r.headers["location"].startswith(scans + "?domain=beta.example&ok=")
         assert "ok=discovery-open" in post("beta.example").headers["location"]   # one open job per domain
     with db.connect(settings.db_path) as c:
         rows = [dict(r) for r in c.execute("SELECT domain, client, discovery FROM jobs")]

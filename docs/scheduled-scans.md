@@ -9,7 +9,7 @@ Owner requests (2026-11-11):
 - Optional stage of an inventory (discovery) job, after the DNS stages and owner look-ups. Off unless the job names
   a discovery profile. The public `POST /api/scan` never sets one, and neither do refreshes or retries.
 - Who starts it:
-  - a domain admin of that domain: "Scan with nmap" on the domain page (profile picker)
+  - a domain admin of that domain: "Scan with nmap" in Posture · Scans, one domain picked (profile picker)
   - a schedule (B)
 - What it sweeps:
 
@@ -24,7 +24,7 @@ Owner requests (2026-11-11):
   the internal DNS servers. No new unit, capability or privileged path. Raw probes only where the worker already
   has raw sockets (`--raw`) and Settings · Raw network access is on.
 - Results per scan (table `discovery_results`): address, name(s) nmap reported, open ports, why it counted as up.
-  Shown on the domain page with the command line that ran (`scans.discovery_params`). The worker log has it too.
+  Shown in Posture · Scans (one domain picked: its latest scan with the stage) with the command line that ran (`scans.discovery_params`). The worker log has it too.
 - Inventory effect:
   - internal: a live address whose reverse name (the LAN DNS servers, `--dns-servers`) is under the domain and not
     yet in the scan becomes a record (host name, address).
@@ -69,7 +69,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 ### Choosing a profile
 
-- Manual: the domain page's "Scan with nmap" form (domain admins).
+- Manual: the "Scan with nmap" form in Posture · Scans (domain admins).
 - Schedule: per schedule (B).
 - Default: Settings · Discovery profiles, "Default profile" = preselected in both forms; "none" = DNS only.
 
@@ -125,7 +125,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 | see the domain's schedules (Posture · Scans list) | yes | yes | yes (read-only) | not listed; 404 |
 | add / edit / delete / enable / run now | yes | yes | 403 | 404 |
 | the domain in the add form's domain picker | yes | yes | no | no |
-| "Scan with nmap" on the domain page | yes | yes | 403 | 404 |
+| "Scan with nmap" in Posture · Scans | yes | yes | 403 | 404 |
 | discovery profiles: read | yes | yes | yes | yes (no domain data) |
 | discovery profiles: add / edit / delete / default | yes | 403 | 403 | 403 |
 
@@ -141,8 +141,8 @@ Every value is checked against this list; no free text reaches argv. The note is
   those domains (hidden when there are none). Filter the page to one domain to pick single hosts or a tag.
   Actions return to the list with the filter they came from.
 - Edit page `/admin/schedules/<id>`: the schedule and its form.
-- Domain page, signed in: a short list (name, status, recurrence, next run) and a link to the section filtered to
-  the domain; "Scan with nmap" (profile picker). Discovery results card when the shown scan had the stage.
+- Posture · Scans with one domain picked: an nmap discovery card ("Scan with nmap" with a profile picker, the latest
+  scan with the stage and what it found). The domain page (DNS inventory) shows no schedules.
 - Operations: a count and a link to the section.
 - Settings · Discovery profiles: list with command line, add/edit form, delete, default picker.
 

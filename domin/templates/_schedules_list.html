@@ -4,7 +4,7 @@
   <thead><tr>{% if show_domain %}<th>Domain</th>{% endif %}<th>Name</th><th>When</th><th>Runs</th><th class="fit">Next run</th>
     <th>Last run</th><th class="fit"></th></tr></thead>
   <tbody>{% for s in sched_rows %}{% set mine = access.acts('scans', s.domain) %}<tr>
-    {% if show_domain %}<td><a href="/d/{{ s.domain }}">{{ s.domain }}</a></td>{% endif %}
+    {% if show_domain %}<td><a href="{{ admin_base }}/security/scans?domain={{ s.domain|urlencode }}">{{ s.domain }}</a></td>{% endif %}
     <td class="name"><b>{{ s.name }}</b><br><span class="pill {{ 'done' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>
       {% if s.busy %}<span class="pill running">running</span>{% endif %}
       {% if not mine %}<span class="pill" title="Viewer on {{ s.domain }}, or read only on Scans &amp; schedules">read-only</span>{% endif %}</td>
@@ -17,7 +17,7 @@
     <td class="mono">{{ s.next_run[:16].replace('T', ' ') if s.enabled and s.next_run else '–' }}</td>
     <td class="last">{% if s.last_run %}<span class="mono">{{ s.last_run[:16].replace('T', ' ') }}</span>
       {% if s.job %}· <span class="pill {{ s.job.status }}">{{ s.job.status }}</span>
-        {% if s.job.scan_id %}<a href="/d/{{ s.domain }}?scan={{ s.job.scan_id }}">job #{{ s.job.id }}</a>{% else %}job #{{ s.job.id }}{% endif %}{% endif %}
+        job #{{ s.job.id }}{% if s.job.scan_id and access.can('inventory') %} · <a href="/d/{{ s.domain }}?scan={{ s.job.scan_id }}">view DNS records</a>{% endif %}{% endif %}
       <div class="muted small">{{ s.last_result }}</div>{% else %}<span class="muted">never</span>{% endif %}</td>
     <td>{% if mine %}<div class="row-actions">
       <a class="btn small" href="{{ admin_base }}/schedules/{{ s.id }}">Edit</a>

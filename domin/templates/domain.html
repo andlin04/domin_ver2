@@ -20,14 +20,6 @@
       <button class="btn primary" type="submit">Scan now</button>
       <div class="scan-status" data-scan-status {% if not open_job %}hidden{% endif %} data-job="{{ open_job or '' }}"></div>
     </form>
-    {% if user and access.acts('scans', domain.name) and sched_opts %}
-    <form method="post" action="{{ admin_base }}/discovery/scan" class="inline nmap-scan"
-          data-confirm="Scan {{ domain.name }} with an nmap discovery stage? It sweeps {{ 'the internal networks (Settings)' if domain_internal else 'only the addresses this scan finds for the domain' }}.">
-      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ domain.name }}">
-      <select name="profile" aria-label="Discovery profile">{% for p in sched_opts.discovery %}<option value="{{ p.name }}" {% if p.name == sched_opts.default_discovery %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
-      <button class="btn" type="submit">Scan with nmap</button>
-    </form>
-    {% endif %}
     <a class="btn" href="/tools?domain={{ domain.name }}">Whois &amp; e-mail</a>
     <a class="btn" href="/scans/{{ current.id }}.csv">CSV</a>
     {% if user and user.role == 'admin' %}
@@ -40,35 +32,8 @@
   </div>
 </section>
 
-{% if user and (access.can('posture') or access.can('scans')) %}
-<div id="posture" class="posture-block">
-  {% if access.can('posture') %}
-  <div class="card-head">
-    <h2 class="section-title">Security posture <small>summary · hosts, CVEs and changes in Posture</small></h2>
-    <a class="btn small" href="{{ admin_base }}/security?domain={{ domain.name|urlencode }}">Open in Posture{% if access.acts('scans', domain.name) %} · scan / renew{% endif %}</a>
-  </div>
-  {% with pp_base=admin_base, pp_domain=domain.name, pp_pending=posture_report.kpi.pending %}
-  {% include "_posture_progress.html" %}
-  {% endwith %}
-  {% with rep=posture_report %}{% include "_posture_summary.html" %}{% endwith %}
-  {% endif %}
-  {% if access.can('scans') %}
-  {# a short list; the list with its actions and the add form live in Posture · Scans #}
-  <section class="card" id="schedules">
-    <div class="card-head"><h2>Scheduled rescans <small>{{ sched_rows|length }} · server local time</small></h2>
-      <a class="btn small" href="{{ admin_base }}/security/scans?domain={{ domain.name|urlencode }}#schedules">{{ 'Manage' if access.acts('scans', domain.name) else 'Open' }} in Posture · Scans</a></div>
-    {% if notice and not request.query_params.get('ok', '').startswith('viewer') %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
-    {% if sched_rows %}<ul class="sched-short">{% for s in sched_rows %}
-      <li><b>{{ s.name }}</b> <span class="pill {{ 'done' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>
-        <span class="muted">· {{ s.when }}{% if s.enabled and s.next_run %} · next {{ s.next_run[:16].replace('T', ' ') }}{% endif %}</span></li>
-    {% endfor %}</ul>{% else %}<p class="muted">No schedules.</p>{% endif %}
-  </section>
-  {% endif %}
-  {% if viewers is not none %}{% include "_viewers.html" %}{% endif %}
-  <h2 class="section-title">Inventory</h2>
-</div>
-{% elif viewers is not none %}{% include "_viewers.html" %}
-{% endif %}
+{# DNS inventory only: posture results, schedules and nmap discovery live in Posture (top bar) #}
+{% if viewers is not none %}{% include "_viewers.html" %}{% endif %}
 
 <section class="toolbar card">
   <label>Scan
@@ -86,17 +51,6 @@
 </section>
 {% if current.error and current.status == 'done' %}
 <p class="note" role="status">This scan may be incomplete: {{ current.error }}.</p>
-{% endif %}
-{% if user and access.can('scans') and current.discovery %}
-<section class="card" id="discovery">
-  <h2>nmap discovery <small>profile {{ current.discovery }} · {{ discovered|length }} live address(es)</small></h2>
-  <p class="mono small">{{ current.discovery_params or 'not run' }}</p>
-  {% if discovered %}<div class="table-wrap short"><table>
-    <thead><tr><th class="fit">Address</th><th title="Reverse DNS names">rDNS</th><th title="Open ports">Ports</th><th>Reason</th></tr></thead>
-    <tbody>{% for f in discovered %}<tr><td class="mono fit">{{ f.ip }}</td><td class="long">{{ f.names }}</td><td class="mono long">{{ f.ports }}</td>
-      <td class="long">{{ f.reason }}</td></tr>{% endfor %}</tbody>
-  </table></div>{% endif %}
-</section>
 {% endif %}
 
 <section class="kpis">

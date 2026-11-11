@@ -5,7 +5,9 @@
 <section class="hero"><div><h1>Security posture</h1>
   <p class="muted">What is exposed and vulnerable, worst first.
     {% if posture_domain %}Showing <b>{{ posture_domain }}</b>{% if posture_host %} · host <b>{{ posture_host }}</b>{% endif %}.
-    {% else %}Showing all {{ "your granted " if not access.sees_all }}domains.{% endif %}</p></div></section>
+    {% else %}Showing all {{ "your granted " if not access.sees_all }}domains.{% endif %}</p></div>
+  {# the one way from Posture to the DNS inventory #}
+  {% if posture_domain and access.can('inventory') %}<div class="actions"><a class="btn" href="/d/{{ posture_domain }}">View DNS records</a></div>{% endif %}</section>
 {% set tab_q = ('?domain=' ~ posture_domain|urlencode ~ ('&host=' ~ posture_host|urlencode if posture_host else '')) if posture_domain else '' %}
 {% set tab_url = base ~ '/security' ~ ('' if tab == 'overview' else '/' ~ tab) %}
 <nav class="tabs posture-tabs" aria-label="Posture views">
@@ -92,6 +94,27 @@
     {% with sf=new_schedule, sf_id=none, sched_domain=sched_pick %}{% include "_schedule_form.html" %}{% endwith %}
   </details>{% endif %}
 </section>
+
+{% if posture_domain %}
+{# nmap discovery: an inventory scan with a discovery stage; the latest one's live addresses and ports #}
+<section class="card" id="discovery">
+  <div class="card-head"><h2>nmap discovery <small>{% if disc_scan %}profile {{ disc_scan.discovery }} · scan of
+    {{ disc_scan.started[:16].replace('T', ' ') }} · {{ discovered|length }} live address(es){% else %}not run on {{ posture_domain }}{% endif %}</small></h2>
+    {% if disc_opts %}
+    <form method="post" action="{{ base }}/discovery/scan" class="inline nmap-scan"
+          data-confirm="Scan {{ posture_domain }} with an nmap discovery stage? It sweeps {{ 'the internal networks (Settings)' if disc_internal else 'only the addresses this scan finds for the domain' }}.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="domain" value="{{ posture_domain }}">
+      <select name="profile" aria-label="Discovery profile">{% for p in disc_opts.discovery %}<option value="{{ p.name }}" {% if p.name == disc_opts.default_discovery %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+      <button class="btn small" type="submit">Scan with nmap</button>
+    </form>{% endif %}</div>
+  {% if disc_scan %}<p class="mono small">{{ disc_scan.discovery_params or 'not run' }}</p>{% endif %}
+  {% if discovered %}<div class="table-wrap short"><table>
+    <thead><tr><th class="fit">Address</th><th title="Reverse DNS names">rDNS</th><th title="Open ports">Ports</th><th>Reason</th></tr></thead>
+    <tbody>{% for f in discovered %}<tr><td class="mono fit">{{ f.ip }}</td><td class="long">{{ f.names }}</td><td class="mono long">{{ f.ports }}</td>
+      <td class="long">{{ f.reason }}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+{% endif %}
 {% endif %}
 
 {% if show_notice and tab == 'scans' %}

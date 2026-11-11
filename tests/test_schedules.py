@@ -344,8 +344,8 @@ def test_domain_admin_manages_schedules_on_its_domain(settings):
         with db.connect(settings.db_path) as c:
             sid = c.execute("SELECT id FROM schedules").fetchone()[0]
         assert "nightly" in section(h.get(SCANS).text)
-        dom_page = h.get("/d/beta.example").text   # the domain page: a short list and a link, no editor
-        assert "nightly" in dom_page and SCANS + "?domain=beta.example#schedules" in dom_page
+        dom_page = h.get("/d/beta.example").text   # the inventory page: no schedules (they are in Posture · Scans)
+        assert "nightly" not in dom_page and SCANS not in dom_page
         assert 'class="schedule-form"' not in dom_page and f"/admin/schedules/{sid}/run" not in dom_page
         assert h.get(f"/admin/schedules/{sid}").status_code == 200
         r = h.post(f"/admin/schedules/{sid}", data={**FORM, "csrf": csrf, "name": "weekly", "freq": "weekly"},
