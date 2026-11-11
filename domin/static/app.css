@@ -1,22 +1,29 @@
-/* "Today" theme: blue-violet accent, system font, rounded cards; dark by default, light when the OS asks */
+/* "Graphite" theme: neutral graphite/stone base, one petrol accent, system font, rounded cards; dark by default,
+   light when the OS asks. Severity tokens are set per theme so each keeps >= 3:1 on its own surface. */
 :root {
-  --bg: #0b0d12; --surface: #12151c; --surface-2: #181c25; --border: #262b36; --text: #e6e8ee; --muted: #9aa3b2;
-  --accent: #8b9bff; --accent-ink: #0b0d12; --accent-2: #2dd4bf; --up: #3fb950; --down: #ff6b61; --flat: #d29922;
+  --bg: #131416; --surface: #1b1c1f; --surface-2: #232428; --border: #36383d; --text: #e9e7e3; --muted: #a3a09a;
+  --accent: #4cb5c0; --accent-ink: #0d1617; --accent-2: #d4935a; --chart-3: #b5c26a; --chart-4: #d88aaa;
+  --up: #5bb974; --down: #f0705f; --flat: #d6a640;
+  --sev-critical: #e0457b; --sev-high: #f07c3a; --sev-medium: #d9b02f; --sev-low: #6f9fe0; --sev-unknown: #8a8780;
   --shadow: 0 1px 2px rgba(0, 0, 0, .35); --radius: 12px; --r-ctl: 8px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6; --border: #e1e4ea; --text: #0f1419; --muted: #57606a;
-    --accent: #4352d0; --accent-ink: #ffffff; --accent-2: #0e7c7b; --up: #1a7431; --down: #cf222e; --flat: #8a5c00;
-    --shadow: 0 1px 2px rgba(16, 24, 40, .06); color-scheme: light;
+    --bg: #f4f3f1; --surface: #ffffff; --surface-2: #eeece8; --border: #d9d6d0; --text: #1b1a18; --muted: #5e5a54;
+    --accent: #0e6f7b; --accent-ink: #ffffff; --accent-2: #a65a1e; --chart-3: #66761a; --chart-4: #b03b6a;
+    --up: #186b2f; --down: #b3241a; --flat: #8a5a00;
+    --sev-critical: #a8174a; --sev-high: #d1501a; --sev-medium: #a87c00; --sev-low: #2f68b8; --sev-unknown: #7a766f;
+    --shadow: 0 1px 2px rgba(28, 25, 23, .06); color-scheme: light;
   }
 }
 :root[data-theme="light"] {
-  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6; --border: #e1e4ea; --text: #0f1419; --muted: #57606a;
-  --accent: #4352d0; --accent-ink: #ffffff; --accent-2: #0e7c7b; --up: #1a7431; --down: #cf222e; --flat: #8a5c00;
-  --shadow: 0 1px 2px rgba(16, 24, 40, .06); color-scheme: light;
+  --bg: #f4f3f1; --surface: #ffffff; --surface-2: #eeece8; --border: #d9d6d0; --text: #1b1a18; --muted: #5e5a54;
+  --accent: #0e6f7b; --accent-ink: #ffffff; --accent-2: #a65a1e; --chart-3: #66761a; --chart-4: #b03b6a;
+  --up: #186b2f; --down: #b3241a; --flat: #8a5a00;
+  --sev-critical: #a8174a; --sev-high: #d1501a; --sev-medium: #a87c00; --sev-low: #2f68b8; --sev-unknown: #7a766f;
+  --shadow: 0 1px 2px rgba(28, 25, 23, .06); color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -24,15 +31,6 @@ html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text); line-height: 1.5;
   font: 14px/1.5 var(--font);
-}
-/* signed-in pages: a decorative backdrop (backdrop.svg as a mask, so it takes the theme's text colour) far below
-   the panels; app.js moves it at a fraction of the scroll speed for depth (none with reduced motion) */
-body.backdrop { position: relative; }
-body.backdrop::before {
-  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--text); opacity: .035;
-  -webkit-mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
-  mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -378,8 +376,8 @@ dialog.pp .bar i { display: block; height: 100%; width: 0; border-radius: inheri
 .kpi.warn b { color: var(--flat); }
 .kpi b i { font-size: .8rem; font-style: normal; color: var(--muted); font-weight: 400; }
 .posture-charts { margin-bottom: 1rem; }
-/* chart severity scale, checked for colour-vision separation on both surfaces; legends and axis labels name each one */
-:root { --sev-critical: #a83a9e; --sev-high: #e04a2f; --sev-medium: #c99a00; --sev-low: #3987e5; --sev-unknown: #7d8590; }
+/* chart severity scale (--sev-*, set per theme at the top): critical, high and medium step up in lightness as well as
+   hue and low is the only blue, for colour-vision separation; legends and axis labels name each one */
 .chart-empty { margin: 0; padding: 2rem .5rem; text-align: center; }
 .map-wrap { position: relative; overflow: hidden; border-radius: 6px; }
 .map-wrap canvas { display: block; cursor: grab; touch-action: none; }

@@ -504,8 +504,9 @@ $("[data-scan-select]")?.addEventListener("change", (ev) => {
 });
 
 // --- charts --------------------------------------------------------------------------------------------------------
-const palette = () => [css("--accent"), css("--accent-2"), "#f59e0b", "#ef4444", "#8b5cf6", "#10b981", "#3b82f6",
-  "#ec4899", "#14b8a6", "#f97316", "#64748b"];
+// categorical series: the theme's chart tokens first, then muted neutrals
+const palette = () => [css("--accent"), css("--accent-2"), css("--chart-3"), css("--chart-4"), css("--sev-low"),
+  css("--sev-medium"), "#8fa89a", "#b08d6e", "#7f8c99", "#a3967a", css("--sev-unknown")];
 function chartDefaults() {
   if (!window.Chart) return false;
   Chart.defaults.color = css("--muted");
@@ -583,7 +584,7 @@ function domainCharts() {
   const d = pageData();
   const h = d.history;
   const series = [["hosts", "Host names", css("--accent")], ["resolved", "Resolving", css("--accent-2")],
-                  ["ips", "Addresses", "#f59e0b"], ["asns", "ASNs", "#ec4899"]];
+                  ["ips", "Addresses", css("--chart-3")], ["asns", "ASNs", css("--chart-4")]];
   const current = h.findIndex((s) => s.id === d.current);
   new Chart($("#history"), {
     type: "line",
@@ -663,8 +664,8 @@ function adminCharts() {
   new Chart(el, {
     type: "bar",
     data: { labels: d.map((r) => r.day), datasets: [series("Page views", "views", css("--accent")),
-      series("Visitors", "visitors", css("--accent-2")), series("Downloads", "downloads", "#f59e0b"),
-      series("Scans", "scans", "#8b5cf6")] },
+      series("Visitors", "visitors", css("--accent-2")), series("Downloads", "downloads", css("--chart-3")),
+      series("Scans", "scans", css("--chart-4"))] },
     options: { scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } },
   });
 }

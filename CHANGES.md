@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Graphite colour scheme (look test)
+
+- New palette: graphite/stone base, petrol accent (dark `#4cb5c0`, light `#0e6f7b`); severity colours set per theme
+  (critical crimson-rose, high orange, medium amber, low blue); chart series from theme tokens (`--chart-3`,
+  `--chart-4`) instead of fixed hex values; favicon recoloured. The network-graph background layer is gone.
+- WCAG: body text 13.8-17.4:1, muted text >= 5.8:1, accent links and buttons >= 5.3:1, chart series >= 3.8:1.
+- Rollback: `git revert` this commit (CSS, chart colours and favicon only; no data or config change).
+
 ## 2026-11-11: Sandboxed root helpers, on-prem HSTS and firewall, dependency audit
 
 - The Tor switch, Mullvad and public import services run sandboxed (`systemd-analyze security` 3.0 / 4.3 / 3.4,
