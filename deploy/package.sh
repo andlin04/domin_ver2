@@ -14,6 +14,8 @@ VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)
 COMMIT=$(git rev-parse --short "$REF")
 NAME=domin-$VERSION-$COMMIT
 mkdir -p dist
-git archive --format=tar.gz --prefix="$NAME/" -o "dist/$NAME.tar.gz" "$REF"
+# only what a host runs or an admin reads: no tests, no git files
+git archive --format=tar.gz --prefix="$NAME/" -o "dist/$NAME.tar.gz" "$REF" \
+  domin deploy pyproject.toml README.md SECURITY.md CHANGES.md
 (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 echo "dist/$NAME.tar.gz ($(du -h "dist/$NAME.tar.gz" | cut -f1)), sha256 $(cut -c1-16 "dist/$NAME.tar.gz.sha256")..."

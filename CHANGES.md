@@ -13,6 +13,8 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 - Existing hosts: `update.sh` copies the code only; install the two units once with install.sh, or
   `install -m 644 deploy/domin-tor.* /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now
   domin-tor.path && bash deploy/tor-switch.sh on|off`.
+- `package.sh` ships only what a host needs (domin, deploy, pyproject.toml, README/SECURITY/CHANGES): no tests or
+  git files.
 - Rollback: revert this change, re-run install.sh; `systemctl disable --now domin-tor.path`, remove the two units.
 
 ## 2026-11-11: On-prem install fixes from clean-VM tests

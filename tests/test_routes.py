@@ -454,7 +454,7 @@ def test_admin_turns_tor_on_and_off_through_a_request_file(settings):
         req.unlink()
         (d / proxy.TOR_STATE).write_text("on\n")
         assert "Turn Tor off" in h.get("/admin/security/scan-settings").text
-        assert h.post("/admin/security/scan-settings/tor", data={"csrf": csrf, "tor": "x; rm"}).status_code == 422
+        assert h.post("/admin/security/scan-settings/tor", data={"csrf": csrf, "tor": "maybe"}).status_code == 422
         assert not req.exists()
         assert h.post("/admin/security/scan-settings/tor", data={"tor": "off"}).status_code in (403, 404)   # no CSRF
         assert not req.exists()
