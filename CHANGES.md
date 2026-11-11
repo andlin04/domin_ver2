@@ -2,6 +2,11 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Screenshots: sessions and Logging views
+
+- `scripts/screenshots.py` also shoots `sessions` (My account, Sessions card) and `settings-logging`.
+- Rollback: `git revert` this commit (documentation tooling only).
+
 ## 2026-11-11: Recovery codes stored as salted scrypt hashes
 
 - New 2FA enrolments store each recovery code as its own salted scrypt hash (the password hashing helper); a code

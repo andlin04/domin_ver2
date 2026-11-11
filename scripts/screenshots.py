@@ -539,6 +539,8 @@ SHOTS = {
     "user-edit": ("/admin/users/4", True, 1900, ""),   # carol (4th user): two domain grants
     "posture-power": ("/admin/security/analysis", "carol", 1500, ""),
     "account": ("/admin/account", True, 900, ""),
+    "sessions": ("/admin/account", True, 420, from_card("Sessions")),
+    "settings-logging": ("/admin/settings/logging", True, 900, ""),
     "discovery-profiles": ("/admin/security/discovery-profiles", True, 1300, ""),
     "discovery-profiles-list": ("/admin/security/discovery-profiles", True, 520, from_card("Profiles")),
     "posture-discovery": ("/admin/security/scans?domain=example.com", True, 700, from_card("nmap discovery")),
