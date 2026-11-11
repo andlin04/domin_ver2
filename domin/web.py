@@ -30,9 +30,27 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, cve, db, fingerprint, jobs, mullvad, posture, proxy, publicsync, reports, tags, tools, totp, users
+from . import (
+    access,
+    admin,
+    cve,
+    db,
+    discovery,
+    fingerprint,
+    jobs,
+    mullvad,
+    posture,
+    proxy,
+    publicsync,
+    reports,
+    schedules,
+    tags,
+    tools,
+    totp,
+    users,
+)
 from .config import Settings
-from .validate import normalize_domain
+from .validate import is_internal, normalize_domain
 
 HERE = Path(__file__).parent
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
@@ -145,6 +163,15 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                     return u, sess["csrf"]
         return None, ""
 
+    def scope_of(request: Request) -> access.Scope:
+        """What this request may see (domin.access): a signed-in power user its grants; admins, sign-in off and
+        anonymous visitors of the public inventory everything."""
+        if not hasattr(request.state, "scope"):
+            user, _ = viewer(request)
+            with conn() as c:
+                request.state.scope = access.for_user(c, user) if user else access.FULL
+        return request.state.scope
+
     def page(request: Request, name: str, status: int = 200, **ctx) -> HTMLResponse:
         # Resolve the signed-in user for the nav on public pages too, so the menu keeps its admin links
         # everywhere a logged-in user goes (the admin views pass their own user and skip this lookup).
@@ -152,13 +179,16 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         if user is None:
             user, csrf = viewer(request)
         admin_csrf = csrf if user and user["role"] == "admin" else ""   # admins can drop a domain from a public page
+        grants = getattr(request.state, "scope", None) or (scope_of(request) if user else access.NONE)
         ctx = {"signed_in_hint": COOKIE in request.cookies, "net_ok": net_ok(request), "user": user, "csrf": csrf,
-               "admin_base": ADMIN, "admin_csrf": admin_csrf, **ctx}
+               "admin_base": ADMIN, "admin_csrf": admin_csrf, "access": grants, "role_labels": users.ROLE_LABELS,
+               **ctx}
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
-    def domain_or_404(c, name: str) -> dict:
+    def domain_or_404(c, name: str, scope: access.Scope) -> dict:
+        """The domain, or 404: unknown and outside the request's grants answer the same."""
         d = db.domain(c, name)
-        if not d:
+        if not d or not scope.sees(d["name"]):
             raise HTTPException(404, f"{name} has not been scanned")
         return d
 
@@ -211,13 +241,14 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
         return page(request, "error.html", exc.status_code, message=exc.detail, code=exc.status_code)
 
-    @lru_cache(maxsize=4)
-    def overview_data(version: str) -> dict:
+    @lru_cache(maxsize=32)
+    def overview_data(version: str, scope: access.Scope) -> dict:
         with conn() as c:
-            return {"totals": db.totals(c), "per_day": db.scans_per_day(c),
-                    "countries": db.top_latest(c, "country"), "netnames": db.top_latest(c, "netname"),
-                    "asns": db.top_latest(c, "asn"), "map": db.top_latest(c, "country", 400),
-                    "eu": db.eu_per_day(c)}
+            return {"totals": db.totals(c, scope), "per_day": db.scans_per_day(c, scope),
+                    "countries": db.top_latest(c, "country", scope=scope),
+                    "netnames": db.top_latest(c, "netname", scope=scope),
+                    "asns": db.top_latest(c, "asn", scope=scope), "map": db.top_latest(c, "country", 400, scope),
+                    "eu": db.eu_per_day(c, scope)}
 
     def data_version(c) -> str:
         return str(c.execute("SELECT COALESCE(MAX(id), 0) FROM scans").fetchone()[0])
@@ -226,24 +257,26 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
 
     @app.get("/", response_class=HTMLResponse)
     def overview(request: Request):
+        scope = scope_of(request)
         with conn() as c:
             version = data_version(c)
-            domains = db.domains_overview(c)
-            recent = jobs.recent(c, 8)
-            src = drill_src(c, False)
-        return page(request, "overview.html", data=overview_data(version), domains=domains, recent=recent,
-                    drill_rows=drill_preview(version), fields=SEARCH_LABELS, drill_src=src)
+            domains = db.domains_overview(c, scope=scope)
+            recent = jobs.recent(c, 8, scope)
+            src = drill_src(c, False, scope)
+        return page(request, "overview.html", data=overview_data(version, scope), domains=domains, recent=recent,
+                    drill_rows=drill_preview(version, scope), fields=SEARCH_LABELS, drill_src=src)
 
-    @lru_cache(maxsize=2)
-    def drill_preview(version: str) -> list[dict]:
+    @lru_cache(maxsize=16)
+    def drill_preview(version: str, scope: access.Scope) -> list[dict]:
         """The first records for the overview's Drilldown tab (latest scans, no filter)."""
         with conn() as c:
-            return db.search(c, limit=SEARCH_PAGE)[0]
+            return db.search(c, limit=SEARCH_PAGE, scope=scope)[0]
 
     @app.get("/d/{name}", response_class=HTMLResponse)
     def domain_page(request: Request, name: str, scan: QueryId | None = None):
+        scope = scope_of(request)
         with conn() as c:
-            d = domain_or_404(c, name)
+            d = domain_or_404(c, name, scope)
             hist = db.history(c, name)
             done = [h for h in hist if h["status"] == "done"]
             if not done:
@@ -283,11 +316,22 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 tag = ""
         posture_report = posture.report(posture_rows)
         posture_report["charts"]["trend"] = posture_trend
+        sched_rows, sched_opts, discovered, internal = [], None, [], False
+        if user:   # schedules and the nmap discovery stage: signed-in, like posture
+            with conn() as c:
+                sched_rows = schedules.for_domain(c, d["name"])
+                if scope.manages(d["name"]):
+                    sched_opts = schedule_opts(c, d["name"])
+                if current.get("discovery"):
+                    discovered = db.discovery_results(c, current["id"])
+                internal = is_internal(d["name"], admin.effective(settings, c).internal_zones)
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
                     posture_report=posture_report, host_tags=host_tags, suggested=suggested, net_tags=net_tags,
-                    tag_counts=dict(sorted(tag_counts.items())), tag=tag)
+                    tag_counts=dict(sorted(tag_counts.items())), tag=tag, sched_rows=sched_rows,
+                    sched_opts=sched_opts, new_schedule=new_schedule(sched_opts), discovered=discovered,
+                    domain_internal=internal, notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
         """Host names added / removed at each scan versus the one before it."""
@@ -305,7 +349,7 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     @app.get("/d/{name}/compare", response_class=HTMLResponse)
     def compare(request: Request, name: str, a: QueryId, b: QueryId):
         with conn() as c:
-            d = domain_or_404(c, name)
+            d = domain_or_404(c, name, scope_of(request))
             sa, sb = db.scan(c, a), db.scan(c, b)
             if not sa or not sb or sa["domain"] != name or sb["domain"] != name:
                 raise HTTPException(404, "scan not found for this domain")
@@ -322,9 +366,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 "history": scope == "all", "columns": {k: v for k, v in cols.items() if v}}
 
     @lru_cache(maxsize=64)
-    def summary(version: str, q: str, field: str, history: bool, cols: tuple) -> dict:
+    def summary(version: str, q: str, field: str, history: bool, cols: tuple,
+                scope: access.Scope = access.FULL) -> dict:
         with conn() as c:
-            return db.search_summary(c, q, field, history, dict(cols))
+            return db.search_summary(c, q, field, history, dict(cols), scope=scope)
 
     @lru_cache(maxsize=16)
     def history_page(hour: str, offset: int) -> tuple[list[dict], int]:
@@ -337,10 +382,11 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     drill_cache: dict[bool, tuple[str, bytes]] = {}
     drill_locks = {False: threading.Lock(), True: threading.Lock()}
 
-    def drill_key(c, history: bool) -> str:
-        """Changes with the data (latest scan, or the hour) and with DRILL_FORMAT, so browsers never reuse a
-        cached copy in an older layout."""
-        return f"{DRILL_FORMAT}-{db.now()[:13] if history else data_version(c)}"
+    def drill_key(c, history: bool, scope: access.Scope = access.FULL) -> str:
+        """Changes with the data (latest scan, or the hour), with DRILL_FORMAT, so browsers never reuse a cached copy
+        in an older layout, and with a power user's grants."""
+        key = f"{DRILL_FORMAT}-{db.now()[:13] if history else data_version(c)}"
+        return key if scope.sees_all else f"{key}-{scope.key()}"
 
     def drill_data(key: str, history: bool) -> bytes:
         with drill_locks[history]:   # one build at a time; the others wait for it
@@ -350,14 +396,20 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 drill_cache[history] = key, gzip.compress(json.dumps(data, separators=(",", ":")).encode(), 6)
             return drill_cache[history][1]
 
-    def drill_src(c, history: bool) -> str:
-        return f"/data/drill.json?scope={'all' if history else 'latest'}&v={drill_key(c, history)}"
+    def drill_src(c, history: bool, grants: access.Scope = access.FULL) -> str:
+        return f"/data/drill.json?scope={'all' if history else 'latest'}&v={drill_key(c, history, grants)}"
 
     @app.get("/data/drill.json")
-    def drill_json(scope: str = "latest", v: str = ""):
-        history = scope == "all"
+    def drill_json(request: Request, scope: str = "latest", v: str = ""):
+        history, grants = scope == "all", scope_of(request)
         with conn() as c:
-            key = drill_key(c, history)
+            key = drill_key(c, history, grants)
+            if not grants.sees_all:   # a power user's domains: built per request, cached by that browser only
+                data = db.drill_columns(c, history, grants)
+                cache = "private, max-age=31536000, immutable" if v == key else "private, no-cache"
+                return Response(gzip.compress(json.dumps(data, separators=(",", ":")).encode(), 6),
+                                media_type="application/json",
+                                headers={"Content-Encoding": "gzip", "Cache-Control": cache})
         cache = "public, max-age=31536000, immutable" if v == key else "no-cache"
         return Response(drill_data(key, history), media_type="application/json",
                         headers={"Content-Encoding": "gzip", "Cache-Control": cache})
@@ -397,8 +449,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     def all_domains(request: Request, q: str = "", field: str = "", scope: str = "latest",
                     page_no: Annotated[int, Query(alias="page", ge=1, le=100_000)] = 1):
         args = search_args(request, q, field, scope)
+        grants = scope_of(request)
         offset = (page_no - 1) * SEARCH_PAGE
-        unfiltered_history = args["history"] and not args["q"] and not args["columns"]
+        unfiltered_history = args["history"] and not args["q"] and not args["columns"] and grants.sees_all
         if unfiltered_history:   # computed hourly in the background (warm_history)
             with conn() as c:
                 src = drill_src(c, True)
@@ -407,10 +460,10 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
         else:
             with heavy(), conn() as c:
                 version = data_version(c)
-                src = drill_src(c, args["history"])
-                rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset)
+                src = drill_src(c, args["history"], grants)
+                rows, total = db.search(c, **args, limit=SEARCH_PAGE, offset=offset, scope=grants)
                 stats = summary(version, args["q"], args["field"], args["history"],
-                                tuple(sorted(args["columns"].items())))
+                                tuple(sorted(args["columns"].items())), grants)
         pages = max(1, -(-total // SEARCH_PAGE))
         return page(request, "search.html", rows=rows, total=total, page_no=page_no, pages=pages, stats=stats,
                     hourly=unfiltered_history,
@@ -420,8 +473,9 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     @app.get("/search.csv")
     def search_csv(request: Request, q: str = "", field: str = "", scope: str = "latest"):
         args = search_args(request, q, field, scope)
+        grants = scope_of(request)
         with heavy(), conn() as c:
-            rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX)
+            rows, _ = db.search(c, **args, limit=SEARCH_CSV_MAX, scope=grants)
         names = ["domain", *db.RECORD_FIELDS, "eu", *(["first_seen", "last_seen", "seen"] if args["history"]
                                                  else ["last_seen"])]
         buf = io.StringIO()
@@ -475,37 +529,41 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
             return jobs.enqueue(c, name, client=who)
 
     @app.get("/api/jobs/{job_id}")
-    def api_job(job_id: PathId):
+    def api_job(job_id: PathId, request: Request):
         with conn() as c:
             job = jobs.get(c, job_id)
-        if not job:
+        if not job or not scope_of(request).sees(job["domain"]):
             raise HTTPException(404, "No such job")
         return job
 
     @app.get("/api/domains")
-    def api_domains(q: str = ""):
+    def api_domains(request: Request, q: str = ""):
+        scope = scope_of(request)
         with conn() as c:
-            return db.domains_overview(c, q.strip().lower())
+            return db.domains_overview(c, q.strip().lower(), scope)
 
     @app.get("/api/domains/{name}/history")
-    def api_history(name: str):
+    def api_history(name: str, request: Request):
+        scope = scope_of(request)
         with conn() as c:
-            domain_or_404(c, name)
+            domain_or_404(c, name, scope)
             return db.history(c, name)
 
     @app.get("/api/scans/{scan_id}")
-    def api_scan_records(scan_id: PathId):
+    def api_scan_records(scan_id: PathId, request: Request):
+        scope = scope_of(request)
         with conn() as c:
             s = db.scan(c, scan_id)
-            if not s:
+            if not s or not scope.sees(s["domain"]):
                 raise HTTPException(404, "No such scan")
             return {"scan": s, "records": db.records(c, scan_id)}
 
     @app.get("/scans/{scan_id}.csv")
     def scan_csv(scan_id: PathId, request: Request):
+        scope = scope_of(request)
         with conn() as c:
             s = db.scan(c, scan_id)
-            if not s:
+            if not s or not scope.sees(s["domain"]):
                 raise HTTPException(404, "No such scan")
             rows = db.records(c, scan_id)
         request.state.domain = s["domain"]
@@ -550,15 +608,56 @@ NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job can
            "2fa-off": "Two-factor turned off.", "pw-set": "Password set; you can sign in now.",
            "posture-queued": "Posture scan queued; reload the page later for the results.",
            "posture-pending": "Those addresses are already queued or running.",
-           "sync-requested": "Sync started; reload in a minute for the result."}
+           "sync-requested": "Sync started; reload in a minute for the result.",
+           "schedule-saved": "Schedule saved; its next run is shown below.", "schedule-deleted": "Schedule removed.",
+           "schedule-run": "Schedule run queued.", "schedule-on": "Schedule enabled; next run from now.",
+           "schedule-off": "Schedule disabled.", "discovery-queued": "Scan with nmap discovery queued.",
+           "discovery-open": "A scan of this domain is already queued or running; it keeps its own parameters."}
+
+
+def schedule_opts(c, domain: str) -> dict:
+    """The choices of the schedule form for one domain."""
+    hosts = posture.host_list(c, domain)
+    return {"posture": posture.profiles(c), "discovery": discovery.profiles(c), "hosts": hosts,
+            "tags": sorted({t for h in hosts for t in h["tags"] + h["net_tags"]}), "freqs": schedules.FREQS,
+            "weekdays": schedules.WEEKDAYS, "host_modes": schedules.HOST_MODES,
+            "default_discovery": discovery.get_default(c)}
+
+
+def new_schedule(opts: dict | None) -> dict:
+    """A new schedule form's starting values."""
+    if not opts:
+        return {}
+    return {"name": "Weekly rescan", "enabled": "1", "discovery": "1", "discovery_profile": opts["default_discovery"],
+            "posture": "", "posture_profile": posture.DEFAULT_PROFILE, "host_mode": "all", "freq": "weekly",
+            "at_time": "03:00", "weekday": "6", "monthday": "1", "every": "1", "chosen": []}
+
+
+def schedule_form(s: dict) -> dict:
+    """A saved schedule as form values."""
+    return {**{k: str(s[k]) for k in schedules.COLS if k != "hosts"}, "chosen": json.loads(s["hosts"] or "[]")}
+
+
+def refused_form(data: dict) -> dict:
+    """A refused schedule form as it was sent (unticked boxes stay unticked)."""
+    return {**data, "enabled": data.get("enabled", "0"), "chosen": [k[2:] for k in data if k.startswith("h:")]}
 PRIVATE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 PENDING = "__Host-domin_2fa"   # short-lived cookie between the password and the second-factor step
 PENDING_MIN = 5
 
 
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
 def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: httpx.Client) -> None:
     """The signed-in area under /admin (behind the optional DOMIN_ADMIN_IPS network allowlist). User accounts with
-    roles (viewer/analyst/admin), optional TOTP second factor, a session cookie and a CSRF token per form."""
+    roles (admin, power user with per-domain grants: domin.access), optional TOTP second factor, a session cookie and
+    a CSRF token per form."""
     base = ADMIN
     cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
 
@@ -581,6 +680,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         u = users.get(c, s["user_id"]) if s["user_id"] else None
         if not u or u["disabled"]:
             return None, None
+        request.state.scope = access.for_user(c, u)   # what this user may see and act on
         return s, u
 
     def priv(resp):
@@ -588,8 +688,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return resp
 
     def back(path: str = base, notice: str = "") -> RedirectResponse:
-        if notice:
-            path = f"{path}{'&' if '?' in path else '?'}ok={notice}"
+        if notice:   # the query goes before a #fragment, else the browser never sends it
+            path, hsh, frag = path.partition("#")
+            path = f"{path}{'&' if '?' in path else '?'}ok={notice}{hsh}{frag}"
         return priv(RedirectResponse(path, status_code=303))
 
     def shell(request: Request, name: str, u: dict, s: dict, status: int = 200, **ctx) -> HTMLResponse:
@@ -606,6 +707,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def dashboard(request: Request, c, u: dict, s: dict, error: str = "", status: int = 200) -> HTMLResponse:
         live = admin.effective(settings, c)
         return shell(request, "admin.html", u, s, status, stats=admin.report(c), jobs=jobs.admin_list(c),
+                     sched_rows=schedules.listing(c, request.state.scope),
                      tunable=[(k, *v, getattr(live, k)) for k, v in admin.TUNABLE.items()], error=error)
 
     @app.get(base, response_class=HTMLResponse, include_in_schema=False)
@@ -613,7 +715,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         with conn() as c:
             s, u = current(request, c)
             if u:
-                if users.can(u["role"], "analyst"):
+                if u["role"] == "admin":
                     return dashboard(request, c, u, s)
                 return back(base + "/security")
             any_user = users.count(c) > 0
@@ -792,16 +894,41 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             raise HTTPException(404, "Not Found")
         return s, u, None
 
+    def users_view(request, c, u, s, status: int = 200, error: str = "", link: str = ""):
+        rows = users.listing(c)
+        return shell(request, "users.html", u, s, status, users=rows, roles=users.ROLES,
+                     last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows},
+                     grants=access.all_grants(c), levels=access.LEVEL_LABELS, audit=access.audit_recent(c),
+                     link=link or request.query_params.get("link", ""), error=error)
+
     @app.get(base + "/users", response_class=HTMLResponse, include_in_schema=False)
     def users_page(request: Request):
         with conn() as c:
             s, u, redirect = admin_only(request, c)
             if redirect:
                 return redirect
-            rows = users.listing(c)
-            last_admin = {r["id"]: users.is_last_admin(c, r["id"]) for r in rows}
-        return shell(request, "users.html", u, s, users=rows, roles=users.ROLES, last_admin=last_admin,
-                     link=request.query_params.get("link", ""), error="")
+            return users_view(request, c, u, s)
+
+    def user_edit_view(request, c, u, s, target: dict, status: int = 200, error: str = "",
+                       rows: list[dict] | None = None):
+        """One user's role and per-domain grants; rows: a refused form's grant rows, else the saved grants."""
+        rows = rows if rows is not None else access.grants(c, target["id"])
+        domains = [r["name"] for r in c.execute("SELECT name FROM domains ORDER BY name")]
+        return shell(request, "user_edit.html", u, s, status, target=target, roles=users.ROLES,
+                     last_admin=users.is_last_admin(c, target["id"]), grant_rows=rows + [{"domain": "",
+                     "level": "viewer"}] * 3, domains=domains, levels=access.LEVEL_LABELS, all_domains=access.ALL,
+                     error=error)
+
+    @app.get(base + "/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
+    def user_edit_page(request: Request, user_id: PathId):
+        with conn() as c:
+            s, u, redirect = admin_only(request, c)
+            if redirect:
+                return redirect
+            target = users.get(c, user_id)
+            if not target:
+                raise HTTPException(404, "No such user")
+            return user_edit_view(request, c, u, s, target)
 
     @app.post(base + "/users/add", include_in_schema=False)
     async def users_add(request: Request):
@@ -813,11 +940,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             try:
                 uid = users.create(c, data.get("name", ""), data.get("role", ""))
             except ValueError as exc:
-                rows = users.listing(c)
-                return shell(request, "users.html", u, s, 422, users=rows, roles=users.ROLES,
-                             last_admin={r["id"]: users.is_last_admin(c, r["id"]) for r in rows}, link="",
-                             error=str(exc))
+                return users_view(request, c, u, s, 422, str(exc))
+            access.audit(c, u["name"], "user-add", data.get("name", "").strip(), f"role {data.get('role')}")
             token = users.new_setpw_token(c, uid)
+        if data.get("role") == "power":   # next: pick its domains
+            return back(f"{base}/users/{uid}?link={base}/set-password?token={token}", "user-added")
         return back(f"{base}/users?link={base}/set-password?token={token}", "user-added")
 
     @app.post(base + "/users/{user_id}/{action}", include_in_schema=False)
@@ -830,30 +957,50 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             target = users.get(c, user_id)
             if not target:
                 raise HTTPException(404, "No such user")
+            after = base + "/users" + (f"/{user_id}" if data.get("from") == "edit" else "")
             if action == "role":
-                if users.is_last_admin(c, user_id) and data.get("role") != "admin":
+                role = data.get("role", "")
+                if users.is_last_admin(c, user_id) and role != "admin":
                     raise HTTPException(409, "This is the last admin; make another user an admin first")
                 try:
-                    users.set_role(c, user_id, data.get("role", ""))
+                    users.set_role(c, user_id, role)
                 except ValueError as exc:
                     raise HTTPException(422, str(exc)) from None
-                return back(base + "/users", "user-saved")
+                if role != target["role"]:
+                    access.audit(c, u["name"], "role", target["name"], f"{target['role']} -> {role}")
+                return back(after, "user-saved")
+            if action == "grants":
+                try:
+                    wanted = access.parse_grants(data)
+                except ValueError as exc:
+                    rows = [{"domain": data.get(f"g_domain_{i}", ""), "level": data.get(f"g_level_{i}", "viewer")}
+                            for i in range(200) if data.get(f"g_domain_{i}")]
+                    return user_edit_view(request, c, u, s, target, 422, str(exc), rows)
+                diff = access.set_grants(c, user_id, wanted, u["name"])
+                detail = "; ".join(f"{k} {', '.join(v)}" for k, v in diff.items() if v)
+                if detail:
+                    access.audit(c, u["name"], "grants", target["name"], detail)
+                return back(f"{base}/users/{user_id}", "user-saved")
             if action == "disable":
                 want = data.get("disabled") == "on"
                 if want and users.is_last_admin(c, user_id):
                     raise HTTPException(409, "This is the last admin; cannot disable it")
                 users.set_disabled(c, user_id, want)
-                return back(base + "/users", "user-saved")
+                access.audit(c, u["name"], "disable" if want else "enable", target["name"])
+                return back(after, "user-saved")
             if action == "reset-2fa":
                 users.disable_totp(c, user_id)
-                return back(base + "/users", "user-saved")
+                access.audit(c, u["name"], "reset-2fa", target["name"])
+                return back(after, "user-saved")
             if action == "reset-password":
                 token = users.new_setpw_token(c, user_id)
-                return back(f"{base}/users?link={base}/set-password?token={token}", "user-saved")
+                access.audit(c, u["name"], "reset-password", target["name"])
+                return back(f"{after}?link={base}/set-password?token={token}", "user-saved")
             if action == "delete":
                 if users.is_last_admin(c, user_id):
                     raise HTTPException(409, "This is the last admin; cannot delete it")
                 users.delete(c, user_id)
+                access.audit(c, u["name"], "delete", target["name"])
                 return back(base + "/users", "user-deleted")
         raise HTTPException(404, "Unknown action")
 
@@ -932,7 +1079,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
 
-    # --- security portal: CVE scan tool (view: any signed-in user; run: analyst or admin) ------------------------
+    # --- security portal: CVE scan tool (view: any signed-in user; run: domain admin rights) ------------------------
 
     def security_ctx(status: int = 200, result: dict | None = None, form: dict | None = None,
                      error: str = "", host_result: dict | None = None):
@@ -946,17 +1093,18 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         if dom is None:
             dom = request.query_params.get("domain", "")
         host = request.query_params.get("host", "")
+        grants = request.state.scope
         with conn() as c:
-            known = posture.domains(c)
-            dom = dom if dom in known else ""
+            known = posture.domains(c, grants)
+            dom = dom if dom in known else ""   # unknown or outside the grants: all (granted) domains
             hosts = posture.hosts(c, dom) if dom else []
             host = host if host in hosts else ""
-            rep = posture.report(posture.current(c, dom), host)
-            rep["charts"]["trend"] = posture.trend(c, dom, host)
+            rep = posture.report(posture.current(c, dom, scope=grants), host)
+            rep["charts"]["trend"] = posture.trend(c, dom, host, grants)
             if not dom:   # all domains: the public footprint over time (inventory scans)
                 since = (datetime.now() - timedelta(days=posture.TREND_DAYS)).strftime("%Y-%m-%d")
-                rep["charts"]["footprint"] = db.footprint_per_day(c, since)
-            rep["changes"] = posture.changes(c, dom, host)
+                rep["charts"]["footprint"] = db.footprint_per_day(c, since, grants)
+            rep["changes"] = posture.changes(c, dom, host, scope=grants)
             at = json.loads(admin.kv_get(c, jobs.CVE_REFRESH_KEY) or "{}").get("at")
             rep["cve_refreshed"] = datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M") if at else ""
             routes = proxy.get(c)
@@ -1006,7 +1154,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             _, u = current(request, c)
             if not u:
                 return JSONResponse({"error": "Sign in first."}, status_code=401)
-            return JSONResponse({"domains": posture.search_domains(c, request.query_params.get("q", "")[:200])})
+            return JSONResponse({"domains": posture.search_domains(c, request.query_params.get("q", "")[:200],
+                                                                   request.state.scope)})
 
     @app.get(base + "/security/kpis", response_class=HTMLResponse, include_in_schema=False)
     def security_kpis(request: Request):
@@ -1017,8 +1166,10 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c)
             if not u:
                 return HTMLResponse("", status_code=401)
-            dom = dom if dom in posture.domains(c) else ""
-            rows = posture.narrow(c, posture.report(posture.current(c, dom), host)["rows"], dom, q)
+            grants = request.state.scope
+            dom = dom if dom in posture.domains(c, grants) else ""
+            rows = posture.narrow(c, posture.report(posture.current(c, dom, scope=grants), host)["rows"], dom, q,
+                                  grants)
             rep = posture.report(rows)
         tab = request.query_params.get("tab", "")
         return shell(request, "_posture_kpis.html", u, s, rep=rep, filter=q,
@@ -1036,7 +1187,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             _, u = current(request, c, data)
             if not u:
                 return back()
-            known = set(posture.domains(c))
+            known = set(posture.domains(c, request.state.scope))   # outside the grants = unknown
             dom = (data.get("domain") or "").strip().lower()
             if data.get("domains") is not None:   # the all-domains view: whole domains
                 picks = {d: None for d in split("domains") if d in known}
@@ -1076,8 +1227,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     @app.post(base + "/security/posture", include_in_schema=False)
     async def security_posture(request: Request):
         """Stage 2: queue posture scans for a whole domain (its in-scope addresses), one host name or one address
-        (Renew). Analyst or admin; the worker runs them. With `Accept: application/json` (the page's script) the
-        answer is JSON: the batch (row ids) for the progress dialog, or the error."""
+        (Renew). Domain admin of that domain; the worker runs them. With `Accept: application/json` (the page's
+        script) the answer is JSON: the batch (row ids) for the progress dialog, or the error."""
         data = await form(request)
         as_json = "application/json" in request.headers.get("accept", "")
         with conn() as c:
@@ -1094,10 +1245,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                     return priv(JSONResponse({"error": error}, status_code=status))
                 return security_view(request, u, s, security_ctx(status, error=error, form=data) | {"tab": "scans",
                     "posture_domain": dom})
-            if not users.can(u["role"], "analyst"):
-                return refuse(403, "Running a posture scan needs the analyst role.")
-            if dom not in posture.domains(c):
+            grants = request.state.scope
+            if dom not in posture.domains(c, grants):   # unknown, or outside the grants: the same answer
                 return refuse(422, "Pick a domain with a finished inventory scan.")
+            if not grants.manages(dom):
+                return refuse(403, f"Running a posture scan needs domain admin rights on {dom}.")
             if not prof:
                 return refuse(422, "Pick an existing scan profile.")
             ports = (data.get("ports") or "").strip()   # optional override of the profile's ports
@@ -1130,18 +1282,18 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c)
             if not u:
                 return priv(JSONResponse({"error": "Sign in again."}, status_code=401))
-            q = request.query_params
+            q, grants = request.query_params, request.state.scope
             ids = {int(x) for x in q.get("ids", "").split(",")[:5000] if x.strip().isdigit()}
             if q.get("pending"):
-                ids.update(posture.pending_ids(c, (q.get("domain") or "").strip().lower()))
+                ids.update(posture.pending_ids(c, (q.get("domain") or "").strip().lower(), grants))
             if q.get("recent"):   # the Scans tab's activity board: pending plus finished in the last 24 h
-                ids.update(posture.recent_ids(c, (q.get("domain") or "").strip().lower()))
-            return priv(JSONResponse(posture.progress(c, sorted(ids))))
+                ids.update(posture.recent_ids(c, (q.get("domain") or "").strip().lower(), scope=grants))
+            return priv(JSONResponse(posture.progress(c, sorted(ids), grants)))
 
     @app.post(base + "/tags", include_in_schema=False)
     async def host_tag(request: Request):
-        """Add or remove one tag on host names of a domain (analyst or admin; host = one name, or several joined by
-        "," for a posture row of names sharing an address), then back to the domain page."""
+        """Add or remove one tag on host names of a domain (domain admin of that domain; host = one name, or several
+        joined by "," for a posture row of names sharing an address), then back to the domain page."""
         data = await form(request)
         dom = (data.get("domain") or "").strip().lower()
         names = [h.strip() for h in (data.get("host") or "").lower().split(",") if h.strip()][:50]
@@ -1150,8 +1302,11 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if not users.can(u["role"], "analyst"):
-                raise HTTPException(403, "Tagging hosts needs the analyst role.")
+            grants = request.state.scope
+            if not grants.sees(dom):   # outside the grants: as an unknown host
+                raise HTTPException(404, "No such host in that domain's latest scan")
+            if not grants.manages(dom):
+                raise HTTPException(403, f"Tagging hosts needs domain admin rights on {dom}.")
             if not tags.valid(tag):
                 raise HTTPException(422, "Tag: 1-30 lower-case letters, digits or -.")
             for host in names or [""]:
@@ -1189,14 +1344,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.post(base + "/security/profiles", include_in_schema=False)
     async def profiles_save(request: Request):
-        """Add or change a scan profile (analyst or admin)."""
+        """Add or change a scan profile (admins)."""
         data = await form(request)
         with conn() as c:
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if not users.can(u["role"], "analyst"):
-                return profiles_view(request, u, s, 403, "Changing scan profiles needs the analyst role.", data)
+            if u["role"] != "admin":
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs the admin role.", data)
             p, error = posture.check_profile((data.get("name") or "").strip().lower(),
                                              (data.get("ports") or "").strip(), data.get("intensity"),
                                              data.get("timing"), data.get("timeout"), (data.get("route") or "").strip(),
@@ -1213,11 +1368,205 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            if not users.can(u["role"], "analyst"):
-                return profiles_view(request, u, s, 403, "Changing scan profiles needs the analyst role.")
+            if u["role"] != "admin":
+                return profiles_view(request, u, s, 403, "Changing scan profiles needs the admin role.")
+            if uses := posture.profile_used_by(c, name):
+                return profiles_view(request, u, s, 409, f"{name} is used by schedule(s) {', '.join(uses)}: pick "
+                                     "another profile there first.")
             if not posture.delete_profile(c, name):
                 return profiles_view(request, u, s, 422, "The default profile cannot be deleted.")
         return back(f"{base}/security/profiles")
+
+    # --- discovery profiles (nmap stage of inventory scans; admins edit, anyone signed in reads) -------------------
+
+    disc_page = base + "/security/discovery-profiles"
+
+    def discovery_view(request, c, u, s, status: int = 200, error: str = "", form: dict | None = None,
+                       editing: bool = False):
+        raw_ok = admin.kv_get(c, posture.RAW_KEY) == "1" and users.get_scope(c)["raw_scans"]
+        rows = [{**p, "command": discovery.command_line(p, raw=raw_ok), "used_by": discovery.used_by(c, p["name"])}
+                for p in discovery.profiles(c)]
+        return shell(request, "discovery_profiles.html", u, s, status, profiles=rows, error=error, form=form or {},
+                     editing=editing, methods=discovery.METHODS, port_modes=discovery.PORT_MODES, raw_ok=raw_ok,
+                     probe_max=discovery.PROBE_MAX, ports_max=discovery.PORTS_MAX, default=discovery.get_default(c),
+                     route_names=proxy.names(proxy.get(c), proxy.tests(c)))
+
+    @app.get(disc_page, response_class=HTMLResponse, include_in_schema=False)
+    def discovery_page(request: Request):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            p = discovery.profile(c, request.query_params.get("edit", "")) or {}
+            form = {k: str(p[k]) for k in discovery.FIELDS} if p else {}
+            return discovery_view(request, c, u, s, form=form, editing=bool(p))
+
+    @app.post(disc_page, include_in_schema=False)
+    async def discovery_save(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            raw_ok = admin.kv_get(c, posture.RAW_KEY) == "1" and users.get_scope(c)["raw_scans"]
+            p, error = discovery.check(data, {r["id"] for r in proxy.get(c)["routes"]}, raw_ok)
+            if not p:
+                return discovery_view(request, c, u, s, 422, error, data)
+            discovery.save(c, p, u["name"])
+            access.audit(c, u["name"], "discovery-profile-save", p["name"], discovery.command_line(p, raw_ok))
+        return back(disc_page, "saved")
+
+    @app.post(disc_page + "/default", include_in_schema=False)
+    async def discovery_default(request: Request):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            name = (data.get("name") or "").strip()
+            try:
+                discovery.set_default(c, name)
+            except ValueError as exc:
+                return discovery_view(request, c, u, s, 422, str(exc))
+            access.audit(c, u["name"], "discovery-profile-default", name or "(none)", "")
+        return back(disc_page, "saved")
+
+    @app.post(disc_page + "/{name}/delete", include_in_schema=False)
+    async def discovery_delete(request: Request, name: str):
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            if u["role"] != "admin":
+                return discovery_view(request, c, u, s, 403, "Changing discovery profiles needs the admin role.")
+            if why := discovery.delete(c, name):
+                return discovery_view(request, c, u, s, 409 if "used by" in why else 422, why)
+            access.audit(c, u["name"], "discovery-profile-delete", name, "")
+        return back(disc_page, "saved")
+
+    @app.post(base + "/discovery/scan", include_in_schema=False)
+    async def discovery_scan(request: Request):
+        """"Scan with nmap" on a domain page: an inventory scan with a discovery stage (domain admin of the domain)."""
+        data = await form(request)
+        dom = (data.get("domain") or "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            grants = request.state.scope
+            if not db.domain(c, dom) or not grants.sees(dom):
+                raise HTTPException(404, f"{dom} has not been scanned")
+            if not grants.manages(dom):
+                raise HTTPException(403, f"Scanning needs domain admin rights on {dom}.")
+            if not users.domain_allowed(c, dom):
+                raise HTTPException(403, f"{dom} is outside the inventory scope (Settings).")
+            name = (data.get("profile") or "").strip()
+            if not discovery.profile(c, name):
+                raise HTTPException(422, "Pick an existing discovery profile.")
+            busy = c.execute("SELECT 1 FROM jobs WHERE domain = ? AND status IN ('queued', 'running')",
+                             (dom,)).fetchone()
+            job = jobs.enqueue(c, dom, client="admin", discovery=name)
+            access.audit(c, u["name"], "discovery-scan", dom, f"profile {name}, job {job['id']}"
+                         + (" (joined the open job)" if busy else ""))
+        return back(f"/d/{dom}", "discovery-open" if busy else "discovery-queued")
+
+    # --- schedules (domin.schedules): domain admins on their domains, viewers read, outside = 404 ------------------
+
+    def schedule_or_404(c, sid: int, grants: access.Scope) -> dict:
+        sc = schedules.get(c, sid)
+        if not sc or not grants.sees(sc["domain"]):
+            raise HTTPException(404, "No such schedule")
+        return sc
+
+    def schedule_view(request, c, u, s, dom: str, sid: int | None, sf: dict, status: int = 200, error: str = ""):
+        grants = request.state.scope
+        rows = [r for r in schedules.for_domain(c, dom) if r["id"] == sid] if sid else []
+        return shell(request, "schedule.html", u, s, status, error=error, sf=sf, sf_id=sid, sched_domain=dom,
+                     sched_rows=rows, can_manage=grants.manages(dom),
+                     sched_opts=schedule_opts(c, dom) if grants.manages(dom) else None)
+
+    def schedule_rights(request, c, dom: str) -> None:
+        grants = request.state.scope
+        if not db.domain(c, dom) or not grants.sees(dom):
+            raise HTTPException(404, f"{dom} has not been scanned")
+        if not grants.manages(dom):
+            raise HTTPException(403, f"Schedules need domain admin rights on {dom}.")
+
+    @app.get(base + "/schedules/{sid}", response_class=HTMLResponse, include_in_schema=False)
+    def schedule_page(request: Request, sid: PathId):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            return schedule_view(request, c, u, s, sc["domain"], sid, schedule_form(sc))
+
+    @app.post(base + "/schedules", include_in_schema=False)
+    async def schedule_create(request: Request):
+        data = await form(request, limit=300_000)   # one h:<name> box per chosen host
+        dom = (data.get("domain") or "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            schedule_rights(request, c, dom)
+            p, error = schedules.check(c, dom, data)
+            if not p:
+                return schedule_view(request, c, u, s, dom, None, refused_form(data), 422, error)
+            sid = schedules.create(c, dom, p, u["name"])
+            access.audit(c, u["name"], "schedule-create", dom, f"#{sid} {p['name']}")
+        return back(f"/d/{dom}#schedules", "schedule-saved")
+
+    @app.post(base + "/schedules/{sid}", include_in_schema=False)
+    async def schedule_update(request: Request, sid: PathId):
+        data = await form(request, limit=300_000)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            schedule_rights(request, c, sc["domain"])
+            p, error = schedules.check(c, sc["domain"], data)
+            if not p:
+                return schedule_view(request, c, u, s, sc["domain"], sid, refused_form(data), 422, error)
+            schedules.update(c, sid, p, u["name"])
+            access.audit(c, u["name"], "schedule-update", sc["domain"], f"#{sid} {p['name']}")
+        return back(f"/d/{sc['domain']}#schedules", "schedule-saved")
+
+    @app.post(base + "/schedules/{sid}/{action}", include_in_schema=False)
+    async def schedule_action(request: Request, sid: PathId, action: str):
+        if action not in ("delete", "run", "enabled"):
+            raise HTTPException(404, "Not Found")
+        data = await form(request)
+        with conn() as c:
+            s, u = current(request, c, data)
+            if not u:
+                return back()
+            sc = schedule_or_404(c, sid, request.state.scope)
+            dom = sc["domain"]
+            schedule_rights(request, c, dom)
+            if action == "delete":
+                schedules.delete(c, sid)
+                notice = "schedule-deleted"
+            elif action == "enabled":
+                on = data.get("on") == "1"
+                schedules.set_enabled(c, sid, on, u["name"])
+                notice = "schedule-on" if on else "schedule-off"
+            else:
+                run = schedules.run_now(c, sid)
+                if run is None:
+                    raise HTTPException(409, "The previous run of this schedule is still queued or running.")
+                notice = "schedule-run"
+            access.audit(c, u["name"], f"schedule-{action}", dom, f"#{sid} {sc['name']}"
+                         + (f": {run['result']}" if action == "run" else f" on={data.get('on')}" if action == "enabled"
+                            else ""))
+        where = data.get("from") or ""
+        return back(f"{base}#schedules" if where == "ops" else f"/d/{dom}#schedules", notice)
 
     # --- routes: named scan routes and the shared route settings (admin only; URL kept from "Scan settings") ------
 
@@ -1423,14 +1772,20 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
             routes = proxy.get(c)
-            if not users.can(u["role"], "analyst"):
-                return lookup_view(request, u, s, security_ctx(403, error="Running a scan needs the analyst role."))
+            grants = request.state.scope
+            if not grants.manages_any:
+                return lookup_view(request, u, s, security_ctx(
+                    403, error="Running a look-up needs domain admin rights on a domain."))
             if data.get("kind") == "host":
                 tgt = (data.get("target") or "").strip()
                 ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
                 if not fingerprint.valid_target(tgt):
                     return lookup_view(request, u, s, security_ctx(
                         422, form=data, error="Enter one host name or IPv4 address to fingerprint."))
+                if not grants.everything and (_is_ip(tgt) or not grants.manages(tgt.lower())):
+                    return lookup_view(request, u, s, security_ctx(
+                        403, form=data, error="Fingerprint a host name under a domain you are domain admin of "
+                                              "(addresses: admins only)."))
                 if not fingerprint.valid_ports(ports):
                     return lookup_view(request, u, s, security_ctx(
                         422, form=data, error="Ports: digits, commas and hyphens only (e.g. 22,80,443 or 1-1024)."))
@@ -1478,14 +1833,14 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         result["label"] = cve.target_label(target)
         return lookup_view(request, u, s, security_ctx(result=result, form=data))
 
-    # --- tuning and jobs (admin or analyst) ----------------------------------------------------------------------
+    # --- tuning and jobs (admins) ----------------------------------------------------------------------
 
     @app.post(base + "/tune", include_in_schema=False)
     async def admin_tune(request: Request):
         data = await form(request)
         with conn() as c:
             s, u = current(request, c, data)
-            if not u or not users.can(u["role"], "analyst"):
+            if not u or u["role"] != "admin":
                 return back()
             try:
                 admin.save_tuning(c, data)
@@ -1498,7 +1853,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         data = await form(request)
         with conn() as c:
             s, u = current(request, c, data)
-            if not u or not users.can(u["role"], "analyst"):
+            if not u or u["role"] != "admin":
                 return back()
             if action == "cancel":
                 return back(base, "cancelled" if jobs.cancel(c, job_id) else "gone")

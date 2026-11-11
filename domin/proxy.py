@@ -182,6 +182,8 @@ def in_use(conn: sqlite3.Connection, cfg: dict, rid: str) -> list[str]:
     got = [name for use, name in USES.items() if cfg[use] == rid]
     got += [f"scan profile {r[0]}" for r in conn.execute(
         "SELECT name FROM posture_profiles WHERE route = ? ORDER BY name", (rid,))]
+    got += [f"discovery profile {r[0]}" for r in conn.execute(
+        "SELECT name FROM discovery_profiles WHERE route = ? ORDER BY name", (rid,))]
     return got
 
 

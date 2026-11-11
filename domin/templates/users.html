@@ -3,8 +3,9 @@
 {% block page %}users{% endblock %}
 {% block content %}
 <section class="hero"><div><h1>Users</h1>
-  <p class="muted">Roles: viewer reads the signed-in reports, analyst also runs scans, admin also manages users and
-    settings.</p></div></section>
+  <p class="muted">Roles: admin sees every domain and manages users and settings; a power user sees only the domains
+    granted to it, per domain as viewer (read) or domain admin (also scans and tags). A grant covers the domains under
+    it.</p></div></section>
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 {% if link %}<p class="note ok">One-time set-password link (valid 24 h, opens once the recipient is on the
@@ -15,29 +16,35 @@
   <form method="post" action="{{ base }}/users/add" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="text" name="name" placeholder="User name" required aria-label="User name">
-    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r }}">{{ role_labels[r] }}</option>{% endfor %}</select>
     <button class="btn primary" type="submit">Create</button>
   </form>
+  <p class="muted">A new power user sees nothing until it has grants: its page opens after Create.</p>
 </section>
 
 <section class="card">
   <h2>All users <small>{{ users|length }}</small></h2>
   <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Role</th><th>2FA</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Role</th><th>Domains</th><th>2FA</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead>
     <tbody>{% for us in users %}<tr>
-      <td>{{ us.name }}</td>
+      <td><a href="{{ base }}/users/{{ us.id }}">{{ us.name }}</a></td>
       <td>
         <form method="post" action="{{ base }}/users/{{ us.id }}/role" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <select name="role" data-autosubmit aria-label="Role for {{ us.name }}"
                   {% if last_admin[us.id] %}disabled title="The last admin's role is locked"{% endif %}>
-            {% for r in roles %}<option value="{{ r }}"{% if r == us.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+            {% for r in roles %}<option value="{{ r }}"{% if r == us.role %} selected{% endif %}>{{ role_labels[r] }}</option>{% endfor %}
           </select></form>
       </td>
+      <td>{% if us.role == 'admin' %}<span class="muted">every domain</span>
+        {% else %}{% for g in grants.get(us.id, []) %}<span class="grant">{{ 'every domain' if g.domain == '*' else g.domain }}
+          <span class="pill {{ 'ok' if g.level == 'admin' }}">{{ levels[g.level] }}</span></span>{% if not loop.last %} {% endif %}
+        {% else %}<span class="muted">none</span>{% endfor %}{% endif %}</td>
       <td>{{ 'on' if us.has_totp else '–' }}</td>
       <td>{{ 'disabled' if us.disabled else 'active' }}</td>
       <td class="muted">{{ (us.last_login or '')[:16].replace('T', ' ') or 'never' }}</td>
       <td class="row-actions">
+        <a class="btn small" href="{{ base }}/users/{{ us.id }}">Edit</a>
         <form method="post" action="{{ base }}/users/{{ us.id }}/reset-password" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Set-pw link</button></form>
         {% if us.has_totp %}
@@ -57,5 +64,17 @@
       </td>
     </tr>{% endfor %}</tbody>
   </table></div>
+</section>
+
+<section class="card">
+  <h2>Changes <small>users, roles and grants · newest first</small></h2>
+  {% if audit %}<div class="table-wrap short"><table>
+    <thead><tr><th>When</th><th>By</th><th>Change</th><th>User</th><th>Detail</th></tr></thead>
+    <tbody>{% for a in audit %}<tr>
+      <td class="muted">{{ a.at[:16].replace('T', ' ') }}</td><td>{{ a.actor }}</td><td>{{ a.action }}</td>
+      <td>{{ a.target }}</td><td class="text">{{ a.detail }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">No changes recorded yet.</p>{% endif %}
 </section>
 {% endblock %}

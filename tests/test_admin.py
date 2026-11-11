@@ -148,8 +148,10 @@ def test_non_admin_cannot_drop_a_domain(settings):
         users.create(c, "ana", "analyst", PW)
         db.save_scan(c, "keep.se", "2025-06-01T00:00:00", "scan", [{"host": "w.keep.se", "ip": "192.0.2.5"}])
     with client(settings) as h:
-        csrf = sign_in(h, name="ana")
-        assert "Drop from inventory" not in h.get("/d/keep.se").text   # no control for an analyst
+        assert h.post(BASE + "/login", data={"name": "ana", "password": PW}, follow_redirects=False).status_code == 303
+        assert h.get(BASE, follow_redirects=False).status_code == 303   # the dashboard is admin-only
+        csrf = re.search(r'name="csrf" value="([^"]+)"', h.get(BASE + "/account").text).group(1)
+        assert "Drop from inventory" not in h.get("/d/keep.se").text   # no control for a power user
         assert h.post(BASE + "/domains/keep.se/delete", data={"csrf": csrf}).status_code == 404
     with db.connect(settings.db_path) as c:
         assert db.domain(c, "keep.se")   # untouched

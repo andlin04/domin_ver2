@@ -1,10 +1,10 @@
 """User accounts, roles and second-factor state for the signed-in area.
 
-Roles, least to most: viewer (reads the signed-in reports) < analyst (also runs scans) < admin (also manages users
-and settings). Passwords use the same scrypt format as the old single admin password (admin.hash_password), so a
-migrated password keeps working and is re-hashed at the next sign-in. Second factor: a TOTP secret plus one-time
-recovery codes (domin.totp); only hashes of the recovery codes are stored, and the last accepted TOTP step is kept
-so a code works only once."""
+Roles: power (a power user: only the domains of its grants, as viewer or domain admin per domain; domin.access) and
+admin (every domain, users, grants and settings; several allowed, never fewer than one enabled). Passwords use the
+same scrypt format as the old single admin password (admin.hash_password), so a migrated password keeps working
+and is re-hashed at the next sign-in. Second factor: a TOTP secret plus one-time recovery codes (domin.totp); only
+hashes of the recovery codes are stored, and the last accepted TOTP step is kept so a code works only once."""
 from __future__ import annotations
 
 import ipaddress
@@ -15,13 +15,10 @@ from datetime import datetime, timedelta
 
 from . import admin, db, tags, totp
 
-ROLES = ("viewer", "analyst", "admin")
+ROLES = ("power", "admin")
+ROLE_LABELS = {"power": "power user", "admin": "admin"}
+OLD_ROLES = {"viewer": "viewer", "analyst": "admin"}   # role before delegation -> grant level on every domain
 SETPW_HOURS = 24          # a set-password link is valid this long
-
-
-def can(role: str, need: str) -> bool:
-    """True when role is at least as privileged as need."""
-    return role in ROLES and need in ROLES and ROLES.index(role) >= ROLES.index(need)
 
 
 def _row(r: sqlite3.Row | None) -> dict | None:
@@ -52,14 +49,20 @@ def count(conn: sqlite3.Connection) -> int:
 
 
 def create(conn: sqlite3.Connection, name: str, role: str, password: str = "") -> int:
+    """A new user. The old role names still work as shorthands, as the migration maps them: viewer = power user with
+    a viewer grant on every domain, analyst = power user with a domain admin grant on every domain."""
     name = name.strip()
-    if not name or len(name) > 64 or role not in ROLES:
+    if not name or len(name) > 64 or role not in (*ROLES, *OLD_ROLES):
         raise ValueError("name (1..64 chars) and a valid role are required")
     if by_name(conn, name):
         raise ValueError(f"a user named {name} already exists")
     pw = admin.hash_password(password) if password else ""
-    return conn.execute("INSERT INTO users (name, password_hash, role, created) VALUES (?, ?, ?, ?)",
-                        (name, pw, role, db.now())).lastrowid
+    uid = conn.execute("INSERT INTO users (name, password_hash, role, created) VALUES (?, ?, ?, ?)",
+                       (name, pw, "power" if role in OLD_ROLES else role, db.now())).lastrowid
+    if role in OLD_ROLES:
+        conn.execute("INSERT INTO grants (user_id, domain, level, added, added_by) VALUES (?, '*', ?, ?, '')",
+                     (uid, OLD_ROLES[role], db.now()))
+    return uid
 
 
 def set_password(conn: sqlite3.Connection, user_id: int, password: str) -> None:
@@ -81,6 +84,7 @@ def set_disabled(conn: sqlite3.Connection, user_id: int, disabled: bool) -> None
 
 
 def delete(conn: sqlite3.Connection, user_id: int) -> None:
+    conn.execute("DELETE FROM grants WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     admin.end_user_sessions(conn, user_id)
 
@@ -208,6 +212,28 @@ def migrate_legacy_admin(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT INTO users (name, password_hash, role, created) VALUES ('admin', ?, 'admin', ?)",
                  (stored, db.now()))
     conn.execute("DELETE FROM kv WHERE key = 'admin_password'")
+
+
+def migrate_roles(conn: sqlite3.Connection) -> int:
+    """Delegation (docs/delegation.md): a viewer becomes a power user with a viewer grant on every domain, an analyst
+    one with a domain admin grant on every domain; the require-2FA setting of either old role carries over to power.
+    Touches only rows still on an old role, so it runs once. Returns how many users changed."""
+    old = conn.execute(f"SELECT id, name, role FROM users WHERE role IN ({','.join('?' * len(OLD_ROLES))})",
+                       tuple(OLD_ROLES)).fetchall()
+    for r in old:
+        conn.execute("INSERT OR IGNORE INTO grants (user_id, domain, level, added, added_by) VALUES (?, '*', ?, ?, "
+                     "'migration')", (r["id"], OLD_ROLES[r["role"]], db.now()))
+        conn.execute("UPDATE users SET role = 'power' WHERE id = ?", (r["id"],))
+        conn.execute("INSERT INTO audit (at, actor, action, target, detail) VALUES (?, 'migration', 'role', ?, ?)",
+                     (db.now(), r["name"], f"{r['role']} -> power + * {OLD_ROLES[r['role']]}"))
+    raw = admin.kv_get(conn, "scope")
+    if raw:
+        saved = json.loads(raw)
+        req = saved.get("require_2fa") or {}
+        if "power" not in req and any(k in req for k in OLD_ROLES):
+            req = {"power": any(bool(req.get(k)) for k in OLD_ROLES), "admin": bool(req.get("admin"))}
+            save_scope(conn, {**saved, "require_2fa": req})
+    return len(old)
 
 
 # --- scope and policy settings -----------------------------------------------------------------------------------
@@ -392,6 +418,11 @@ def posture_ok(scope: dict, ip: str, country: str) -> bool:
     """True when the posture engine may probe this inventoried address: IP rules and geolocation rules."""
     return (_ip_ok([ip], scope["ip_allow"], scope["ip_deny"])
             and _country_ok(country, scope["countries_allow"], scope["countries_deny"]))
+
+
+def posture_ip_ok(scope: dict, ip: str) -> bool:
+    """The posture IP allow/deny rules only (an address without a country: internal networks)."""
+    return _ip_ok([ip], scope["ip_allow"], scope["ip_deny"])
 
 
 def posture_ip_in_scope(conn: sqlite3.Connection, ip: str) -> bool:

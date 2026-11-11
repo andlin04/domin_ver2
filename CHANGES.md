@@ -2,6 +2,45 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Scheduled rescans and nmap discovery profiles
+
+- Discovery profiles (Settings · Discovery profiles, admins edit): an optional nmap stage of an inventory scan with
+  an allowlisted host discovery method (-sn default probes, -Pn, -PS/-PA/-PU port lists, -PE/-PP), port check
+  (none / top N / list), -T0..5, --max-rate, --max-retries, --host-timeout, -n/-R, route; the page shows each
+  profile's command line. Public domains: only the scan's own addresses; internal domains: Settings · Internal
+  networks (reverse names under the domain become records). Results per scan on the domain page.
+- "Scan with nmap" on a domain page (domain admins) with a profile; a default profile preselects it. Refreshes,
+  retries and the public scan API never get a discovery stage.
+- Schedules per domain: inventory (with or without a discovery profile) and/or posture (profile; all hosts, chosen
+  hosts from the latest inventory, or a tag); daily, weekly, monthly (29-31: last day of shorter months), every N
+  hours or days, server local time. A worker thread checks every minute; a missed run runs once, a run whose
+  previous one is open is skipped and logged, chosen hosts gone from the inventory are skipped and shown. Run now,
+  enable/disable, edit, delete; domain admins on their domains, viewers read, others 404; all on the admin
+  dashboard. Changes go to the audit table.
+- Migration on start (idempotent): new tables `discovery_profiles` (with a `default` row), `discovery_results`,
+  `schedules`; new columns `jobs.discovery`, `jobs.schedule_id`, `scans.discovery`, `scans.discovery_params`,
+  `posture_scans.schedule_id`.
+- Rollback: `UPDATE schedules SET enabled = 0` stops every schedule; then `git revert` and re-run install.sh (older
+  code ignores the new tables and columns), or restore the pre-update database backup.
+
+## 2026-11-11: Delegation: power users with per-domain grants, several admins
+
+- Roles are now admin and power user (docs/delegation.md). Admins: every domain, users, grants, settings,
+  operations, tuning, scan profiles, address fingerprints; several allowed, the last enabled one cannot be
+  demoted, disabled or deleted (web and CLI).
+- A power user sees only its granted domains, per domain as viewer (inventory, posture, CVEs, changes, reports) or
+  domain admin (also posture scans, host tags, host-name fingerprints and CVE look-ups). A grant covers the domains
+  under it; `*` = every domain.
+- One scope filter in every list, search, CSV, drill data, chart, count, Changes panel, posture page and API; an
+  out-of-scope domain, scan, job or host answers 404 like an unknown one. Visitors without a session still see the
+  public inventory.
+- Users page: grants per user, an edit page per user (`/admin/users/<id>`), and an audit of user, role and grant
+  changes (new `audit` table). CLI: `user-grant <name> <domain|*> <viewer|admin|none>`.
+- Migration on start (idempotent): viewer -> power user + `*` viewer, analyst -> power user + `*` domain admin;
+  require-2FA for either old role carries over to power users. New tables `grants`, `audit`.
+- Rollback: restore the pre-update database backup, or run `UPDATE users SET role = 'viewer' WHERE role = 'power'`
+  first (older code lets every signed-in user read all posture), then `git revert` and re-run install.sh.
+
 ## 2026-11-11: Sandboxed root helpers, on-prem HSTS and firewall, dependency audit
 
 - The Tor switch, Mullvad and public import services run sandboxed (`systemd-analyze security` 3.0 / 4.3 / 3.4,

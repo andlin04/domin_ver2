@@ -9,7 +9,7 @@
 {% if scan_route %}<p class="muted small-print scan-route">Scans go through {{ scan_route }}</p>{% endif %}
 {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
 
-{% if user.role in ('admin', 'analyst') %}
+{% if access.manages_any %}
 <section class="card">
   <h2>Look up CVEs</h2>
   <form method="post" action="{{ base }}/security/scan" class="cve-form">
@@ -57,8 +57,8 @@
   </form>
 </section>
 {% else %}
-<section class="card"><p class="muted">Signed in as <b>{{ user.role }}</b>. Running a CVE look-up needs the
-  analyst role.</p></section>
+<section class="card"><p class="muted">Running a CVE look-up needs domain admin rights on a domain
+  (an admin grants them under Users).</p></section>
 {% endif %}
 
 {% if result is not none %}

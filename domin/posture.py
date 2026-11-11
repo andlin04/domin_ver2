@@ -97,8 +97,14 @@ def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("DELETE FROM posture_profiles WHERE name = ?", (name,)).rowcount > 0
 
 
+def profile_used_by(conn: sqlite3.Connection, name: str) -> list[str]:
+    """Schedules ("domain: name") whose posture part uses a profile."""
+    return [f"{r['domain']}: {r['name']}" for r in conn.execute(
+        "SELECT domain, name FROM schedules WHERE posture = 1 AND posture_profile = ? ORDER BY domain, name", (name,))]
+
+
 def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict | str, requested_by: str,
-            batch: list[int] | None = None) -> int:
+            batch: list[int] | None = None, schedule_id: int | None = None) -> int:
     """Queue one posture scan per address with the profile's parameters (prof: name, ports, intensity, timing,
     timeout, route; a bare port list means the default knobs and route); an address already queued or running for
     the domain is left alone. Returns how many were queued. batch, when given, gets the row id per address (new or
@@ -114,28 +120,37 @@ def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict
                 batch.append(row["id"])
             continue
         cur = conn.execute("""INSERT INTO posture_scans (domain, ip, hosts, country, ports, status, requested_by,
-                              created, profile, intensity, timing, timeout, route) VALUES (?, ?, ?, ?, ?, 'queued',
-                              ?, ?, ?, ?, ?, ?, ?)""",
+                              created, profile, intensity, timing, timeout, route, schedule_id) VALUES (?, ?, ?, ?, ?,
+                              'queued', ?, ?, ?, ?, ?, ?, ?, ?)""",
                            (domain, t["ip"], ",".join(t["hosts"]), t["country"], prof["ports"], requested_by,
                             db.now(), prof["name"], prof["intensity"], prof["timing"], prof["timeout"],
-                            prof.get("route") or ""))
+                            prof.get("route") or "", schedule_id))
         if batch is not None:
             batch.append(cur.lastrowid)
         n += 1
     return n
 
 
-def pending_ids(conn: sqlite3.Connection, domain: str = "") -> list[int]:
+def _where(domain: str, scope, lead: str = "AND") -> tuple[str, list]:
+    """WHERE text for posture_scans rows of one domain (or all) inside the delegation scope (domin.access)."""
+    f, fa = db.in_scope(scope, "domain")
+    if domain:
+        return f"{lead} domain = ? AND {f}", [domain, *fa]
+    return f"{lead} {f}", fa
+
+
+def pending_ids(conn: sqlite3.Connection, domain: str = "", scope=None) -> list[int]:
     """Ids of the queued and running rows (of one domain, or all)."""
-    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    where, args = _where(domain, scope)
     return [r[0] for r in conn.execute(f"SELECT id FROM posture_scans WHERE status IN ('queued', 'running') {where} "
                                        "ORDER BY id", args)]
 
 
-def recent_ids(conn: sqlite3.Connection, domain: str = "", hours: int = 24, limit: int = 5000) -> list[int]:
+def recent_ids(conn: sqlite3.Connection, domain: str = "", hours: int = 24, limit: int = 5000,
+               scope=None) -> list[int]:
     """Ids for the Scans tab's activity board: queued and running rows plus those finished in the last `hours`."""
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    where, args = _where(domain, scope)
     return [r[0] for r in conn.execute(
         f"""SELECT id FROM posture_scans WHERE (status IN ('queued', 'running') OR finished >= ?) {where}
             ORDER BY id DESC LIMIT ?""", (since, *args, limit))][::-1]
@@ -146,13 +161,15 @@ def _worst(services: list[dict]) -> str:
     return next((x for x in SEVERITIES if x in sevs), "none")
 
 
-def progress(conn: sqlite3.Connection, ids: list[int]) -> dict:
+def progress(conn: sqlite3.Connection, ids: list[int], scope=None) -> dict:
     """Progress of a set of posture_scans rows (one request's batch) for the progress dialog: counts, the addresses
-    running now, seconds since the first was queued, and one item per row with its result."""
+    running now, seconds since the first was queued, and one item per row with its result. Rows outside the scope
+    are left out."""
+    where, args = _where("", scope)
     rows = [dict(r) for r in conn.execute(
         f"""SELECT id, domain, ip, hosts, status, created, started, finished, services, open_ports, cves, high, error,
-                   chunks, chunks_done FROM posture_scans WHERE id IN ({",".join("?" * len(ids))}) ORDER BY id""",
-        ids)] if ids else []
+                   chunks, chunks_done FROM posture_scans WHERE id IN ({",".join("?" * len(ids))}) {where}
+            ORDER BY id""", [*ids, *args])] if ids else []
     count = {s: sum(1 for r in rows if r["status"] == s) for s in ("queued", "running", "done", "failed")}
     finished = count["queued"] + count["running"] == 0
     elapsed = 0
@@ -302,10 +319,10 @@ def requeue_running(conn: sqlite3.Connection) -> int:
                         "WHERE status = 'running'", (REQUEUED,)).rowcount
 
 
-def current(conn: sqlite3.Connection, domain: str = "", limit: int = 500) -> list[dict]:
+def current(conn: sqlite3.Connection, domain: str = "", limit: int = 500, scope=None) -> list[dict]:
     """The current posture per (domain, address): the latest finished scan, with `pending` set when a newer scan is
     queued or running. An address with nothing finished yet shows its pending row."""
-    where, args = ("WHERE domain = ?", [domain]) if domain else ("", [])
+    where, args = _where(domain, scope, "WHERE")
     rows = conn.execute(f"""
         SELECT p.*, (SELECT q.status FROM posture_scans q WHERE q.domain = p.domain AND q.ip = p.ip
                      AND q.status IN ('queued', 'running') ORDER BY q.id DESC LIMIT 1) AS pending
@@ -487,11 +504,11 @@ def domain_summary(rows: list[dict]) -> list[dict]:
 TREND_DAYS = 90
 
 
-def trend(conn: sqlite3.Connection, domain: str = "", host: str = "") -> list[dict]:
+def trend(conn: sqlite3.Connection, domain: str = "", host: str = "", scope=None) -> list[dict]:
     """Exposure over time: per day with a finished scan, across the addresses' latest successful scans as of that
     day (the last TREND_DAYS such days): distinct CVEs per severity, open ports and addresses scanned. One day says
     nothing: empty then."""
-    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    where, args = _where(domain, scope)
     state: dict[tuple[str, str], tuple[dict[str, str], int]] = {}   # (domain, ip) -> ({cve: severity}, open ports)
     days: dict[str, dict] = {}
     for r in conn.execute(f"""SELECT domain, ip, hosts, finished, services FROM posture_scans
@@ -522,12 +539,13 @@ def port_set(ports: str) -> set[int]:
     return out
 
 
-def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: datetime | None = None) -> dict:
+def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: datetime | None = None,
+            scope=None) -> dict:
     """What changed between consecutive successful scans of each address: ports opened or closed (only ports both
     scans covered, so a different profile is not a change), service versions, CVEs new or gone. Returns
     {kpi: counts over the last CHANGE_DAYS days, rows: newest first (at most CHANGE_ROWS), compared: addresses
     with two or more scans}."""
-    where, args = ("AND domain = ?", (domain,)) if domain else ("", ())
+    where, args = _where(domain, scope)
     since = ((now or datetime.now()) - timedelta(days=CHANGE_DAYS)).isoformat(timespec="seconds")
     last: dict[tuple[str, str], dict] = {}
     rows: list[dict] = []
@@ -583,7 +601,7 @@ def changes(conn: sqlite3.Connection, domain: str = "", host: str = "", now: dat
 SEARCH_WORDS = 6
 
 
-def search_domains(conn: sqlite3.Connection, query: str) -> list[str]:
+def search_domains(conn: sqlite3.Connection, query: str, scope=None) -> list[str]:
     """Domains (with a finished inventory scan) whose data holds every word of query, any case: the domain name, the
     latest inventory scan's records (host, address, ASN also as "AS<n>", prefix, network name, description,
     country), the host names' tags, and the latest posture result per address (services json: service, product,
@@ -606,13 +624,14 @@ def search_domains(conn: sqlite3.Connection, query: str) -> list[str]:
         found = hit if found is None else found & hit
         if not found:
             break
-    return sorted(found or ())
+    return [d for d in sorted(found or ()) if scope is None or scope.sees(d)]
 
 
-def domains(conn: sqlite3.Connection) -> list[str]:
-    """Domains with a finished inventory scan, for the target pick-list."""
+def domains(conn: sqlite3.Connection, scope=None) -> list[str]:
+    """Domains with a finished inventory scan (in the delegation scope), for the target pick-list."""
+    f, fa = db.in_scope(scope, "d.name")
     return [r[0] for r in conn.execute(f"SELECT d.name FROM domains d JOIN ({db.LATEST}) s ON s.domain_id = d.id "
-                                       "ORDER BY d.name")]
+                                       f"WHERE {f} ORDER BY d.name", fa)]
 
 
 def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
@@ -651,14 +670,14 @@ def host_list(conn: sqlite3.Connection, domain: str) -> list[dict]:
     return list(names.values())
 
 
-def narrow(conn: sqlite3.Connection, rows: list[dict], domain: str, query: str) -> list[dict]:
+def narrow(conn: sqlite3.Connection, rows: list[dict], domain: str, query: str, scope=None) -> list[dict]:
     """The report rows the posture page's Filter box leaves (report() rows): all domains = the rows of the domains
     search_domains finds; one domain = the addresses of its host names whose Filter text holds every word."""
     words = query.lower().split()
     if not words:
         return rows
     if not domain:
-        keep = set(search_domains(conn, query))
+        keep = set(search_domains(conn, query, scope))
         return [r for r in rows if r["domain"] in keep]
     ips = {ip for h in with_results(host_list(conn, domain), rows) if all(w in h["text"] for w in words)
            for ip in h["ips"]}

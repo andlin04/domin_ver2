@@ -16,7 +16,7 @@
       title="Hides {{ quiet }} scanned address(es) with no open port and no finding; press again to show them">Open ports or findings <small>{{ host_list|length - quiet }}</small></button>
   </div>{% endif %}
   <div class="table-tools">
-    {% if user.role in ('admin', 'analyst') %}
+    {% if access.manages(posture_domain) %}
     <button class="btn primary" type="button" data-picked-open="#scan-picked" disabled>Scan now</button>{% endif %}
     <button class="btn" type="button" data-picked-open="#report-picked" disabled>Report</button>
     <span class="muted small-print" data-picked-count>0 ticked</span>
@@ -31,7 +31,7 @@
       <th data-sort="text">Host name</th><th data-sort="ip">Addr</th><th data-sort="num">Severity</th>
       <th data-sort="num">CVEs</th><th data-sort="num">Fixable</th><th data-sort="num">Open ports</th>
       <th data-sort="text">Last scan</th><th data-sort="text">Tags</th></tr></thead>
-    {% set tagger = user.role in ('admin', 'analyst') %}
+    {% set tagger = access.manages(posture_domain) %}
     <tbody>{% for h in host_list %}<tr data-text="{{ h.text }}" data-quiet="{{ 'yes' if h.quiet else 'no' }}">
       <td class="tick"><input type="checkbox" data-pick value="{{ h.pick }}" aria-label="Tick {{ h.host }}"></td>
       <td>{% if h.anchors %}<a href="#{{ h.anchors[0] }}" class="host-toggle" data-host-details="{{ h.anchors|join(' ') }}"{% if posture_host %} data-auto-open{% endif %}
@@ -102,7 +102,7 @@
       </tr>{% endfor %}</tbody>
     </table></div>
   </div>{% endif %}
-  {% if user.role in ('admin', 'analyst') %}
+  {% if access.manages(posture_domain) %}
   <dialog class="confirm" id="scan-picked">
     <form method="post" action="{{ base }}/security/posture" data-posture-run>
       <input type="hidden" name="csrf" value="{{ csrf }}">

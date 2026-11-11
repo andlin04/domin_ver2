@@ -62,7 +62,7 @@ def test_roles_gate_the_pages(settings):
     mkuser(settings, "viewer", "viewer")
     expect = {
         "boss": {BASE: 200, BASE + "/users": 200, BASE + "/settings": 200, BASE + "/security": 200},
-        "ana": {BASE: 200, BASE + "/users": 404, BASE + "/settings": 404, BASE + "/security": 200},
+        "ana": {BASE: 303, BASE + "/users": 404, BASE + "/settings": 404, BASE + "/security": 200},
         "viewer": {BASE: 303, BASE + "/users": 404, BASE + "/settings": 404, BASE + "/security": 200},
     }
     for name, paths in expect.items():
@@ -79,7 +79,7 @@ def test_last_admin_cannot_lose_access(settings):
         token = csrf_of(h, BASE + "/users")
         assert h.post(f"{BASE}/users/{uid}/disable", data={"csrf": token, "disabled": "on"}).status_code == 409
         assert h.post(f"{BASE}/users/{uid}/delete", data={"csrf": token}).status_code == 409
-        assert h.post(f"{BASE}/users/{uid}/role", data={"csrf": token, "role": "viewer"}).status_code == 409
+        assert h.post(f"{BASE}/users/{uid}/role", data={"csrf": token, "role": "power"}).status_code == 409
 
 
 # --- user management ---------------------------------------------------------------------------------------------

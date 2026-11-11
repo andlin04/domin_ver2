@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_fingerprint import PW, SCAN_XML, transport
 
-from domin import admin, cve, db, fingerprint, jobs, posture, users
+from domin import access, admin, cve, db, fingerprint, jobs, posture, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
@@ -28,6 +28,7 @@ def settings(tmp_path):
                 cve_db_path=str(tmp_path / "cve.json"))
     db.init(s.db_path)
     with db.connect(s.db_path) as c:
+        users.create(c, "adm", "admin", PW)
         users.create(c, "ana", "analyst", PW)
         users.create(c, "vee", "viewer", PW)
         db.save_scan(c, DOM, db.now(), "scan", RECORDS)
@@ -423,7 +424,7 @@ def test_viewer_cannot_start_posture(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
-        assert r.status_code == 403 and "analyst role" in r.text
+        assert r.status_code == 403 and "domain admin rights" in r.text
         assert "data-scan-open" not in h.get(f"/admin/security/scans?domain={DOM}").text
 
 
@@ -521,9 +522,13 @@ def test_check_profile_rejects_bad_input():
     assert not posture.check_profile("web", "80", 2, 5, 60)[0]
 
 
-def test_analyst_makes_a_profile_and_scans_with_it(settings, nmap):
+def test_admin_makes_a_profile_and_a_domain_admin_scans_with_it(settings, nmap):
     with app_client(settings) as h:
-        csrf = sign_in(h, "ana")
+        csrf = sign_in(h, "ana")   # a power user may use profiles but not change them
+        assert h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443",
+                      "intensity": "5", "timing": "4", "timeout": "60"}).status_code == 403
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
         r = h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443",
                    "intensity": "5", "timing": "4", "timeout": "60", "note": "web only"}, follow_redirects=False)
         assert r.status_code == 303
@@ -542,7 +547,7 @@ def test_analyst_makes_a_profile_and_scans_with_it(settings, nmap):
 
 def test_edit_loads_a_profile_into_the_form_and_saving_changes_it(settings):
     with app_client(settings) as h:
-        csrf = sign_in(h, "ana")
+        csrf = sign_in(h, "adm")
         h.post("/admin/security/profiles", data={"csrf": csrf, "name": "web", "ports": "80,443", "intensity": "5",
                                                  "timing": "4", "timeout": "60", "note": "web only"})
         page = h.get("/admin/security/profiles").text
@@ -592,7 +597,8 @@ def test_analyst_tags_hosts_and_groups_by_tag(settings, nmap):
                    follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].startswith(f"/d/{DOM}")
         page = h.get(f"/d/{DOM}?tag=storage").text
-        assert "Group by tag" in page and "nas.corp.example" in page and "cdn.corp.example" not in page
+        records = page.split('id="records"')[1]   # the schedule form's host pick list holds every host
+        assert "Group by tag" in page and "nas.corp.example" in records and "cdn.corp.example" not in records
         h.post("/admin/tags", data={"csrf": csrf, "domain": DOM, "host": "nas.corp.example", "tag": "storage",
                                     "action": "remove"})
         assert "Group by tag" not in h.get(f"/d/{DOM}").text
@@ -699,9 +705,10 @@ def test_report_renders_collapsed_host_headlines_with_nested_cves():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(Path(posture.__file__).parent / "templates"),
                              autoescape=True)
     html = env.get_template("_posture_report.html").render(rep=posture.report(report_rows()), can_run=True,
-                                                           renew_base="/admin", csrf="t", show_domain=False, tab="overview") + env.get_template(
+                                                           renew_base="/admin", csrf="t", show_domain=False, tab="overview",
+                                                           access=access.FULL) + env.get_template(
         "_posture_report.html").render(rep=posture.report(report_rows()), can_run=True, renew_base="/admin",
-                                       csrf="t", show_domain=False, tab="analysis")
+                                       csrf="t", show_domain=False, tab="analysis", access=access.FULL)
     heads = re.findall(r'<details class="svc posture-detail"[^>]*>', html)
     assert len(heads) == 2 and not [d for d in re.findall(r"<details[^>]*>", html) if " open" in d]
     assert html.index('id="pa-172-20-4-50"') < html.index('id="pa-172-20-4-60"')  # worst host first
@@ -755,11 +762,11 @@ def test_posture_page_puts_summary_and_vulnerabilities_first(settings, nmap):
         assert "CVE look-up" not in page and 'aria-label="Settings sections"' not in page   # moved under Settings
         look = h.get("/admin/security/lookup").text
         assert "Product (CPE)" in look and 'aria-label="Settings sections"' in look
-        # an analyst's Settings opens Scan profiles; General and Routes stay admin-only
+        # a power user's Settings opens Scan profiles; General, Routes and Operations stay admin-only
         assert '<a href="/admin/security/profiles" class="active" aria-current="page">Settings</a>' in look
-        # Operations and Settings sit in the nav's Admin menu, which is marked active on their pages
+        # Settings sits in the nav's Admin menu, which is marked active on its pages
         menu = look.split("data-nav-menu>")[1].split("</details>")[0]
-        assert '<summary class="active">Admin</summary>' in menu and ">Operations</a>" in menu and ">Settings</a>" in menu
+        assert '<summary class="active">Admin</summary>' in menu and ">Operations</a>" not in menu and ">Settings</a>" in menu
         assert '<summary >Admin</summary>' in page and page.index('href="/admin/security"') < page.index("data-nav-menu")
         assert ">General</a>" not in look and ">Routes</a>" not in look
 
@@ -783,8 +790,6 @@ def test_scans_tab_board_lists_pending_and_recently_finished_scans(settings, nma
 
 
 def test_sign_in_can_be_turned_off_only_where_the_environment_allows_it(settings):
-    with db.connect(settings.db_path) as c:
-        users.create(c, "adm", "admin", PW)
     with app_client(settings) as h:   # default: no switch, and the endpoint refuses
         csrf = sign_in(h, "adm")
         assert "Turn sign-in off" not in h.get("/admin/settings").text

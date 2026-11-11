@@ -119,7 +119,7 @@
     <p class="muted">Users in a ticked role must set up a second factor.</p>
     {% for r in roles %}
     <label class="tick"><input type="checkbox" name="require_2fa_{{ r }}"
-      {% if scope.require_2fa[r] %}checked{% endif %}> {{ r }}</label>
+      {% if scope.require_2fa[r] %}checked{% endif %}> {{ role_labels.get(r, r) }}</label>
     {% endfor %}
   </section>
 

@@ -19,6 +19,7 @@ log = logging.getLogger("domin.worker")
 
 
 REFRESH = "refresh"
+SCHEDULE = "schedule"   # queued by a schedule (domin.schedules): the refresh queue, never a visitor's
 
 
 class Cancelled(Exception):
@@ -30,7 +31,7 @@ class TimedOut(Exception):
 
 
 def _queue(refresh: bool) -> str:
-    return "client = 'refresh'" if refresh else "client != 'refresh'"
+    return "client IN ('refresh', 'schedule')" if refresh else "client NOT IN ('refresh', 'schedule')"
 
 
 def _public(row: sqlite3.Row) -> dict:
@@ -40,17 +41,20 @@ def _public(row: sqlite3.Row) -> dict:
     return job
 
 
-def enqueue(conn: sqlite3.Connection, domain: str, client: str = "") -> dict:
-    """One open job per domain: asking again returns the job already queued or running. A visitor asking for a
-    domain with a queued refresh takes that job over, so it moves to the visitors' queue."""
+def enqueue(conn: sqlite3.Connection, domain: str, client: str = "", discovery: str = "",
+            schedule_id: int | None = None) -> dict:
+    """One open job per domain: asking again returns the job already queued or running (with its own parameters).
+    A visitor asking for a domain with a queued refresh takes that job over, so it moves to the visitors' queue.
+    discovery: a discovery profile for the nmap stage ('' = DNS only); schedule_id: the schedule queueing it."""
     row = conn.execute("SELECT * FROM jobs WHERE domain = ? AND status IN ('queued', 'running')", (domain,)).fetchone()
-    if row and row["status"] == "queued" and row["client"] == REFRESH and client not in ("", REFRESH):
+    if row and row["status"] == "queued" and row["client"] == REFRESH and client not in ("", REFRESH, SCHEDULE):
         conn.execute("UPDATE jobs SET client = ?, created = ? WHERE id = ?", (client, db.now(), row["id"]))
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
     if row:
         return _public(row)
-    jid = conn.execute("INSERT INTO jobs (domain, status, created, client) VALUES (?, 'queued', ?, ?)",
-                       (domain, db.now(), client)).lastrowid
+    jid = conn.execute("INSERT INTO jobs (domain, status, created, client, discovery, schedule_id) "
+                       "VALUES (?, 'queued', ?, ?, ?, ?)",
+                       (domain, db.now(), client, discovery, schedule_id)).lastrowid
     return _public(conn.execute("SELECT * FROM jobs WHERE id = ?", (jid,)).fetchone())
 
 
@@ -62,7 +66,7 @@ def queued(conn: sqlite3.Connection) -> int:
 def forget_clients(conn: sqlite3.Connection, hours: int = 24) -> int:
     """Privacy: requester addresses are kept only as long as the rate limit needs them."""
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    return conn.execute("UPDATE jobs SET client = '' WHERE client NOT IN ('', 'refresh') AND created < ?",
+    return conn.execute("UPDATE jobs SET client = '' WHERE client NOT IN ('', 'refresh', 'schedule') AND created < ?",
                         (since,)).rowcount
 
 
@@ -90,12 +94,14 @@ def get(conn: sqlite3.Connection, job_id: int) -> dict | None:
     job = _public(row)
     if job["status"] == "queued":
         job["ahead"] = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND id < ? AND "
-                                    f"{_queue(row['client'] == REFRESH)}", (job_id,)).fetchone()[0]
+                                    f"{_queue(row['client'] in (REFRESH, SCHEDULE))}", (job_id,)).fetchone()[0]
     return job
 
 
-def recent(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    return [_public(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))]
+def recent(conn: sqlite3.Connection, limit: int = 10, scope=None) -> list[dict]:
+    f, fa = db.in_scope(scope, "domain")
+    return [_public(r) for r in conn.execute(f"SELECT * FROM jobs WHERE {f} ORDER BY id DESC LIMIT ?",
+                                             (*fa, limit))]
 
 
 def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) -> int:
@@ -106,7 +112,7 @@ def scans_by_client(conn: sqlite3.Connection, client: str, minutes: int = 60) ->
 def visitor_scans(conn: sqlite3.Connection, hours: int = 24) -> int:
     """Visitors' jobs in the last hours, from all clients together (not refreshes, admin retries or the CLI)."""
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    return conn.execute("SELECT COUNT(*) FROM jobs WHERE client NOT IN ('', 'refresh', 'admin', 'cli') "
+    return conn.execute("SELECT COUNT(*) FROM jobs WHERE client NOT IN ('', 'refresh', 'schedule', 'admin', 'cli') "
                         "AND created >= ?", (since,)).fetchone()[0]
 
 
@@ -136,7 +142,9 @@ def run_job(settings: Settings, job: dict) -> None:
         started = db.now()
         try:
             notes: list[str] = []
-            records = scanner.run(conn, job["domain"], settings, progress, notes=notes)
+            stage: dict = {}
+            records = scanner.run(conn, job["domain"], settings, progress, notes=notes,
+                                  nmap=job.get("discovery") or "", stage=stage)
             progress("saving")
         except Cancelled:
             log.info("scan %s cancelled", job["domain"])
@@ -161,6 +169,8 @@ def run_job(settings: Settings, job: dict) -> None:
         # a done scan's error column holds its notes: what made the result incomplete
         sid = db.save_scan(conn, job["domain"], started, "scan", records, finished=db.now(),
                            error="; ".join(notes) or None)
+        if job.get("discovery"):
+            db.save_discovery(conn, sid, job["discovery"], stage.get("params") or "", stage.get("found") or [])
         conn.execute("UPDATE jobs SET status = 'done', finished = ?, scan_id = ?, progress = '' WHERE id = ?",
                      (db.now(), sid, job["id"]))
         log.info("scan %s done: %d records", job["domain"], len(records))
@@ -282,6 +292,25 @@ def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
     return res
 
 
+SCHEDULE_TICK = 60   # seconds between passes of the schedule runner
+
+
+def schedule_tick(settings: Settings, now: float | None = None) -> list[str]:
+    """One pass of the schedule runner (domin.schedules.tick) on its own connection."""
+    from . import schedules  # schedules imports this module
+    with db.connect(settings.db_path) as conn:
+        return schedules.tick(conn, now)
+
+
+def _schedule_loop(settings: Settings) -> None:
+    while True:
+        try:
+            schedule_tick(settings)
+        except Exception:
+            log.exception("schedule runner error")
+        time.sleep(SCHEDULE_TICK)
+
+
 def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
     """once: run housekeeping, then every queued job one at a time (visitors' first), and return."""
     db.init(settings.db_path)
@@ -292,6 +321,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
             log.info("restart: %d posture scans requeued", n)
     housekeeping(settings)
     if once:
+        schedule_tick(settings)
         for refresh in (False, True):
             while (got := _next(settings, refresh))[1]:
                 run_job(*got)
@@ -307,6 +337,7 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
         for i in range(n):
             threading.Thread(target=_scan_loop, args=(settings, refresh, idle), daemon=True,
                              name=f"{'refresh' if refresh else 'user'}-{i}").start()
+    threading.Thread(target=_schedule_loop, args=(settings,), daemon=True, name="schedules").start()
     while True:
         time.sleep(3600)   # hourly: a failed job waits at most an hour for its retry
         try:

@@ -298,6 +298,17 @@ td form { margin: 0; }
 .nav-sep { align-self: center; width: 1px; height: 1.1rem; background: var(--border); margin: 0 .35rem; }
 form.inline { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 0; }
 .row-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.wrap > * { min-width: 0; }   /* grid items: a wide table scrolls inside its card instead of widening the page */
+td.wrap-cell { white-space: normal; min-width: 22rem; }
+td.note-cell { white-space: normal; min-width: 12rem; }
+details.add-schedule { margin-top: .75rem; }
+/* schedules: text cells wrap, the four actions stay on one line */
+table.schedules td { white-space: normal; }
+table.schedules td.when { min-width: 11rem; max-width: 16rem; }
+table.schedules td.runs { min-width: 12rem; }
+table.schedules td.last { min-width: 11rem; max-width: 16rem; }
+table.schedules td.mono, table.schedules .row-actions { white-space: nowrap; flex-wrap: nowrap; }
+.grant { display: inline-block; white-space: nowrap; margin: .1rem .6rem .1rem 0; }
 .codeblock { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-ctl); padding: .6rem .8rem;
   font-family: ui-monospace, Consolas, monospace; font-size: .82rem; white-space: pre-wrap; word-break: break-all; }
 .codes { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .3rem;

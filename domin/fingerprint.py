@@ -128,7 +128,12 @@ def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensit
     (proxy.hop) when there is one; nmap then runs under proxychains4 with a per-run config (mode 0600, deleted
     afterwards), always as a connect scan. Fails closed: a missing proxychains4 or an unresolvable or unreachable
     proxy is an NmapError, never a direct scan."""
-    args = nmap_args(ip, ports, timeout, intensity, timing, nmap_bin, raw=raw and not via)
+    return run_args(nmap_args(ip, ports, timeout, intensity, timing, nmap_bin, raw=raw and not via), timeout, via)
+
+
+def run_args(args: list[str], timeout: int, via: dict | None = None) -> str:
+    """Run an nmap command line and return its XML; through the hop's proxy (proxychains4) when via is set. The
+    caller has made args a connect scan when routed."""
     if not via:
         return _run(args, timeout)
     pc = shutil.which("proxychains4")
