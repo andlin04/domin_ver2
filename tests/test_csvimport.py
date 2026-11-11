@@ -130,10 +130,12 @@ def test_bad_rows_are_skipped_and_counted(settings, tmp_path):
             "example.com,a.example.com,192.0.2.2,,,,,,,yesterday",
             "example.com,a.example.com,192.0.2.2,,,,,,,2026-02-30",
             "example.com,a.example.com,192.0.2.2,,,,,",
-            "example.com,b.example.com,,,,,,,,2026-03-01"]
+            "example.com,b.example.com,,,,,,,,2026-03-01",
+            "example.com,info@example.com,192.0.2.3,,NA,NA,,,,",   # mailbox names and NA come from real scans
+            "example.com,bad local!@example.com,192.0.2.3,,,,,,,"]
     stats = run_import(settings, write(tmp_path, HEADER + "\r\n".join(rows) + "\r\n"))
-    assert (stats["rows"], stats["bad"], stats["imported"], stats["records"]) == (11, 9, 1, 2)
-    assert stats["errors"][:3] == ["line 3: domain", "line 4: host", "line 5: ip"] and len(stats["errors"]) == 9
+    assert (stats["rows"], stats["bad"], stats["imported"], stats["records"]) == (13, 10, 1, 3)
+    assert stats["errors"][:3] == ["line 3: domain", "line 4: host", "line 5: ip"] and len(stats["errors"]) == 10
     with db.connect(settings.db_path) as c:
         assert db.history(c, "example.com")[0]["started"] == "2026-03-01T10:00:00"   # the newest last_seen
 

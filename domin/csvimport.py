@@ -31,6 +31,7 @@ PREFIX = "csv-import-"   # temp files in the data directory
 TEXT_MAX = {"netname": 200, "descr": 1000, "country": 100}
 ERRORS_KEPT = 10
 _HOST_LABEL = re.compile(r"^(\*|[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?)$")
+_LOCAL = re.compile(r"^[a-z0-9._%+-]{1,64}$")
 _ASN = re.compile(r"^(\d{1,10}|NA)?$")
 _WHEN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -61,10 +62,16 @@ def check_header(header: list[str]) -> list[str]:
 
 
 def _host_ok(v: str) -> bool:
+    """A host name; certificate logs also give mailbox names (local@host.example), kept as the scanner stored them."""
+    local, at, v = v.rpartition("@")
+    if at and not _LOCAL.match(local):
+        return False
     return 0 < len(v) <= 253 and all(_HOST_LABEL.match(x) for x in v.split("."))
 
 
 def _net_ok(v: str) -> bool:
+    if v == "NA":   # RDAP/whois had no network for the address
+        return True
     try:
         return all(ipaddress.ip_network(p, strict=False) for p in _RANGE_SPLIT.split(v))
     except ValueError:
