@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: update.sh survives replacing itself
+
+- update.sh copies a new update.sh over itself in place; bash reads a script piece by piece, so the rest of that
+  run came from the new file at an old offset (seen: a syntax error after the files were copied, no restart). The
+  script body is now one `{ }` group that bash reads whole before running. An update from an older update.sh can
+  still stop that way once: run it a second time, or restart `domin` and `domin-worker` by hand.
+- Rollback: `git revert` this commit; no database change.
+
 ## 2026-11-11: DNS inventory and posture are separate areas
 
 - Inventory pages (`/`, `/all`, `/d/...`, compare, `/tools`) show DNS-scan data only and link only to inventory

@@ -307,6 +307,9 @@ def test_update_script_checks_entries_owns_the_code_and_never_evals_the_env_file
     assert 'chown -R root:root "$APP"' in code and 'chmod -R go-w "$APP"' in code
     assert code.index("tar -tvf") < code.index("tar -x")   # checked before anything is extracted
     assert "__pycache__" in code
+    # one { } group read whole before it runs: copying a new update.sh over itself mid-run cannot change the run
+    body = [x for x in code.splitlines() if x.strip()]
+    assert body[:2] == ["{", "set -euo pipefail"] and body[-2:] == ["exit 0", "}"]
 
 
 def test_the_cli_runs_as_the_app_user_without_writing_bytecode():

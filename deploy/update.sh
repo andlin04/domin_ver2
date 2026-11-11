@@ -11,6 +11,9 @@
 # The archive may hold only regular files and directories under domin/ and deploy/: links, devices and other entry
 # types, absolute paths and .. are refused before anything is extracted. Afterwards the code belongs to root and is
 # not writable for group or others; bytecode caches are removed (the services cannot write new ones).
+# The whole script is one { } group: bash reads all of it before running, so copying a new update.sh over this file
+# mid-run cannot change what runs (bash otherwise reads a script piece by piece).
+{
 set -euo pipefail
 APP=${DOMIN_APP:-/opt/domin/app}
 NEW=$(mktemp -d)
@@ -121,3 +124,5 @@ if [ -n "$worker" ] && systemctl is-enabled -q domin-worker 2>/dev/null; then
 else
   echo "worker: left running"
 fi
+exit 0
+}
