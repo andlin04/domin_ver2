@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: README screenshots in Graphite, neutral test data
+
+- README screenshots regenerated (mock data, Graphite colours).
+- Discovery tests use documentation-style private addresses (172.20.x.y) instead of 192.168.x.y.
+- Old pytest result files (tests/failures/*.xml, with a workstation name) removed from the tree and ignored.
+- Rollback: `git revert` this commit (images, one test file, .gitignore; nothing on the hosts).
+
 ## 2026-11-11: Two-factor QR code, styled not-found page, public sync only on request
 
 - My account > Two-factor setup: the otpauth link is also shown as a QR code, inline SVG made on the server

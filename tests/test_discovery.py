@@ -53,8 +53,8 @@ def test_argv_for_port_checks_timing_rate_retries_timeout_and_dns():
     assert "--max-rate" not in a and a[a.index("--max-retries") + 1] == "0" and "10s" in a
     a = discovery.nmap_args(prof(port_mode="list", ports="22,8000-8010", timing="0"), "t")
     assert a[a.index("-p") + 1] == "22,8000-8010" and "-T0" in a
-    a = discovery.nmap_args(prof(rdns="on"), "t", dns_servers=("172.20.0.252",))
-    assert "-R" in a and "-n" not in a and a[a.index("--dns-servers") + 1] == "172.20.0.252"
+    a = discovery.nmap_args(prof(rdns="on"), "t", dns_servers=("172.20.0.53",))
+    assert "-R" in a and "-n" not in a and a[a.index("--dns-servers") + 1] == "172.20.0.53"
 
 
 def test_argv_raw_routed_and_ipv6():
@@ -147,7 +147,7 @@ def test_public_mode_sweeps_only_this_scans_global_addresses(conn):
 
 
 def test_internal_mode_sweeps_the_internal_networks_and_adds_names_under_the_domain(conn):
-    s = replace(Settings.from_env(), internal_nets=("172.20.4.16/29",), internal_dns=("172.20.0.252",))
+    s = replace(Settings.from_env(), internal_nets=("172.20.4.16/29",), internal_dns=("172.20.0.53",))
     seen, notes = [], []
     p = prof(rdns="on")
     discovery.save(conn, {**p, "name": "lan"}, "t")
