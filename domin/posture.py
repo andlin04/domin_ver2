@@ -112,7 +112,7 @@ def enqueue(conn: sqlite3.Connection, domain: str, found: list[dict], prof: dict
     the domain is left alone. Returns how many were queued. batch, when given, gets the row id per address (new or
     already pending): the set the progress dialog follows."""
     if isinstance(prof, str):
-        prof = {"name": "", "ports": prof, "intensity": 2, "timing": 3, "timeout": 120, "route": ""}
+        prof = {"name": "", "ports": prof, "intensity": 7, "timing": 3, "timeout": 120, "route": ""}
     n = 0
     for t in found:
         row = conn.execute("""SELECT id FROM posture_scans WHERE domain = ? AND ip = ?
@@ -247,7 +247,7 @@ def run(conn: sqlite3.Connection, row: dict, cve_db: cve.Database, client: httpx
         with proxy.cve_client(proxy.cve_hop(conn, cfg, r, via, client), client) as lookups:
             res = fingerprint.scan(row["ip"], cve_db=cve_db, client=lookups, api_key=api_key, ports=row["ports"],
                                    display=row["hosts"].split(",")[0] or row["ip"],
-                                   intensity=row.get("intensity", 2), timing=row.get("timing", 3),
+                                   intensity=row.get("intensity", 7), timing=row.get("timing", 3),
                                    timeout=row.get("timeout", 120), via=via, resume=resume, on_chunk=saved,
                                    raw=raw)
     except Exception as exc:   # one bad host must not stop the queue

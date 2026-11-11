@@ -138,9 +138,9 @@ CREATE TABLE IF NOT EXISTS posture_scans (   -- stage 2: one fingerprint + CVE m
 CREATE TABLE IF NOT EXISTS posture_profiles (   -- named scan parameter sets, picked per posture scan
     name TEXT PRIMARY KEY,
     ports TEXT NOT NULL,
-    intensity INTEGER NOT NULL DEFAULT 2,  -- nmap --version-intensity 0-9
+    intensity INTEGER NOT NULL DEFAULT 7,  -- nmap --version-intensity 0-9 (7: nmap's own default)
     timing INTEGER NOT NULL DEFAULT 3,     -- nmap -T1..-T4
-    timeout INTEGER NOT NULL DEFAULT 120,  -- per-host seconds
+    timeout INTEGER NOT NULL DEFAULT 900,  -- per-host seconds
     route TEXT NOT NULL DEFAULT '',        -- scan route id (proxy.py): '' = the default route, 'direct'
     note TEXT NOT NULL DEFAULT '',
     updated TEXT NOT NULL DEFAULT '',
@@ -312,8 +312,11 @@ def init(path: Path) -> None:
                         '22,80,443', 'none', 3, 100, 1, 120, 0, 'TCP SYN ping on 22, 80, 443; no port check', ?)""",
                      (now(),))
         from .fingerprint import DEFAULT_PORTS  # local import: fingerprint -> cve
-        conn.execute("INSERT OR IGNORE INTO posture_profiles (name, ports, note, updated) VALUES ('default', ?, ?, ?)",
-                     (DEFAULT_PORTS, "Common services, light version probes", now()))
+        # a fresh install's default profile: nmap's own version intensity (7) and 15 minutes per host; an existing
+        # database keeps its profile as the admin left it
+        conn.execute("INSERT OR IGNORE INTO posture_profiles (name, ports, intensity, timeout, note, updated) "
+                     "VALUES ('default', ?, 7, 900, ?, ?)",
+                     (DEFAULT_PORTS, "Common services, nmap's default version probes", now()))
         from . import users  # local import: users -> admin -> db
         users.migrate_legacy_admin(conn)
         users.migrate_roles(conn)

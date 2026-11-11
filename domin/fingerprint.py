@@ -108,12 +108,12 @@ def raw_capable() -> bool:
     return bool(eff & (1 << 13)) and bool(eff & (1 << 12))
 
 
-def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int = 3,
+def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 7, timing: int = 3,
               nmap_bin: str = "nmap", raw: bool = False) -> list[str]:
     """The nmap command line: a connect scan (``-sT``, no raw packets, no root or capabilities), or with raw a SYN
     scan (``-sS --privileged``: the worker holds CAP_NET_RAW + CAP_NET_ADMIN, not root). intensity is nmap's
-    --version-intensity (0-9; 2 = --version-light), timing its -T template (1-4). ID_SCRIPTS add product names
-    and versions from headers and banners."""
+    --version-intensity (0-9; 7 = nmap's default, 2 = --version-light), timing its -T template (1-4). ID_SCRIPTS
+    add product names and versions from headers and banners."""
     scan = ["-sS", "--privileged"] if raw else ["-sT"]
     args = [nmap_bin, *scan, "-sV", "-Pn", "-n", "--version-intensity", str(int(intensity)), f"-T{int(timing)}",
             "--script", ID_SCRIPTS, "-oX", "-", "-p", str(ports), "--host-timeout", f"{timeout}s", ip]
@@ -122,7 +122,7 @@ def nmap_args(ip: str, ports: str, timeout: int, intensity: int = 2, timing: int
     return args
 
 
-def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 2, timing: int = 3,
+def run_nmap(ip: str, ports: str, timeout: int, nmap_bin: str = "nmap", intensity: int = 7, timing: int = 3,
              via: dict | None = None, raw: bool = False) -> str:
     """Run a connect (or with raw and no route, SYN) + service-version scan and return the XML. via: the route's hop
     (proxy.hop) when there is one; nmap then runs under proxychains4 with a per-run config (mode 0600, deleted
@@ -276,7 +276,7 @@ def no_answer(xml: str, routed: bool) -> bool:
 
 
 def scan(ip: str, *, cve_db: cve.Database, client=None, api_key: str = "", ports: str = DEFAULT_PORTS,
-         timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 2,
+         timeout: int = 120, nmap_bin: str = "nmap", display: str = "", intensity: int = 7,
          timing: int = 3, via: dict | None = None, resume: dict | None = None,
          on_chunk: Callable[[dict], None] | None = None, raw: bool = False) -> dict:
     """Fingerprint one host and match each service's CPEs against the CVE layer. raw: SYN scan (no route only).

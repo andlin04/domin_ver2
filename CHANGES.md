@@ -2,6 +2,13 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Posture default profile: version intensity 7, timeout 900
+
+- A fresh install seeds the `default` posture profile with `--version-intensity 7` (nmap's own default, better hit
+  rate) and a 900 s host timeout; the new-profile form and the code fallbacks (posture, fingerprint) default to 7
+  too. Existing databases keep their profiles as they are (no migration).
+- Rollback: `git revert` this commit and run update.sh (profiles already created keep their values).
+
 ## 2026-11-11: Syslog forwarding (Settings > Logging)
 
 - New `domin/syslog.py` and Settings > Logging (admin): server, port, UDP / TCP / TLS, facility, app-name, and

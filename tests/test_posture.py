@@ -508,6 +508,21 @@ def test_nmap_args_carry_profile_knobs():
     assert a[a.index("--version-intensity") + 1] == "7" and "-T2" in a and "60s" in a
 
 
+def test_fresh_default_profile_is_intensity_7_timeout_900(tmp_path):
+    path = tmp_path / "fresh.db"
+    db.init(path)
+    with db.connect(path) as c:
+        p = c.execute("SELECT intensity, timing, timeout FROM posture_profiles WHERE name = 'default'").fetchone()
+        assert tuple(p) == (7, 3, 900)
+        c.execute("UPDATE posture_profiles SET intensity = 2, timeout = 120 WHERE name = 'default'")   # the admin's
+    db.init(path)   # a restart (update.sh) leaves an existing profile alone
+    with db.connect(path) as c:
+        p = c.execute("SELECT intensity, timeout FROM posture_profiles WHERE name = 'default'").fetchone()
+        assert tuple(p) == (2, 120)
+    a = fingerprint.nmap_args("172.20.4.50", "22", 60)
+    assert a[a.index("--version-intensity") + 1] == "7"
+
+
 def test_default_profile_is_seeded_and_kept(settings):
     with db.connect(settings.db_path) as c:
         assert posture.profile(c, "default")["ports"] == fingerprint.DEFAULT_PORTS
