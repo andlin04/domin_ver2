@@ -688,8 +688,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return resp
 
     def back(path: str = base, notice: str = "") -> RedirectResponse:
-        if notice:
-            path = f"{path}{'&' if '?' in path else '?'}ok={notice}"
+        if notice:   # the query goes before a #fragment, else the browser never sends it
+            path, hsh, frag = path.partition("#")
+            path = f"{path}{'&' if '?' in path else '?'}ok={notice}{hsh}{frag}"
         return priv(RedirectResponse(path, status_code=303))
 
     def shell(request: Request, name: str, u: dict, s: dict, status: int = 200, **ctx) -> HTMLResponse:

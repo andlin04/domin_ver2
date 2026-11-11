@@ -324,7 +324,8 @@ def test_domain_admin_manages_schedules_on_its_domain(settings):
         page = h.get("/d/beta.example").text
         assert 'id="schedules"' in page and "Add a schedule" in page and 'name="h:db.beta.example"' in page
         r = h.post("/admin/schedules", data={**FORM, "csrf": csrf, "domain": "beta.example"}, follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].startswith("/d/beta.example")
+        assert r.status_code == 303 and r.headers["location"] == "/d/beta.example?ok=schedule-saved#schedules"
+        assert "Schedule saved" in h.get(r.headers["location"]).text
         with db.connect(settings.db_path) as c:
             sid = c.execute("SELECT id FROM schedules").fetchone()[0]
         assert "nightly" in h.get("/d/beta.example").text
