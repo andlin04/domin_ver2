@@ -1,6 +1,6 @@
 """User accounts, roles and second-factor state for the signed-in area.
 
-Roles: power (a power user: only the domains of its grants, as viewer or domain admin per domain; domin.access) and
+Roles: power (a power user: only the domains of its grants, as viewer or maintainer per domain; domin.access) and
 admin (every domain, users, grants and settings; several allowed, never fewer than one enabled). Passwords use the
 same scrypt format as the old single admin password (admin.hash_password), so a migrated password keeps working
 and is re-hashed at the next sign-in. Second factor: a TOTP secret plus one-time recovery codes (domin.totp); only
@@ -50,7 +50,7 @@ def count(conn: sqlite3.Connection) -> int:
 
 def create(conn: sqlite3.Connection, name: str, role: str, password: str = "") -> int:
     """A new user. The old role names still work as shorthands, as the migration maps them: viewer = power user with
-    a viewer grant on every domain, analyst = power user with a domain admin grant on every domain."""
+    a viewer grant on every domain, analyst = power user with a maintainer grant on every domain."""
     name = name.strip()
     if not name or len(name) > 64 or role not in (*ROLES, *OLD_ROLES):
         raise ValueError("name (1..64 chars) and a valid role are required")
@@ -257,7 +257,7 @@ def migrate_legacy_admin(conn: sqlite3.Connection) -> None:
 
 def migrate_roles(conn: sqlite3.Connection) -> int:
     """Delegation (docs/delegation.md): a viewer becomes a power user with a viewer grant on every domain, an analyst
-    one with a domain admin grant on every domain; the require-2FA setting of either old role carries over to power.
+    one with a maintainer grant on every domain; the require-2FA setting of either old role carries over to power.
     Touches only rows still on an old role, so it runs once. Returns how many users changed."""
     old = conn.execute(f"SELECT id, name, role FROM users WHERE role IN ({','.join('?' * len(OLD_ROLES))})",
                        tuple(OLD_ROLES)).fetchall()

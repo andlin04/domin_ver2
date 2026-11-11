@@ -9,7 +9,7 @@ Owner requests (2026-11-11):
 - Optional stage of an inventory (discovery) job, after the DNS stages and owner look-ups. Off unless the job names
   a discovery profile. The public `POST /api/scan` never sets one, and neither do refreshes or retries.
 - Who starts it:
-  - a domain admin of that domain: "Scan with nmap" in Posture · Scans, one domain picked (profile picker)
+  - a maintainer of that domain: "Scan with nmap" in Posture · Scans, one domain picked (profile picker)
   - a schedule (B)
 - What it sweeps:
 
@@ -69,7 +69,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 ### Choosing a profile
 
-- Manual: the "Scan with nmap" form in Posture · Scans (domain admins).
+- Manual: the "Scan with nmap" form in Posture · Scans (maintainers).
 - Schedule: per schedule (B).
 - Default: Settings · Discovery profiles, "Default profile" = preselected in both forms; "none" = DNS only.
 
@@ -120,7 +120,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 ## Rights (docs/delegation.md)
 
-| Action | admin | domain admin of the domain | viewer of the domain | outside the grants |
+| Action | admin | maintainer of the domain | viewer of the domain | outside the grants |
 | --- | --- | --- | --- | --- |
 | see the domain's schedules (Posture · Scans list) | yes | yes | yes (read-only) | not listed; 404 |
 | add / edit / delete / enable / run now | yes | yes | 403 | 404 |
@@ -137,7 +137,7 @@ Every value is checked against this list; no free text reaches argv. The note is
 
 - Posture · Scans, "Scheduled rescans" section (below the scan activity): the schedules of the domains in the
   user's scope (admins: all; the page's Domain filter narrows it), with Edit, Run now, Enable/Disable and Delete on
-  the domains the user is domain admin of (viewer rows read-only), and "Add a schedule" with a domain picker of
+  the domains the user is maintainer of (viewer rows read-only), and "Add a schedule" with a domain picker of
   those domains (hidden when there are none). Filter the page to one domain to pick single hosts or a tag.
   Actions return to the list with the filter they came from.
 - Edit page `/admin/schedules/<id>`: the schedule and its form.
@@ -170,5 +170,5 @@ address among the hosts the schedule's posture part covers (latest inventory).
 ## Open (owner)
 
 - Add live internal addresses without a name to the inventory (address as host name), so posture can scan them?
-- Re-check the creator's rights when a schedule runs (a domain admin who lost the grant)?
+- Re-check the creator's rights when a schedule runs (a maintainer who lost the grant)?
 - Apply the default discovery profile to automatic refreshes (refresh_days) too?

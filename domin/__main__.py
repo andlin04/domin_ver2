@@ -59,10 +59,11 @@ def main(argv: list[str] | None = None) -> int:
     ur.add_argument("name")
     ur.add_argument("role", choices=users.ROLES)
     ug = sub.add_parser("user-grant", help="give a power user a level on a domain (and the domains under it; "
-                                           "* = every domain), or take it away with 'none'")
+                                           "* = every domain): viewer or maintainer, or take it away with 'none'")
     ug.add_argument("name")
     ug.add_argument("domain")
-    ug.add_argument("level", choices=(*access.LEVELS, "none"))
+    ug.add_argument("level", choices=("viewer", "maintainer", "none", "admin"),
+                    help="viewer, maintainer or none ('admin' = maintainer, the stored name)")
     u2 = sub.add_parser("user-2fa-reset", help="turn a user's two-factor off")
     u2.add_argument("name")
     sub.add_parser("admin-password", help="set the 'admin' user's password (kept for one release)")
@@ -129,7 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         with db.connect(settings.db_path) as conn:
             for u in users.listing(conn):
                 flags = ",".join(f for f, on in (("2fa", u["has_totp"]), ("disabled", u["disabled"])) if on) or "-"
-                grants = " ".join(f"{g['domain']}={g['level']}" for g in access.grants(conn, u["id"]))
+                grants = " ".join(f"{g['domain']}={access.LEVEL_LABELS.get(g['level'], g['level'])}"
+                                  for g in access.grants(conn, u["id"]))
                 print(f"{u['name']}\t{u['role']}\t{flags}\t{u['last_login'] or 'never'}\t{grants or '-'}")
     elif args.cmd == "user-passwd":
         with db.connect(settings.db_path) as conn:
@@ -162,10 +164,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             wanted = {g["domain"]: g["level"] for g in access.grants(conn, u["id"])}
             dom = args.domain.strip().lower().rstrip(".")
-            if args.level == "none":
+            level = "admin" if args.level == "maintainer" else args.level   # stored name of maintainer
+            if level == "none":
                 wanted.pop(dom, None)
             else:
-                wanted[dom] = args.level
+                wanted[dom] = level
             try:
                 diff = access.set_grants(conn, u["id"], wanted, "cli")
             except ValueError as exc:
@@ -175,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
             if detail:
                 access.audit(conn, "cli", "grants", u["name"], detail)
         note = " (admins see every domain anyway)" if u["role"] == "admin" else ""
-        print(f"{args.name}: {dom} {args.level}{note}")
+        print(f"{args.name}: {dom} {access.LEVEL_LABELS.get(level, level)}{note}")
     elif args.cmd == "user-2fa-reset":
         with db.connect(settings.db_path) as conn:
             u = users.by_name(conn, args.name)

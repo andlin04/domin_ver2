@@ -549,7 +549,8 @@ SHOTS = {
     "settings-signin": ("/admin/settings", True, 520, from_card("Sign-in required for")),
     "settings-csv-import": ("/admin/settings", True, 420, from_card("CSV import")),
     "csv-map": ("", True, 1500, ""),   # the path: an upload of DEMO_CSV, made in main()
-    "domain-viewers": ("/d/example.com", "carol", 560, from_card("Viewers")),
+    "domain-viewers": ("/admin/viewers?domain=example.com", "carol", 560, ""),   # carol: maintainer of example.com
+    "users-info": ("/admin/users", True, 560, from_card("Roles and rights")),
     "table-cves": ("/admin/security/analysis?domain=example.com", True, 1000,
                    "document.querySelector('[data-tab=cves]')?.click();" + show_from("section.host-list")),
     "table-hosts": ("/d/example.com", True, 1000, show_from("#records")),

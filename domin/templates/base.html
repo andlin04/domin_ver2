@@ -28,13 +28,14 @@
       {% if access.can('posture') %}<a href="/admin/security" {{ here('security') }}>Posture</a>
       {% elif access.can('scans') %}<a href="/admin/security/scans" {{ here('security') }}>Posture</a>{% endif %}
       <details class="nav-menu" data-nav-menu>
-        <summary {% if sec in ('admin', 'settings', 'users', 'account') %}class="active"{% endif %}>Admin</summary>
+        <summary {% if sec in ('admin', 'settings', 'users', 'viewers', 'account') %}class="active"{% endif %}>Admin</summary>
         <div class="nav-drop">
           {% if user.role == 'admin' %}<a href="/admin" {{ here('admin') }}>Operations</a>{% endif %}
           {% set set_home = '/admin/settings' if user.role == 'admin' else '/admin/security/profiles' if access.can('profiles')
              else '/admin/security/discovery-profiles' if access.can('discovery') else '/admin/security/lookup' if access.can('posture') else '' %}
           {% if set_home %}<a href="{{ set_home }}" {{ here('settings') }}>Settings</a>{% endif %}
           {% if user.role == 'admin' %}<a href="/admin/users" {{ here('users') }}>Users</a>{% endif %}
+          {% if access.manages_any %}<a href="/admin/viewers" {{ here('viewers') }}>Domain viewers</a>{% endif %}
           <a class="nav-acct" href="/admin/account" {{ here('account') }} title="Signed in as {{ user.name }}"><span>My account</span><small class="muted">{{ user.name }}</small></a>
         </div>
       </details>

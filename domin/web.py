@@ -412,15 +412,11 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
                 rows = [r for r in rows if tag in host_tags.get(r["host"], []) + net_tags.get(r["host"], [])]
             else:
                 tag = ""
-        viewers = None
-        if user and scope.manages(d["name"]):   # domain admins (and admins) grant viewer here
-            with conn() as c:
-                viewers = access.viewers_panel(c, d["name"], user)
         return page(request, "domain.html", domain=d, scans=done, current=current, previous=previous,
                     rows=rows, change=change, charts=charts, open_job=open_job["id"] if open_job else None,
                     user=user, csrf=csrf, admin_csrf=csrf if user and user["role"] == "admin" else "",
                     host_tags=host_tags, suggested=suggested, net_tags=net_tags,
-                    tag_counts=dict(sorted(tag_counts.items())), tag=tag, viewers=viewers,
+                    tag_counts=dict(sorted(tag_counts.items())), tag=tag,
                     notice=NOTICES.get(request.query_params.get("ok", ""), ""))
 
     def churn_series(c, scans: list[dict]) -> list[dict]:
@@ -1189,7 +1185,32 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 raise HTTPException(404, "No such domain")
         return back("/")   # the domain is gone from the overview
 
-    # --- viewers on a domain (domain admin of it: access.grant_viewer) -------------------------------------------
+    # --- Domain viewers (maintainer of a domain: access.grant_viewer) ------------------------------------------
+    # The admin side's page for it: pick a domain you administer, list its viewers, add or remove one. Admins: every
+    # domain. Outside the grants answers as an unknown domain (404), seen without maintainer 403.
+
+    def managed_domain(c, name: str, grants: access.Scope) -> dict:
+        d = db.domain(c, name.lower())
+        if not d or not grants.sees(d["name"]):
+            raise HTTPException(404, f"{name} has not been scanned")
+        if not grants.manages(d["name"]):
+            raise HTTPException(403, f"Granting viewers needs maintainer rights on {d['name']}.")
+        return d
+
+    @app.get(base + "/viewers", response_class=HTMLResponse, include_in_schema=False)
+    def viewers_page(request: Request, domain: str = ""):
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return back()
+            grants = request.state.scope
+            if not grants.manages_any:
+                raise HTTPException(404, "Not Found")
+            names = [r["name"] for r in c.execute("SELECT name FROM domains ORDER BY name")
+                     if grants.manages(r["name"])]
+            d = managed_domain(c, domain, grants) if domain else None
+            panel = access.viewers_panel(c, d["name"], u) if d else None
+            return shell(request, "viewers.html", u, s, domains=names, domain=d, viewers=panel)
 
     @app.post(base + "/domains/{name}/viewers", include_in_schema=False)
     @app.post(base + "/domains/{name}/viewers/{user_id}/delete", include_in_schema=False)
@@ -1199,12 +1220,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             s, u = current(request, c, data)
             if not u:
                 return back()
-            grants = request.state.scope
-            d = db.domain(c, name.lower())
-            if not d or not grants.sees(d["name"]):   # outside the grants: as an unknown domain
-                raise HTTPException(404, f"{name} has not been scanned")
-            if not grants.manages(d["name"]):
-                raise HTTPException(403, f"Granting viewers needs domain admin rights on {d['name']}.")
+            d = managed_domain(c, name, request.state.scope)
             try:
                 if user_id is None:
                     if not (data.get("user") or "").isdigit():
@@ -1216,7 +1232,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 raise HTTPException(404, str(e)) from None
             except ValueError as e:
                 raise HTTPException(409, str(e)) from None
-        return back(f"/d/{d['name']}#viewers", "viewer-removed" if user_id else "viewer-added")
+        notice = "viewer-removed" if user_id else "viewer-added"
+        return back(f"{base}/viewers?{urlencode({'domain': d['name']})}", notice)
 
     # --- settings / scope (admin only) ---------------------------------------------------------------------------
 
@@ -1385,7 +1402,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             users.save_scope(c, scope)
         return back(base + "/settings", "saved")
 
-    # --- security portal: CVE scan tool (view: any signed-in user; run: domain admin rights) ------------------------
+    # --- security portal: CVE scan tool (view: any signed-in user; run: maintainer rights) ------------------------
 
     def security_ctx(status: int = 200, result: dict | None = None, form: dict | None = None,
                      error: str = "", host_result: dict | None = None):
@@ -1441,7 +1458,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     def schedule_section(c, grants: access.Scope, dom: str) -> dict:
         """Posture · Scans, Scheduled rescans: the schedules of the domains in the scope (dom: that one only); the add
-        form's domain picker lists the domains this user is domain admin of (none: no form)."""
+        form's domain picker lists the domains this user is maintainer of (none: no form)."""
         rows = [r for r in schedules.listing(c, grants) if not dom or r["domain"] == dom]
         mine = [d for d in posture.domains(c, grants) if grants.acts("scans", d)]
         pick = dom if dom in mine else ""
@@ -1451,7 +1468,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     def discovery_section(c, grants: access.Scope, dom: str) -> dict:
         """Posture · Scans, nmap discovery of one domain: the latest inventory scan that ran the stage, what it found,
-        and the "Scan with nmap" form's profiles (domain admin of the domain only)."""
+        and the "Scan with nmap" form's profiles (maintainer of the domain only)."""
         last = next((h for h in reversed(db.history(c, dom)) if h["status"] == "done" and h["discovery"]), None)
         return {"disc_scan": last, "discovered": db.discovery_results(c, last["id"]) if last else [],
                 "disc_opts": schedule_opts(c, dom) if grants.acts("scans", dom) else None,
@@ -1561,7 +1578,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     @app.post(base + "/security/posture", include_in_schema=False)
     async def security_posture(request: Request):
         """Stage 2: queue posture scans for a whole domain (its in-scope addresses), one host name or one address
-        (Renew). Domain admin of that domain; the worker runs them. With `Accept: application/json` (the page's
+        (Renew). Maintainer of that domain; the worker runs them. With `Accept: application/json` (the page's
         script) the answer is JSON: the batch (row ids) for the progress dialog, or the error."""
         data = await form(request)
         as_json = "application/json" in request.headers.get("accept", "")
@@ -1583,7 +1600,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if dom not in posture.domains(c, grants):   # unknown, or outside the grants: the same answer
                 return refuse(422, "Pick a domain with a finished inventory scan.")
             if not grants.manages(dom):
-                return refuse(403, f"Running a posture scan needs domain admin rights on {dom}.")
+                return refuse(403, f"Running a posture scan needs maintainer rights on {dom}.")
             if not prof:
                 return refuse(422, "Pick an existing scan profile.")
             ports = (data.get("ports") or "").strip()   # optional override of the profile's ports
@@ -1627,7 +1644,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.post(base + "/tags", include_in_schema=False)
     async def host_tag(request: Request):
-        """Add or remove one tag on host names of a domain (domain admin of that domain; host = one name, or several
+        """Add or remove one tag on host names of a domain (maintainer of that domain; host = one name, or several
         joined by "," for a posture row of names sharing an address), then back to the domain page."""
         data = await form(request)
         dom = (data.get("domain") or "").strip().lower()
@@ -1641,7 +1658,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not grants.sees(dom):   # outside the grants: as an unknown host
                 raise HTTPException(404, "No such host in that domain's latest scan")
             if not grants.manages(dom):
-                raise HTTPException(403, f"Tagging hosts needs domain admin rights on {dom}.")
+                raise HTTPException(403, f"Tagging hosts needs maintainer rights on {dom}.")
             if not tags.valid(tag):
                 raise HTTPException(422, "Tag: 1-30 lower-case letters, digits or -.")
             for host in names or [""]:
@@ -1790,7 +1807,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
 
     @app.post(base + "/discovery/scan", include_in_schema=False)
     async def discovery_scan(request: Request):
-        """"Scan with nmap" in Posture · Scans: an inventory scan with a discovery stage (domain admin only)."""
+        """"Scan with nmap" in Posture · Scans: an inventory scan with a discovery stage (maintainer only)."""
         data = await form(request)
         dom = (data.get("domain") or "").strip().lower()
         with conn() as c:
@@ -1801,7 +1818,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not db.domain(c, dom) or not grants.sees(dom):
                 raise HTTPException(404, f"{dom} has not been scanned")
             if not grants.manages(dom):
-                raise HTTPException(403, f"Scanning needs domain admin rights on {dom}.")
+                raise HTTPException(403, f"Scanning needs maintainer rights on {dom}.")
             if not users.domain_allowed(c, dom):
                 raise HTTPException(403, f"{dom} is outside the inventory scope (Settings).")
             name = (data.get("profile") or "").strip()
@@ -1815,7 +1832,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return back(f"{base}/security/scans?domain={quote(dom)}#discovery",
                     "discovery-open" if busy else "discovery-queued")
 
-    # --- schedules (domin.schedules): domain admins on their domains, viewers read, outside = 404 ------------------
+    # --- schedules (domin.schedules): maintainers on their domains, viewers read, outside = 404 ------------------
 
     def schedule_or_404(c, sid: int, grants: access.Scope) -> dict:
         sc = schedules.get(c, sid)
@@ -1846,7 +1863,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         if not db.domain(c, dom) or not grants.sees(dom):
             raise HTTPException(404, f"{dom} has not been scanned")
         if not grants.manages(dom):
-            raise HTTPException(403, f"Schedules need domain admin rights on {dom}.")
+            raise HTTPException(403, f"Schedules need maintainer rights on {dom}.")
 
     @app.get(base + "/schedules/{sid}", response_class=HTMLResponse, include_in_schema=False)
     def schedule_page(request: Request, sid: PathId):
@@ -2132,7 +2149,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             grants = request.state.scope
             if not grants.manages_any:
                 return lookup_view(request, u, s, security_ctx(
-                    403, error="Running a look-up needs domain admin rights on a domain."))
+                    403, error="Running a look-up needs maintainer rights on a domain."))
             if data.get("kind") == "host":
                 tgt = (data.get("target") or "").strip()
                 ports = (data.get("ports") or "").strip() or fingerprint.DEFAULT_PORTS
@@ -2141,7 +2158,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                         422, form=data, error="Enter one host name or IPv4 address to fingerprint."))
                 if not grants.everything and (_is_ip(tgt) or not grants.manages(tgt.lower())):
                     return lookup_view(request, u, s, security_ctx(
-                        403, form=data, error="Fingerprint a host name under a domain you are domain admin of "
+                        403, form=data, error="Fingerprint a host name under a domain you are maintainer of "
                                               "(addresses: admins only)."))
                 if not fingerprint.valid_ports(ports):
                     return lookup_view(request, u, s, security_ctx(

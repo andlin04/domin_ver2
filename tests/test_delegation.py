@@ -1,5 +1,5 @@
 """Delegation (docs/delegation.md): admins see everything, a power user only its granted domains, per domain as
-viewer (read) or domain admin (read plus that domain's actions); out-of-scope objects answer 404 like unknown ones."""
+viewer (read) or maintainer (read plus that domain's actions); out-of-scope objects answer 404 like unknown ones."""
 import json
 import re
 from dataclasses import replace
@@ -15,7 +15,7 @@ from domin.web import COOKIE, create_app
 BASE = "/admin"
 PW = "correct horse battery"
 # alpha: viewer for pia; sub.alpha: covered by the alpha grant; xalpha: not (a suffix match needs the dot);
-# beta: domain admin for pia; gamma: nobody but the admins
+# beta: maintainer for pia; gamma: nobody but the admins
 INVENTORY = {"alpha.example": "192.0.2.10", "sub.alpha.example": "192.0.2.11", "xalpha.example": "192.0.2.12",
              "beta.example": "198.51.100.20", "gamma.example": "203.0.113.30"}
 SEEN = {"alpha.example", "sub.alpha.example", "beta.example"}
@@ -179,7 +179,7 @@ def test_report_covers_only_granted_domains(settings):
         assert r.status_code == 200 and "alpha.example" in r.text and "gamma.example" not in r.text
 
 
-# --- actions: domain admin only on its domains -------------------------------------------------------------------
+# --- actions: maintainer only on its domains -------------------------------------------------------------------
 
 def test_posture_scans_and_tags_need_domain_admin_on_that_domain(settings):
     with client(settings) as h:
@@ -227,7 +227,7 @@ def test_admin_sets_grants_and_the_change_is_audited(settings):
     with client(settings) as h:
         csrf = login(h, "boss")
         page = h.get(f"{BASE}/users/{pia}").text
-        assert 'id="grants"' in page and "domain admin" in page
+        assert 'id="grants"' in page and "maintainer" in page
         r = h.post(f"{BASE}/users/{pia}/grants", data={"csrf": csrf, "g_domain_0": "alpha.example",
                    "g_level_0": "admin", "g_domain_1": "gamma.example", "g_level_1": "viewer"}, follow_redirects=False)
         assert r.status_code == 303
@@ -235,7 +235,7 @@ def test_admin_sets_grants_and_the_change_is_audited(settings):
             assert {g["domain"]: g["level"] for g in access.grants(c, pia)} == {"alpha.example": "admin",
                                                                                 "gamma.example": "viewer"}
         listing = h.get(BASE + "/users").text
-        assert "beta.example=admin" in listing and "alpha.example=viewer-&gt;admin" in listing
+        assert "beta.example=maintainer" in listing and "alpha.example=viewer-&gt;maintainer" in listing
         r = h.post(f"{BASE}/users/{pia}/grants", data={"csrf": csrf, "g_domain_0": "bad domain!",
                                                         "g_level_0": "viewer"})
         assert r.status_code == 422 and 'value="bad domain!" selected' in r.text
@@ -268,7 +268,10 @@ def test_several_admins_and_the_last_one_is_kept(settings):
 
 def test_cli_user_grant(settings, monkeypatch, capsys):
     monkeypatch.setenv("DOMIN_DB", str(settings.db_path))
-    assert cli.main(["user-grant", "nob", "gamma.example", "admin"]) == 0
+    assert cli.main(["user-grant", "nob", "gamma.example", "maintainer"]) == 0
+    assert "gamma.example maintainer" in capsys.readouterr().out
+    assert cli.main(["user-grant", "nob", "delta.example", "admin"]) == 0   # the stored name still works
+    assert cli.main(["user-grant", "nob", "delta.example", "none"]) == 0
     assert cli.main(["user-grant", "nob", "beta.example", "viewer"]) == 0
     assert cli.main(["user-grant", "nob", "beta.example", "none"]) == 0
     assert cli.main(["user-grant", "nobody", "beta.example", "viewer"]) == 2

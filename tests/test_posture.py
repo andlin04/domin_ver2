@@ -425,7 +425,7 @@ def test_viewer_cannot_start_posture(settings):
     with app_client(settings) as h:
         csrf = sign_in(h, "vee")
         r = h.post("/admin/security/posture", data={"csrf": csrf, "domain": DOM})
-        assert r.status_code == 403 and "domain admin rights" in r.text
+        assert r.status_code == 403 and "maintainer rights" in r.text
         assert "data-scan-open" not in h.get(f"/admin/security/scans?domain={DOM}").text
 
 

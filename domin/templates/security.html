@@ -84,7 +84,7 @@
   <div data-sb-list></div>
 </section>
 
-{# the schedules of the domains in this user's scope (actions where domain admin), then the add form #}
+{# the schedules of the domains in this user's scope (actions where maintainer), then the add form #}
 <section class="card" id="schedules">
   <h2>Scheduled rescans <small>{{ sched_rows|length }}{% if posture_domain %} · {{ posture_domain }}{% endif %} ·
     {{ sched_rows|selectattr('enabled')|list|length }} enabled · server local time</small></h2>

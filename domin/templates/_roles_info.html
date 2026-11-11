@@ -1,0 +1,20 @@
+{# Users page: what each role and right means (checked against domin.access, domin.users and web.signin_gate). #}
+<section class="card" id="roles-info">
+  <h2>Roles and rights</h2>
+  <dl class="facts">
+    <dt>Admin</dt><dd>Every domain and feature, plus Operations, Settings and Users; the last enabled admin cannot be
+      demoted, disabled or deleted.</dd>
+    <dt>Power user</dt><dd>Only the domains of its grants and the features its rights allow; without grants it sees
+      nothing.</dd>
+    <dt>Maintainer</dt><dd>Per domain, includes subdomains: viewer plus that domain's scans, tags and schedules (with
+      read-write on the feature); grants and removes viewer there for other power users (Domain viewers).</dd>
+    <dt>Viewer</dt><dd>Per domain, includes subdomains, read-only: inventory, posture, CVEs, changes and reports, as far
+      as the feature rights allow.</dd>
+    <dt>Feature rights</dt><dd>Per power user and feature: none (the feature answers 404), read, or read-write (its
+      changes); Inventory and Posture are read only.</dd>
+    <dt>Sign-in scope</dt><dd>Settings, Sign-in required for: Inventory (unticked: open to every visitor) and Posture
+      (always a user; unticked lets only the lab sign-in-off stand-in in); the admin area always needs sign-in.</dd>
+    <dt>2FA required</dt><dd>Per role (Settings) or per user (Edit); not set up yet: each sign-in opens My account
+      first.</dd>
+  </dl>
+</section>

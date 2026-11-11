@@ -96,11 +96,11 @@ a public issue for it.
   re-run install.sh after that to turn on HSTS (never sent with a self-signed certificate).
 - nginx answers only `--admin-sources` (default the private ranges); the sign-in, roles and optional two-factor
   govern `/admin` on top.
-- Roles: admin, or power user limited to granted domains (viewer or domain admin per domain, covering the domains
+- Roles: admin, or power user limited to granted domains (viewer or maintainer per domain, covering the domains
   under it). One scope filter in every list, search, CSV, chart, count and posture query; an object outside a
   power user's grants answers 404 like an unknown one. Feature rights per power user (none / read / read-write per
   feature) are checked once per request from one route table before any handler runs: no right answers 404, read
-  only on a change 403. Admins grant; a domain admin may only give existing power users a viewer grant on its own
+  only on a change 403. Admins grant; a maintainer may only give existing power users a viewer grant on its own
   domains (audited). Operations, Settings, Routes and Users stay admin-only. The last enabled admin cannot be
   demoted, disabled or deleted. Inventory pages stay public to visitors without a session unless Settings,
   "Sign-in required for: Inventory" is ticked (then the sign-in page; API, CSV and drill data 401; private API
@@ -117,7 +117,7 @@ a public issue for it.
   lists of digits and ranges, bounded numbers, route id), passed as an argv list with a 0600 temporary targets file:
   no free text reaches the command line. Raw-only probes (ACK, UDP, ICMP) need `--raw` and Settings · Raw network
   access. It runs in the worker's sandbox like every scan. Only admins edit discovery profiles.
-- Scheduled rescans queue normal jobs (same queue, limits, scopes and sandbox); domain admins manage those of their
+- Scheduled rescans queue normal jobs (same queue, limits, scopes and sandbox); maintainers manage those of their
   domains, every change is in the audit table.
 
 ## Root helpers

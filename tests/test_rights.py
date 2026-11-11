@@ -1,9 +1,10 @@
-"""Feature rights per power user (none / read / read-write per feature, docs/delegation.md) and the domain page's
-Viewers panel (a domain admin grants viewer on its own domains). Probes use invalid forms: an allowed write gets the
+"""Feature rights per power user (none / read / read-write per feature, docs/delegation.md) and Admin > Domain
+viewers (a maintainer grants viewer on its own domains). Probes use invalid forms: an allowed write gets the
 handler's own refusal (422), never a saved change or a queued scan."""
 import json
 import re
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -97,6 +98,7 @@ def test_routes_map_to_features():
     assert f("GET", BASE + "/users/2") == ("settings", "read") and f("POST", BASE + "/tune") == ("operations", "write")
     assert f("POST", BASE + "/domains/x.example/delete") == ("operations", "write")
     assert f("POST", BASE + "/domains/x.example/viewers") == ("inventory", "read")
+    assert f("GET", BASE + "/viewers") == ("inventory", "read")
     for free in (BASE, BASE + "/account", BASE + "/login", BASE + "/security/posture/status", "/healthz"):
         assert f("GET", free) is None, free
 
@@ -188,30 +190,88 @@ def test_admin_saves_the_matrix_and_it_is_audited(settings):
         assert h.post(f"{BASE}/users/{dana}/rights", data={"csrf": csrf}).status_code == 404
 
 
-# --- viewers granted by a domain admin ---------------------------------------------------------------------------
+# --- viewers granted by a maintainer ---------------------------------------------------------------------------
 
 def grants_of(settings, name):
     with db.connect(settings.db_path) as c:
         return {g["domain"]: g["level"] for g in access.grants(c, uid(settings, name))}
 
 
-def test_domain_admin_grants_and_removes_a_viewer(settings):
+def test_domain_page_has_no_viewers_box(settings):
+    for name in ("boss", "dana"):   # admin, maintainer of DOM
+        with client(settings) as h:
+            login(h, name)
+            page = h.get(f"/d/{DOM}").text
+            assert 'id="viewers"' not in page and "Add viewer" not in page and "/viewers" not in page.split("<main")[1]
+
+
+def test_domain_viewers_page(settings):
+    with client(settings) as h:
+        login(h, "dana")
+        page = h.get(f"{BASE}/viewers").text
+        assert 'href="/admin/viewers"' in page   # the Admin menu entry
+        assert re.findall(r'<option value="([a-z.]+)"', page) == [DOM]   # only the domains she administers
+        assert h.get(f"{BASE}/viewers", params={"domain": DOM}).status_code == 200
+        assert h.get(f"{BASE}/viewers", params={"domain": OTHER}).status_code == 403   # viewer there
+        assert h.get(f"{BASE}/viewers", params={"domain": "gamma.example"}).status_code == 404
+    with client(settings) as h:
+        login(h, "boss")   # admins: every domain
+        assert re.findall(r'<option value="([a-z.]+)"', h.get(f"{BASE}/viewers").text) == [DOM, OTHER]
+        assert h.get(f"{BASE}/viewers", params={"domain": OTHER}).status_code == 200
+    with client(settings) as h:
+        login(h, "pia")   # no maintainer grant: no page, no menu entry
+        assert h.get(f"{BASE}/viewers").status_code == 404
+        assert "/admin/viewers" not in h.get(BASE + "/account").text
+
+
+def test_users_page_explains_roles_and_rights(settings):
+    with client(settings) as h:
+        login(h, "boss")
+        page = h.get(BASE + "/users").text
+        info = page.split('id="roles-info"')[1].split("</section>")[0]
+        for term in ("Admin", "Power user", "Maintainer", "Viewer", "Feature rights", "Sign-in scope",
+                     "2FA required"):
+            assert f"<dt>{term}</dt>" in info, term
+        assert 'href="/admin/viewers"' in page
+
+
+OLD_NAME = re.compile(r"domain[\s-]+admin", re.I)   # the per-domain level is "maintainer" (AD Domain Admins clash)
+
+
+def test_no_template_or_page_says_domain_admin(settings):
+    root = Path(access.__file__).parent / "templates"
+    assert [p.name for p in root.glob("*.html") if OLD_NAME.search(p.read_text(encoding="utf-8"))] == []
+    dana, pages = uid(settings, "dana"), ["/", "/all", f"/d/{DOM}", "/tools", BASE, BASE + "/account",
+                                          BASE + "/viewers", f"{BASE}/viewers?domain={DOM}", BASE + "/security",
+                                          BASE + "/security/scans", BASE + "/security/lookup"]
+    for name, extra in (("boss", [BASE + "/users", f"{BASE}/users/{dana}", BASE + "/settings"]), ("dana", [])):
+        with client(settings) as h:
+            csrf = login(h, name)
+            for path in pages + extra:
+                r = h.get(path)
+                assert r.status_code in (200, 404) and not OLD_NAME.search(r.text), path
+            if name == "dana":   # a refusal names the level too
+                r = h.post(f"{BASE}/domains/{OTHER}/viewers", data={"csrf": csrf, "user": "1"})
+                assert r.status_code == 403 and "maintainer rights" in r.text and not OLD_NAME.search(r.text)
+
+
+def test_maintainer_grants_and_removes_a_viewer(settings):
     pia = uid(settings, "pia")
     with client(settings) as h:
         csrf = login(h, "dana")
-        page = h.get(f"/d/{DOM}").text
-        assert 'id="viewers"' in page
-        picks = re.findall(r'<option value="(\d+)">(\w+)</option>', page.split('id="viewers"')[1])
+        page = h.get(f"{BASE}/viewers", params={"domain": DOM}).text
+        picks = re.findall(r'<option value="(\d+)">(\w+)</option>', page.split('id="add-viewer"')[1])
         assert {n for _, n in picks} == {"pia"}   # not the admin, not herself, not a disabled user
         r = h.post(f"{BASE}/domains/{DOM}/viewers", data={"csrf": csrf, "user": str(pia), "level": "admin"},
                    follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].startswith(f"/d/{DOM}")
+        assert r.status_code == 303 and r.headers["location"] == f"{BASE}/viewers?domain={DOM}&ok=viewer-added"
         assert grants_of(settings, "pia") == {DOM: "viewer"}   # a level in the form is ignored
-        assert "Viewer added." in h.get(f"/d/{DOM}?ok=viewer-added").text
+        page = h.get(r.headers["location"]).text
+        assert "Viewer added." in page and "<b>pia</b>" in page
     with client(settings) as h:
         login(h, "pia")
         assert h.get(f"/d/{DOM}").status_code == 200 and h.get(f"/d/{OTHER}").status_code == 404
-        assert 'id="viewers"' not in h.get(f"/d/{DOM}").text   # a viewer can't pass it on
+        assert h.get(f"{BASE}/viewers").status_code == 404   # a viewer can't pass it on
     with client(settings) as h:
         csrf = login(h, "dana")
         r = h.post(f"{BASE}/domains/{DOM}/viewers/{pia}/delete", data={"csrf": csrf}, follow_redirects=False)
@@ -222,7 +282,7 @@ def test_domain_admin_grants_and_removes_a_viewer(settings):
             ("revoke-viewer", "dana", "pia", DOM), ("grant-viewer", "dana", "pia", DOM)]
 
 
-def test_domain_admin_cannot_go_further(settings):
+def test_maintainer_cannot_go_further(settings):
     ids = {n: uid(settings, n) for n in ("boss", "dana", "pia", "old")}
     with db.connect(settings.db_path) as c:
         access.set_grants(c, ids["pia"], {DOM: "admin"}, "test")
@@ -237,7 +297,7 @@ def test_domain_admin_cannot_go_further(settings):
         assert add(DOM, ids["dana"]) == 404             # not herself
         assert add(DOM, ids["old"]) == 404              # disabled
         assert add(DOM, 99999) == 404                   # no such user, no user made
-        assert add(DOM, ids["pia"]) == 409              # domain admin there: never lowered
+        assert add(DOM, ids["pia"]) == 409              # maintainer there: never lowered
         assert add(DOM, ids["pia"], "wrong") == 403     # CSRF
         r = h.post(f"{BASE}/domains/{DOM}/viewers/{ids['pia']}/delete", data={"csrf": csrf})
         assert r.status_code == 409

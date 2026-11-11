@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from . import db
 
 LEVELS = ("viewer", "admin")   # per-domain grant levels, least to most
-LEVEL_LABELS = {"viewer": "viewer", "admin": "domain admin"}
+LEVEL_LABELS = {"viewer": "viewer", "admin": "maintainer"}
 ALL = "*"                      # a grant on every domain
 
 # Feature rights of a power user (admins: everything). A feature right decides whether a user may use a feature at
@@ -94,7 +94,7 @@ class Scope:
         return RIGHTS.index(dict(self.rights).get(feature, "none")) >= RIGHTS.index(level)
 
     def acts(self, feature: str, name: str) -> bool:
-        """An action of a feature on one domain: read-write on the feature and domain admin of the domain."""
+        """An action of a feature on one domain: read-write on the feature and maintainer of the domain."""
         return self.can(feature, "write") and self.manages(name)
 
     def level(self, name: str) -> str:
@@ -170,7 +170,7 @@ ROUTES = [(re.compile(p), f, lv) for p, f, lv in (
     (r"/admin/tags", "tags", "write"),
     (r"/admin/(tune|jobs/.*|domains/[^/]+/delete)", "operations", "write"),
     (r"/admin/(settings|users)(/.*)?", "settings", None),
-    (r"/admin/domains/[^/]+/viewers(/.*)?", "inventory", "read"),
+    (r"/admin/(viewers|domains/[^/]+/viewers(/.*)?)", "inventory", "read"),
     (r"/|/all|/search|/search\.csv|/tools|/d/.*|/data/drill\.json|/scans/[^/]+\.csv"
      r"|/api/(domains|scans|jobs|rdap|email|scan)(/.*)?", "inventory", "read"),
 )]
@@ -227,9 +227,11 @@ def set_grants(conn: sqlite3.Connection, user_id: int, wanted: dict[str, str], b
         if not valid_domain(d) or lv not in LEVELS:
             raise ValueError(f"grant {d}: not a domain name or level")
     have = {g["domain"]: g["level"] for g in grants(conn, user_id)}
-    diff = {"added": sorted(f"{d}={lv}" for d, lv in wanted.items() if d not in have),
-            "removed": sorted(f"{d}={lv}" for d, lv in have.items() if d not in wanted),
-            "changed": sorted(f"{d}={have[d]}->{lv}" for d, lv in wanted.items() if d in have and have[d] != lv)}
+    lb = LEVEL_LABELS   # the audit shows the labels (maintainer), the table keeps the stored levels (admin)
+    diff = {"added": sorted(f"{d}={lb[lv]}" for d, lv in wanted.items() if d not in have),
+            "removed": sorted(f"{d}={lb.get(lv, lv)}" for d, lv in have.items() if d not in wanted),
+            "changed": sorted(f"{d}={lb.get(have[d], have[d])}->{lb[lv]}" for d, lv in wanted.items()
+                              if d in have and have[d] != lv)}
     now = db.now()
     for d in have.keys() - wanted.keys():
         conn.execute("DELETE FROM grants WHERE user_id = ? AND domain = ?", (user_id, d))
@@ -259,9 +261,9 @@ def parse_grants(form: dict[str, str], rows: int = 200) -> dict[str, str]:
 
 # --- audit trail ---------------------------------------------------------------------------------------------------
 
-# --- viewers granted by a domain admin (the domain page's Viewers panel) -----------------------------------------
-# A domain admin of a domain may give existing power users a viewer grant on exactly that domain, and take such a
-# grant back. Never more: no users made, no domain admin grants, admins untouched, a higher grant never lowered.
+# --- viewers granted by a maintainer (Admin > Domain viewers) ---------------------------------------------------
+# A maintainer of a domain may give existing power users a viewer grant on exactly that domain, and take such a
+# grant back. Never more: no users made, no maintainer grants, admins untouched, a higher grant never lowered.
 
 def viewers_panel(conn: sqlite3.Connection, domain: str, actor: dict) -> dict:
     """The grants on exactly this domain (power users) and the enabled power users that could get a viewer grant."""
@@ -283,14 +285,14 @@ def _power_user(conn: sqlite3.Connection, user_id: int, actor: dict) -> dict:
 
 def grant_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: dict) -> bool:
     """A viewer grant on exactly `domain` for an existing, enabled power user. False = already there.
-    ValueError: the user already holds domain admin there (never lowered here). LookupError: no such power user."""
+    ValueError: the user already holds maintainer there (never lowered here). LookupError: no such power user."""
     target = _power_user(conn, user_id, actor)
     if target["disabled"]:
         raise LookupError("No such power user.")
     row = conn.execute("SELECT level FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain)).fetchone()
     if row:
         if row["level"] != "viewer":
-            raise ValueError(f"{target['name']} is domain admin of {domain}; only an admin changes that.")
+            raise ValueError(f"{target['name']} is maintainer of {domain}; only an admin changes that.")
         return False
     conn.execute("INSERT INTO grants (user_id, domain, level, added, added_by) VALUES (?, ?, 'viewer', ?, ?)",
                  (user_id, domain, db.now(), actor["name"]))
@@ -299,13 +301,13 @@ def grant_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: dic
 
 
 def revoke_viewer(conn: sqlite3.Connection, domain: str, user_id: int, actor: dict) -> None:
-    """Take back a viewer grant on exactly `domain`. ValueError: it is a domain admin grant. LookupError: none."""
+    """Take back a viewer grant on exactly `domain`. ValueError: it is a maintainer grant. LookupError: none."""
     target = _power_user(conn, user_id, actor)
     row = conn.execute("SELECT level FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain)).fetchone()
     if not row:
         raise LookupError(f"{target['name']} has no grant on {domain}.")
     if row["level"] != "viewer":
-        raise ValueError(f"{target['name']} is domain admin of {domain}; only an admin changes that.")
+        raise ValueError(f"{target['name']} is maintainer of {domain}; only an admin changes that.")
     conn.execute("DELETE FROM grants WHERE user_id = ? AND domain = ?", (user_id, domain))
     audit(conn, actor["name"], "revoke-viewer", target["name"], domain)
 

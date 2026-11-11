@@ -8,7 +8,7 @@
   {% if route_warn %}<div class="note bad route-warn" role="alert"><p>{{ route_warn }}</p>
     <label class="tick"><input type="checkbox" name="route_ack"> Save anyway</label></div>{% endif %}
   {% if sched_domains and not sf_id %}
-  <label class="field">Domain <small>the domains you are domain admin of</small>
+  <label class="field">Domain <small>the domains you are maintainer of</small>
     <select name="domain" required>{% if not sched_domain %}<option value="">Pick a domain…</option>{% endif %}
       {% for d in sched_domains %}<option value="{{ d }}" {% if d == sched_domain %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
   {% else %}<input type="hidden" name="domain" value="{{ sched_domain }}">{% endif %}

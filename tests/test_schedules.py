@@ -334,7 +334,7 @@ def test_domain_admin_manages_schedules_on_its_domain(settings):
         sec = section(h.get(SCANS).text)
         assert "Add a schedule" in sec
         picker = re.search(r'<select name="domain" required>(.*?)</select>', sec, re.S).group(1)
-        assert "beta.example" in picker and "alpha.example" not in picker   # domain admin domains only
+        assert "beta.example" in picker and "alpha.example" not in picker   # maintained domains only
         sec = section(h.get(SCANS + "?domain=beta.example").text)
         assert 'name="h:db.beta.example"' in sec and '<option value="beta.example" selected>' in sec
         r = h.post("/admin/schedules", data={**FORM, "csrf": csrf, "domain": "beta.example"}, follow_redirects=False)
@@ -368,9 +368,9 @@ def test_domain_admin_manages_schedules_on_its_domain(settings):
 def test_scans_section_lists_only_allowed_schedules_per_role_and_level(settings):
     with db.connect(settings.db_path) as c:
         a = make(c, dom="alpha.example", name="alpha-run")   # pia: viewer
-        b = make(c, dom="beta.example", name="beta-run")     # pia: domain admin
+        b = make(c, dom="beta.example", name="beta-run")     # pia: maintainer
         g = make(c, dom="gamma.example", name="gamma-run")   # pia: no grant
-    with client(settings) as h:   # power user: granted domains only; actions only where domain admin
+    with client(settings) as h:   # power user: granted domains only; actions only where maintainer
         login(h, "pia")
         sec = section(h.get(SCANS).text)
         assert "alpha-run" in sec and "beta-run" in sec and "gamma-run" not in sec and "gamma.example" not in sec

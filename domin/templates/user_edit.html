@@ -41,7 +41,7 @@
         <td class="pick" colspan="3">admins only</td><td class="small">{{ what }}</td></tr>{% endfor %}</tbody>
     </table></div>
     <p class="muted">A right decides what this user may use at all; the domain grants decide on which domains. Actions
-      on a domain (scans, tags, schedules) need read-write here and domain admin of that domain.</p>
+      on a domain (scans, tags, schedules) need read-write here and maintainer of that domain.</p>
     <p><button class="btn primary" type="submit">Save rights</button></p>
   </form>
 </section>
@@ -86,7 +86,7 @@
         </select></td>
       </tr>{% endfor %}</tbody>
     </table></div>
-    <p class="muted">Viewer: reads the domain's inventory, posture, CVEs, changes and reports. Domain admin: also runs
+    <p class="muted">Viewer: reads the domain's inventory, posture, CVEs, changes and reports. Maintainer: also runs
       posture scans and sets host tags there. Pick "remove" to take a domain away; save to get more empty rows.</p>
     <p><button class="btn primary" type="submit">Save domains</button></p>
   </form>

@@ -68,9 +68,9 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
 ## Users and admin
 - **Roles:** admin (every domain, users, grants, settings, operations; several allowed, never fewer than one) and
   power user (only the domains granted to it). Per domain a grant is viewer (reads inventory, posture, CVEs,
-  reports) or domain admin (also posture scans and host tags there); a grant covers the domains under it. Feature
+  reports) or maintainer (also posture scans and host tags there); a grant covers the domains under it. Feature
   rights per power user: none / read / read-write for Inventory, Posture & CVEs, Scans & schedules, Tags, Scan
-  profiles, Discovery profiles ([docs/delegation.md](docs/delegation.md)). A domain admin can add viewers to its own
+  profiles, Discovery profiles ([docs/delegation.md](docs/delegation.md)). A maintainer can add viewers to its own
   domains (domain page, Viewers). Changes to users, roles, rights and grants are logged on the Users page.
 - **Sign-in:** password, optional two-factor (TOTP, recovery codes); two-factor can be required per role
   (Settings) and per user (Users, edit page; the user enrols under My account, sent there after sign-in).

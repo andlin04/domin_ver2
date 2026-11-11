@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{# Admin > Domain viewers: a maintainer gives existing power users a viewer grant on a domain it maintains
+   (domin.access.grant_viewer); admins on every domain. Needs domains, domain (or none), viewers (rows, candidates). #}
+{% block title %}Domain viewers · domin{% endblock %}
+{% block page %}viewers{% endblock %}
+{% block content %}
+<section class="hero"><div><h1>Domain viewers</h1>
+  <p class="muted">{% if user.role == 'admin' %}<a href="{{ base }}/users">Users</a> · {% endif %}Viewer grants on a
+    domain you maintain. A viewer reads that domain and the domains under it, as far as its feature rights allow.
+    Users, maintainer grants and admins are set by an admin.</p></div></section>
+{% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
+
+<section class="card" id="viewers">
+  <form method="get" action="{{ base }}/viewers" class="inline">
+    <select name="domain" data-autosubmit aria-label="Domain">
+      <option value="">— pick a domain —</option>
+      {% for n in domains %}<option value="{{ n }}"{% if domain and n == domain.name %} selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Show</button>
+  </form>
+  {% if not domains %}<p class="muted">No domain in the inventory that you maintain.</p>{% endif %}
+</section>
+
+{% if domain %}
+<section class="card">
+  <h2>{{ domain.name }} <small>grants on this domain itself</small></h2>
+  {% if viewers.rows %}<ul class="sched-short">{% for v in viewers.rows %}
+    <li><b>{{ v.name }}</b> <span class="pill {{ 'done' if v.level == 'admin' }}">{{ 'maintainer' if v.level == 'admin' else 'viewer' }}</span>
+      {% if v.level == 'viewer' and v.user_id != user.id %}<form method="post" action="{{ base }}/domains/{{ domain.name }}/viewers/{{ v.user_id }}/delete" class="inline"
+            data-confirm="Remove {{ v.name }}'s viewer grant on {{ domain.name }}?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small" type="submit">Remove</button></form>{% endif %}</li>
+  {% endfor %}</ul>{% else %}<p class="muted">No grants on this domain itself (grants on a parent domain or every domain
+    are set by an admin).</p>{% endif %}
+  {% if viewers.candidates %}
+  <form method="post" action="{{ base }}/domains/{{ domain.name }}/viewers" class="inline" id="add-viewer">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="user" aria-label="Power user">{% for c in viewers.candidates %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+    <button class="btn primary" type="submit">Add viewer</button>
+  </form>{% else %}<p class="muted">No other enabled power user to add.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

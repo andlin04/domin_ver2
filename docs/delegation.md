@@ -11,7 +11,7 @@ content from the assigned rights; viewer and administrative rights per domain.
 
 - Last admin: an enabled admin cannot be demoted, disabled or deleted while it is the only one (409; CLI refuses).
 - Old roles, migrated once on start (`db.init`, idempotent): `viewer` -> power + grant `*` viewer;
-  `analyst` -> power + grant `*` domain admin. Require-2FA setting: power = viewer or analyst ticked before.
+  `analyst` -> power + grant `*` maintainer. Require-2FA setting: power = viewer or analyst ticked before.
 - Lost by old analysts (global, admin-only now): Operations page, tuning, job cancel/retry, scan profile edits,
   ad-hoc fingerprint of an address.
 
@@ -20,13 +20,13 @@ content from the assigned rights; viewer and administrative rights per domain.
 - `domain`: a domain name, or `*` = every domain (also future ones).
 - Levels:
   - viewer: read that domain: inventory pages, records, search/CSV rows, posture, CVEs, changes, reports.
-  - domain admin (`admin`): viewer plus that domain's actions: posture scans (whole domain, host, address,
+  - maintainer (`admin`): viewer plus that domain's actions: posture scans (whole domain, host, address,
     renew), host tags add/remove, ad-hoc fingerprint of a host name in it.
 - Subdomains: a grant on `example.com` covers the domain `example.com` and every inventoried domain `*.example.com`.
 - Several grants covering one domain: the highest level wins.
 - Grants of an admin are kept but unused.
-- Who grants: admins (any grant, Users page); a domain admin: viewer only, on a domain it is domain admin of
-  (Viewers panel, below).
+- Who grants: admins (any grant, Users page); a maintainer: viewer only, on a domain it is maintainer of
+  (Domain viewers, below).
 
 ## Feature rights (owner 2026-11-11)
 - Per power user, per feature: none / read / read-write (column `users.rights`, JSON). Admins: everything.
@@ -44,8 +44,8 @@ content from the assigned rights; viewer and administrative rights per domain.
 - Admin-only, not in the matrix: Operations (jobs, tuning, visits, dropping a domain), Settings and Routes (incl.
   sign-in), Users (users, roles, rights, grants). Global data with no domain to filter on, or user management.
 - How rights and grants combine: the right decides whether the user may use a feature at all, the grants on which
-  domains. Reading a domain's data needs read on the feature and a grant (viewer or domain admin) covering the
-  domain. An action on a domain needs read-write on the feature and domain admin of the domain. Profiles have no
+  domains. Reading a domain's data needs read on the feature and a grant (viewer or maintainer) covering the
+  domain. An action on a domain needs read-write on the feature and maintainer of the domain. Profiles have no
   domain: read-write on the feature is enough.
 - Enforcement: one table, `domin/access.py` `ROUTES` (path -> feature, level; GET = read, other methods = write
   unless fixed), checked for every signed-in request before its handler (`web.signin_gate`). No right: 404, as an
@@ -56,13 +56,16 @@ content from the assigned rights; viewer and administrative rights per domain.
   Scan profiles, Discovery profiles read; Scans & schedules, Tags read-write. New users get the same; admins change
   them on the edit page (audit `rights`).
 
-## Viewers panel (owner 2026-11-11)
-- Domain page, for a domain admin of that domain (and admins): the grants on exactly that domain, "Add viewer" (a
-  pick of enabled power users, not the actor) and "Remove" on viewer rows.
-- Only a viewer grant on exactly that domain (it covers the domains under it). Never: making users, domain admin
-  grants, admins, lowering a domain admin grant (409), the actor's own grants.
-- Routes: `POST /admin/domains/<name>/viewers` (form `user`), `POST /admin/domains/<name>/viewers/<id>/delete`. Not
-  domain admin there: 403; domain outside the grants or unknown: 404. Audit: `grant-viewer`, `revoke-viewer`.
+## Domain viewers (owner 2026-11-11; moved off the domain page 2026-11-11)
+- Admin menu > Domain viewers (`GET /admin/viewers?domain=<name>`), for a maintainer of any domain (and admins):
+  pick a domain you administer (admins: every domain), see the grants on exactly that domain, "Add viewer" (a pick
+  of enabled power users, not the actor) and "Remove" on viewer rows. No maintainer grant: 404. The inventory
+  domain page shows no viewer box.
+- Only a viewer grant on exactly that domain (it covers the domains under it). Never: making users, maintainer
+  grants, admins, lowering a maintainer grant (409), the actor's own grants.
+- Routes: `POST /admin/domains/<name>/viewers` (form `user`), `POST /admin/domains/<name>/viewers/<id>/delete`;
+  both go back to the page. Not maintainer there: 403 ("needs maintainer rights"); domain outside the grants or unknown: 404. Audit:
+  `grant-viewer`, `revoke-viewer`.
 
 ## Filtering
 - One helper: `domin/access.py` `Scope` (for_user, sees, manages, `sql(column)` -> SQL fragment).
@@ -96,7 +99,7 @@ content from the assigned rights; viewer and administrative rights per domain.
   by the user (admins reset it). Audit: `require-2fa`, `reset-2fa`.
 - Out-of-scope object: same answer as an unknown one (404 for `/d/<name>`, compare, scan records/CSV, history,
   job; the posture page ignores an unknown `?domain=` as before).
-- Action on a visible domain without domain admin: 403 with the reason.
+- Action on a visible domain without maintainer rights: 403 with the reason.
 - Admin-only (404 to power users): Users, Settings, Routes, Operations/tuning/jobs, public DB sync, sign-in switch,
   domain delete. Profile changes follow the feature rights.
 
@@ -106,7 +109,7 @@ content from the assigned rights; viewer and administrative rights per domain.
 ## UI
 - Users page: role column, grants as pills, Edit per user.
 - User edit page `/admin/users/<id>`: role; grant rows (domain picker from the inventory plus "every domain",
-  level viewer / domain admin); empty domain = remove; 3 empty rows to add; same card/table/select styles.
+  level viewer / maintainer); empty domain = remove; 3 empty rows to add; same card/table/select styles.
 - Audit: new table `audit` (no audit log existed): user add/role/disable/delete and grant changes, actor and time;
   last 50 on the Users page.
 

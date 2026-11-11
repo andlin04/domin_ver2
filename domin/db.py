@@ -148,7 +148,7 @@ CREATE INDEX IF NOT EXISTS host_tags_tag ON host_tags(tag, host);
 CREATE TABLE IF NOT EXISTS grants (   -- delegation: a power user's domains (domin.access)
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     domain TEXT NOT NULL,                 -- a domain name (covers the domains under it) or '*' = every domain
-    level TEXT NOT NULL,                  -- viewer | admin (domain admin: that domain's actions too)
+    level TEXT NOT NULL,                  -- viewer | admin (maintainer: that domain's actions too)
     added TEXT NOT NULL,
     added_by TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (user_id, domain)

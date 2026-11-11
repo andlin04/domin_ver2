@@ -2,6 +2,22 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Domain viewers move to the admin side; "domain admin" is now "maintainer"
+
+- The per-domain levels are Maintainer and Viewer: "domain admin" (formerly; it reads as Active Directory Domain
+  Admins in a DNS context) is renamed everywhere users see it: pages, error messages, the users page's Changes
+  detail (new entries: `example.com=maintainer`), CLI (`user-grant ... maintainer`, `user-list`), README, SECURITY,
+  docs and the older entries below. Unchanged: the stored level `admin` in `grants.level` (the CLI still accepts
+  `admin`), routes, the audit actions; no migration.
+- The inventory domain page no longer shows the Viewers box. Viewer granting is now Admin > Domain viewers
+  (`/admin/viewers`): a maintainer picks a domain it maintains, sees the grants on it, adds or removes a viewer;
+  admins on every domain. Same rules as before (viewer only, existing enabled power users, 403 without maintainer
+  rights, 404 outside the grants); the menu entry and page exist only for users with a maintainer grant (and
+  admins). The add/remove forms return to this page.
+- Users page: a "Roles and rights" panel (admin, power user, maintainer, viewer, feature rights, sign-in scope,
+  2FA required) and a link to Domain viewers.
+- Rollback: `git revert` this commit and run update.sh; no database change.
+
 ## 2026-11-11: update.sh survives replacing itself
 
 - update.sh copies a new update.sh over itself in place; bash reads a script piece by piece, so the rest of that
@@ -144,23 +160,23 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   key, so old saved widths no longer apply); host names no longer cut off; the skip reason sits under the date.
 - Rollback: `git revert` this commit and re-run install.sh (templates and static files only).
 
-## 2026-11-11: Feature rights per power user, viewers granted by domain admins
+## 2026-11-11: Feature rights per power user, viewers granted by maintainers
 
 - Users, edit page, "Feature rights": none / read / read-write per feature for a power user: Inventory, Posture &
   CVEs, Scans & schedules, Tags, Scan profiles, Discovery profiles (docs/delegation.md, Feature rights). Operations,
   Settings/Routes and Users stay admin-only. Admins have every right. Audit: `rights`.
 - Checked once, centrally (`access.ROUTES`, before the handler): no right = 404 as an unknown page, read only on a
   change = 403. Navigation, tabs, buttons and columns (Tags) hide what the user can't use. Combines with the domain
-  grants: an action on a domain needs read-write on the feature and domain admin of the domain.
+  grants: an action on a domain needs read-write on the feature and maintainer of the domain.
 - Profile and discovery profile edits follow the rights instead of the admin role.
 - A power user's start page is the first feature it may use (Posture, Scans, Inventory, My account).
-- Domain page, "Viewers" panel (domain admins of that domain, and admins): give an enabled power user a viewer grant
-  on exactly that domain, or take one back. No users made, no domain admin grants, admins and higher grants
+- Domain page, "Viewers" panel (maintainers of that domain, and admins): give an enabled power user a viewer grant
+  on exactly that domain, or take one back. No users made, no maintainer grants, admins and higher grants
   untouched (409). Audit: `grant-viewer`, `revoke-viewer`.
 - Migration on start (once): new column `users.rights`; every existing user gets what power users could do before:
   inventory, posture, profiles, discovery read; scans & schedules, tags read-write. New users get the same.
 - Rollback: `git revert` this commit and re-run install.sh; older code ignores `users.rights` (every power user gets
-  the old abilities back, profile edits admin-only again). Viewer grants made by domain admins stay as normal grants;
+  the old abilities back, profile edits admin-only again). Viewer grants made by maintainers stay as normal grants;
   remove them on the Users page if unwanted (audit `grant-viewer` lists them).
 
 ## 2026-11-11: Sign-in per area, two-factor per user
@@ -184,9 +200,9 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
 ## 2026-11-11: Scheduled rescans in Posture · Scans, route check, header and table fixes
 
 - Scheduled rescans moved to a section of Posture · Scans: domain, name, recurrence, what runs, next and last run,
-  status; edit, run now, enable/disable and delete where the user is domain admin, other rows read-only. Admins see
+  status; edit, run now, enable/disable and delete where the user is maintainer, other rows read-only. Admins see
   every schedule, power users only those of domains they hold a grant on. "Add a schedule" picks the domain from the
-  user's domain-admin domains (hidden when there are none). The domain page keeps a short list with a link; the
+  user's maintained domains (hidden when there are none). The domain page keeps a short list with a link; the
   Operations card is a count with a link.
 - Route check: a posture profile whose route is a proxy, Tor or Mullvad, on an internal domain or with private host
   addresses, gets a note at the profile pick, a refusal on save (409, "Save anyway" to keep it) and a warning in the
@@ -212,13 +228,13 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   (none / top N / list), -T0..5, --max-rate, --max-retries, --host-timeout, -n/-R, route; the page shows each
   profile's command line. Public domains: only the scan's own addresses; internal domains: Settings · Internal
   networks (reverse names under the domain become records). Results per scan on the domain page.
-- "Scan with nmap" on a domain page (domain admins) with a profile; a default profile preselects it. Refreshes,
+- "Scan with nmap" on a domain page (maintainers) with a profile; a default profile preselects it. Refreshes,
   retries and the public scan API never get a discovery stage.
 - Schedules per domain: inventory (with or without a discovery profile) and/or posture (profile; all hosts, chosen
   hosts from the latest inventory, or a tag); daily, weekly, monthly (29-31: last day of shorter months), every N
   hours or days, server local time. A worker thread checks every minute; a missed run runs once, a run whose
   previous one is open is skipped and logged, chosen hosts gone from the inventory are skipped and shown. Run now,
-  enable/disable, edit, delete; domain admins on their domains, viewers read, others 404; all on the admin
+  enable/disable, edit, delete; maintainers on their domains, viewers read, others 404; all on the admin
   dashboard. Changes go to the audit table.
 - Migration on start (idempotent): new tables `discovery_profiles` (with a `default` row), `discovery_results`,
   `schedules`; new columns `jobs.discovery`, `jobs.schedule_id`, `scans.discovery`, `scans.discovery_params`,
@@ -232,14 +248,14 @@ Newest first. `deploy/install.sh` applies an update in place; the database, `/et
   operations, tuning, scan profiles, address fingerprints; several allowed, the last enabled one cannot be
   demoted, disabled or deleted (web and CLI).
 - A power user sees only its granted domains, per domain as viewer (inventory, posture, CVEs, changes, reports) or
-  domain admin (also posture scans, host tags, host-name fingerprints and CVE look-ups). A grant covers the domains
+  maintainer (also posture scans, host tags, host-name fingerprints and CVE look-ups). A grant covers the domains
   under it; `*` = every domain.
 - One scope filter in every list, search, CSV, drill data, chart, count, Changes panel, posture page and API; an
   out-of-scope domain, scan, job or host answers 404 like an unknown one. Visitors without a session still see the
   public inventory.
 - Users page: grants per user, an edit page per user (`/admin/users/<id>`), and an audit of user, role and grant
   changes (new `audit` table). CLI: `user-grant <name> <domain|*> <viewer|admin|none>`.
-- Migration on start (idempotent): viewer -> power user + `*` viewer, analyst -> power user + `*` domain admin;
+- Migration on start (idempotent): viewer -> power user + `*` viewer, analyst -> power user + `*` maintainer;
   require-2FA for either old role carries over to power users. New tables `grants`, `audit`.
 - Rollback: restore the pre-update database backup, or run `UPDATE users SET role = 'viewer' WHERE role = 'power'`
   first (older code lets every signed-in user read all posture), then `git revert` and re-run install.sh.
