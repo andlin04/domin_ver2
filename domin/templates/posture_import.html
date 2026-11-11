@@ -9,6 +9,6 @@
 {% include "_posture_tabs.html" %}
 {% if notice %}<p class="note ok" role="status">{{ notice }}</p>{% endif %}
 {% with import_from="posture", import_title="Import targets from CSV" %}{% include "_csv_import.html" %}{% endwith %}
-<p class="muted small-print">A row needs a domain or a host name, and an address to be scanned. The domain inventory
-  scope (Settings) applies; addresses outside the posture scope stay listed but are not scanned.</p>
+<p class="muted">A row needs a domain or a host name, and an address to be scanned. The domain inventory scope
+  (Settings) applies; addresses outside the posture scope stay listed but are not scanned.</p>
 {% endblock %}

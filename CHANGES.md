@@ -2,6 +2,12 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Components page and Import targets: layout
+
+- The notes on Settings > Components and Posture > Import targets are left-aligned body text (they were centered
+  small print). `scripts/screenshots.py` adds the views `settings-components` and `posture-import`.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Components: inventory and posture, installed and turned on separately
 
 - **`install.sh --components inventory,posture`** (default both; kept as `DOMIN_COMPONENTS` in `/etc/domin.env`).
