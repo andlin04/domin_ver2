@@ -553,6 +553,12 @@ SHOTS = {
     "table-posture-hosts": ("/admin/security/analysis?domain=example.com", True, 1000, show_from("section.host-list")),
     "table-schedules": ("/admin/security/scans", True, 900, from_card("Scheduled rescans")),
     "schedule-route-warning":("/admin/security/scans?domain=lab.example.test", True, 1000, SUBMIT_LAB),
+    "tools": ("/tools", True, 900, ""),
+    "lookup": ("/admin/security/lookup", True, 1100, ""),
+    "public-overview": ("/", False, 1200, ""),
+    "public-domain": ("/d/example.com", False, 1400, ""),
+    "not-found": ("/d/no-such-domain.example", True, 500, ""),   # error.html
+    "setpw-invalid": ("/admin/set-password?token=demo", False, 600, ""),
 }
 LIGHT = ("overview", "posture-overview", "header")   # also shot in the light theme: NAME-light.png
 PHONE, PHONE_WIDTH = ("header",), 390   # also shot at a phone width, dark and light: NAME-390[-light].png
@@ -602,12 +608,15 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--wait", type=int, default=6000, help="ms the page gets to render (charts)")
     ap.add_argument("--only", default="", help="comma-separated shot names")
+    ap.add_argument("--light", default=",".join(LIGHT), help="comma-separated views also shot in the light theme"
+                    " ('all' = every view)")
     ap.add_argument("--phone", default=",".join(PHONE), help=f"comma-separated views also shot {PHONE_WIDTH} px wide")
     args = ap.parse_args()
     browser = find_browser(args.edge)
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     only = {x.strip() for x in args.only.split(",") if x.strip()}
+    light = list(SHOTS) if args.light == "all" else [x for x in args.light.split(",") if x in SHOTS]
     with tempfile.TemporaryDirectory(prefix="domin-demo-", ignore_cleanup_errors=True) as tmp:
         os.chdir(tmp)   # relative data paths: pages that show them show "data/...", not this machine's paths
         for k in [k for k in os.environ if k.startswith("DOMIN_")]:
@@ -649,7 +658,7 @@ def main() -> int:
         thread.start()
         while not server.started:
             time.sleep(0.1)
-        shots = [(n, "dark", n, 0) for n in SHOTS] + [(n, "light", f"{n}-light", 0) for n in LIGHT]
+        shots = [(n, "dark", n, 0) for n in SHOTS] + [(n, "light", f"{n}-light", 0) for n in light]
         shots += [(n, t, f"{n}-{PHONE_WIDTH}" + ("-light" if t == "light" else ""), PHONE_WIDTH)
                   for n in args.phone.split(",") if n in SHOTS for t in ("dark", "light")]
         for view, theme, name, phone in shots:

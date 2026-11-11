@@ -27,10 +27,24 @@
 }
 
 * { box-sizing: border-box; }
+/* browser-drawn colours from the theme, not the browser's blue */
+input[type="checkbox"], input[type="radio"], progress { accent-color: var(--accent); }
+a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text); line-height: 1.5;
   font: 14px/1.5 var(--font);
+}
+/* signed-in pages: a decorative backdrop (backdrop.svg as a mask, so it takes the theme's text colour) far below
+   the panels; app.js moves it at a fraction of the scroll speed for depth (none with reduced motion) */
+body.backdrop { position: relative; }
+body.backdrop::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--text); opacity: .035;
+  -webkit-mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
+  mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }

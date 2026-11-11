@@ -2,6 +2,16 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Network-graph backdrop back, Graphite colours on browser-drawn controls
+
+- Signed-in pages: the faint network-graph backdrop is back (as before the Graphite scheme: the text colour at 3.5 %,
+  moving at 15 % of the scroll speed; still with reduced motion).
+- Checkboxes, radio buttons and progress bars take the accent colour, focus rings and text selection too (they were
+  the browser's blue). Sweep for purple/indigo/violet (hue 225-330) in styles, scripts, SVGs, templates and the
+  screenshot script: none left.
+- Feature rights matrix: the description column wraps instead of scrolling sideways.
+- Rollback: `git revert` this commit and re-run install.sh (static files and one template).
+
 ## 2026-11-11: Table columns sized to their content
 
 - Every table: short columns (counts, dates, flags, severity, buttons) take only the width they need (`fit` class);

@@ -35,7 +35,7 @@
         <td><b>{{ label }}</b></td>
         {% for k in right_labels %}<td class="pick">{% if k != 'write' or write %}<input type="radio" name="r_{{ f }}" value="{{ k }}"
           aria-label="{{ label }}: {{ right_labels[k] }}" {% if rights[f] == k %}checked{% endif %}>{% else %}<span class="muted" title="Read only feature">–</span>{% endif %}</td>{% endfor %}
-        <td class="muted small">{{ read }}{% if write %} · <i>{{ write }}</i>{% endif %}</td>
+        <td class="muted small long">{{ read }}{% if write %} · <i>{{ write }}</i>{% endif %}</td>
       </tr>{% endfor %}
       {% for f, (label, what) in admin_features.items() %}<tr class="muted"><td>{{ label }}</td>
         <td class="pick" colspan="3">admins only</td><td class="small">{{ what }}</td></tr>{% endfor %}</tbody>
