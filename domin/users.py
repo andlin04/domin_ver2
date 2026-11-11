@@ -9,6 +9,7 @@ A password an admin sets (create or reset) is marked: the user may keep it for G
 renew it (count_signin); a password the user sets clears the mark."""
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import json
 import logging
@@ -196,11 +197,12 @@ def enrol_pending(conn: sqlite3.Connection, user_id: int) -> dict | None:
 
 def confirm_enrol(conn: sqlite3.Connection, user_id: int, code: str) -> list[str] | None:
     """Turn 2FA on once the user proves one code from the app; returns the recovery codes, or None if the code is
-    wrong. The codes were already shown at enrolment; this stores the secret encrypted and only the codes' hashes."""
+    wrong. The codes were already shown at enrolment; this stores the secret encrypted and only the codes' hashes:
+    each a salted scrypt hash in the password format (admin.hash_password)."""
     pending = enrol_pending(conn, user_id)
     if not pending or totp.verify(pending["secret"], code) is None:
         return None
-    hashes = [totp.hash_recovery(c) for c in pending["recovery"]]
+    hashes = [admin.hash_password(totp.normalize_recovery(c)) for c in pending["recovery"]]
     conn.execute("UPDATE users SET totp_secret = ?, recovery = ?, totp_last_step = -1 WHERE id = ?",
                  (secretbox.encrypt(pending["secret"]), json.dumps(hashes), user_id))
     conn.execute("DELETE FROM kv WHERE key = ?", (f"enrol:{user_id}",))
@@ -210,6 +212,22 @@ def confirm_enrol(conn: sqlite3.Connection, user_id: int, code: str) -> list[str
 def disable_totp(conn: sqlite3.Connection, user_id: int) -> None:
     conn.execute("UPDATE users SET totp_secret = '', recovery = '[]', totp_last_step = -1 WHERE id = ?", (user_id,))
     conn.execute("DELETE FROM kv WHERE key = ?", (f"enrol:{user_id}",))
+
+
+def _recovery_match(stored: list[str], code: str) -> str | None:
+    """The stored hash an unused recovery code matches (then consumed by the caller), or None. Stored hashes are
+    salted scrypt (scrypt$...); ones from before are unsalted SHA-256 and still work once each (no lock-out). Only a
+    code shaped like a recovery code is tried, so a wrong 6-digit code costs no scrypt runs."""
+    if not totp.looks_like_recovery(code):
+        return None
+    norm, old = totp.normalize_recovery(code), totp.hash_recovery(code)
+    for h in stored:
+        if h.startswith("scrypt$"):
+            if admin.password_matches(h, norm)[0]:
+                return h
+        elif hmac.compare_digest(h, old):
+            return h
+    return None
 
 
 def verify_second_factor(conn: sqlite3.Connection, user_id: int, code: str) -> bool:
@@ -229,9 +247,8 @@ def verify_second_factor(conn: sqlite3.Connection, user_id: int, code: str) -> b
     if step is not None:
         conn.execute("UPDATE users SET totp_last_step = ? WHERE id = ?", (step, user_id))
         return True
-    h = totp.hash_recovery(code)
-    if h in u["recovery"]:
-        left = [x for x in u["recovery"] if x != h]
+    if (used := _recovery_match(u["recovery"], code)) is not None:
+        left = [x for x in u["recovery"] if x != used]
         conn.execute("UPDATE users SET recovery = ? WHERE id = ?", (json.dumps(left), user_id))
         return True
     if secret is None:

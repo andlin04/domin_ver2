@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import re
 import secrets
 import struct
 import time
@@ -17,6 +18,7 @@ STEP = 30          # seconds per code
 WINDOW = 1         # also accept the neighbouring steps (± this many)
 ISSUER = "domin"
 RECOVERY_CODES = 10
+RECOVERY_RE = re.compile(r"^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$")
 
 
 def new_secret() -> str:
@@ -74,5 +76,16 @@ def new_recovery_codes(n: int = RECOVERY_CODES) -> list[str]:
     return ["-".join(secrets.token_hex(2) for _ in range(3)) for _ in range(n)]
 
 
+def normalize_recovery(code: str) -> str:
+    """A recovery code as typed: case and spaces do not matter."""
+    return code.strip().lower().replace(" ", "")
+
+
+def looks_like_recovery(code: str) -> bool:
+    """A recovery code (xxxx-xxxx-xxxx), not a 6-digit TOTP code: only these are tried against the slow hashes."""
+    return bool(RECOVERY_RE.match(normalize_recovery(code)))
+
+
 def hash_recovery(code: str) -> str:
-    return hashlib.sha256(code.strip().lower().replace(" ", "").encode()).hexdigest()
+    """The old storage format (unsalted SHA-256); still accepted once each, never written any more."""
+    return hashlib.sha256(normalize_recovery(code).encode()).hexdigest()

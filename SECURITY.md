@@ -46,8 +46,8 @@ a public issue for it.
   the session's CSRF token, so another site cannot sign a user out.
 - **Two-factor secrets at rest:** TOTP secrets and pending enrolments (secret plus recovery codes) are Fernet-encrypted
   (`f1:` prefix) with a key outside the database, `/etc/domin/totp.key` (root:domin 0640); they are decrypted only
-  to check a code or show the enrolment QR. Recovery codes are kept only as SHA-256 hashes once enrolment is
-  confirmed.
+  to check a code or show the enrolment QR. Recovery codes are kept only as hashes once enrolment is confirmed:
+  each a salted scrypt hash (the password format, N=2^15), so a database copy gives no cheap offline search.
   - **Protects:** copies of the database (backups, rollback copies, a stolen file): without the key they do not
     disable anyone's second factor.
   - **Does not protect against:** a compromised domin process or root on the host (both can read the key), nor a
@@ -56,8 +56,10 @@ a public issue for it.
   - **Missing or wrong key:** the app starts; no TOTP code is accepted (logged, "2FA unavailable, contact an admin");
     recovery codes still work; an admin resets the user's 2FA. Password break-glass (`admin-password`,
     `user-passwd`) needs no key. `totp-rekey` re-encrypts everything with a new key (README).
-  - **Recovery-code hashes** are unsalted SHA-256 of 48 random bits each: a database copy lets an attacker search
-    them offline (about 2^48 tries per code); they still need the user's password (scrypt) to use one.
+  - **Recovery-code hashes:** a code is checked against each unused hash (only input shaped like a recovery code,
+    so a wrong 6-digit code costs no scrypt runs); a match is removed, so each code works once. Codes from before
+    this change are unsalted SHA-256 hashes: they still work once each and are not rewritten; re-enrolling 2FA
+    replaces them with salted ones.
 - **Admin-set passwords** (Users: create, or Set password on a user's page; CLI `user-add`, `user-passwd`): the admin
   types or generates the password (Generate: 20 characters from `crypto.getRandomValues` in the browser, a static
   script) and hands it over; **that handover is the admin's responsibility** (a channel you trust, not the same one

@@ -2,6 +2,14 @@
 
 Newest first. `deploy/install.sh` applies an update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-11: Recovery codes stored as salted scrypt hashes
+
+- New 2FA enrolments store each recovery code as its own salted scrypt hash (the password hashing helper); a code
+  is verified by trying each unused hash and removed when it matches. Existing unsalted SHA-256 entries still verify
+  once each (no lock-out); re-enrolling 2FA replaces them.
+- Rollback: `git revert` this commit and run update.sh. Users who enrolled after this change then cannot use their
+  recovery codes (the old code only knows SHA-256): an admin resets their 2FA, or they re-enrol.
+
 ## 2026-11-11: Posture default profile: version intensity 7, timeout 900
 
 - A fresh install seeds the `default` posture profile with `--version-intensity 7` (nmap's own default, better hit

@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS users (
     totp_required INTEGER NOT NULL DEFAULT 0,
     rights TEXT NOT NULL DEFAULT '',           -- json feature rights of a power user; '' = the defaults
     totp_last_step INTEGER NOT NULL DEFAULT -1,   -- last accepted TOTP step: a code works only once
-    recovery TEXT NOT NULL DEFAULT '[]',       -- json list of sha256 of the unused recovery codes
+    recovery TEXT NOT NULL DEFAULT '[]',       -- json: salted scrypt per unused recovery code (or old sha256)
     disabled INTEGER NOT NULL DEFAULT 0,
     created TEXT NOT NULL,
     last_login TEXT

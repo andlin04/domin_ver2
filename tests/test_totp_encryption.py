@@ -65,8 +65,30 @@ def test_enrolment_stores_only_ciphertext(settings):
         assert users.confirm_enrol(c, uid, now_code(secret)) == codes
         row = c.execute("SELECT totp_secret, recovery FROM users WHERE id = ?", (uid,)).fetchone()
     assert row[0].startswith("f1:") and row[0] != secret and secret not in row[0]
-    assert json.loads(row[1]) == [totp.hash_recovery(x) for x in codes]   # hashes, not the codes
-    assert not any(x in row[1] for x in codes)
+    stored_codes = json.loads(row[1])
+    assert len(stored_codes) == len(codes) and all(h.startswith("scrypt$") for h in stored_codes)   # salted hashes
+    assert len(set(stored_codes)) == len(codes)
+    assert not any(x in row[1] for x in codes) and not any(totp.hash_recovery(x) in row[1] for x in codes)
+    with db.connect(settings.db_path) as c:
+        assert users.verify_second_factor(c, uid, codes[3].upper()) is True    # any unused code works once
+        assert users.verify_second_factor(c, uid, codes[3]) is False           # used: refused
+        assert len(json.loads(c.execute("SELECT recovery FROM users WHERE id = ?", (uid,)).fetchone()[0])) == 9
+        assert users.verify_second_factor(c, uid, "0000-0000-0000") is False
+
+
+def test_old_unsalted_recovery_code_still_works_once(settings):
+    with db.connect(settings.db_path) as c:
+        uid = users.create(c, "tia", "admin", PW)
+        secret, codes = users.start_enrol(c, uid)
+        users.confirm_enrol(c, uid, now_code(secret))
+        new = json.loads(c.execute("SELECT recovery FROM users WHERE id = ?", (uid,)).fetchone()[0])
+        old = "1a2b-3c4d-5e6f"
+        c.execute("UPDATE users SET recovery = ? WHERE id = ?", (json.dumps([totp.hash_recovery(old)] + new), uid))
+        assert users.verify_second_factor(c, uid, old) is True
+        assert users.verify_second_factor(c, uid, old) is False
+        left = json.loads(c.execute("SELECT recovery FROM users WHERE id = ?", (uid,)).fetchone()[0])
+        assert left == new
+        assert users.verify_second_factor(c, uid, codes[0]) is True
 
 
 def test_plaintext_is_migrated_at_start_and_still_verifies(settings):
