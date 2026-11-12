@@ -139,7 +139,7 @@
   <p class="muted small-print">Marks posture CVEs that are exploited in the wild (CISA KEV), have public exploit code
     (Exploit-DB, Metasploit, NVD references tagged Exploit) or proof-of-concept repositories (PoC-in-GitHub,
     unverified third-party code), with the EPSS exploitation probability. Pages read only the local copy; links
-    open the source's page.{% if not xp.own %} Shared CVE database mode: this instance downloads nothing.{% endif %}</p>
+    open the source's page. Each instance downloads its own copy, also in shared CVE database mode.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Source</th><th class="fit">Last updated</th><th class="num fit">CVEs</th><th>Last error</th></tr></thead>
     <tbody>{% for src in xp.sources %}<tr><td>{{ src.name }}</td><td class="fit">{{ src.at or 'never' }}</td>

@@ -1786,7 +1786,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             route = proxy.label(proxy.get(c))   # ad-hoc fingerprints take the default route
             st = exploits.status(c)
             when = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else ""  # noqa: E731
-            xp = {"on": exploits.enabled(c), "own": settings.cve_db_mode == "own",
+            xp = {"on": exploits.enabled(c),
                   "sources": [{"name": exploits.NAMES[k], "at": when(st.get(k, {}).get("at")),
                                "n": st.get(k, {}).get("n", 0), "error": st.get(k, {}).get("error", ""),
                                "failed": when(st.get(k, {}).get("failed"))} for k in exploits.SOURCES]}

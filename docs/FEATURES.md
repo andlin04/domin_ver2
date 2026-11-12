@@ -51,8 +51,8 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   PoC chips; a CVE's details and the findings by address list the sources with links (new tab; nothing third-party
   is fetched or shown inline). Downloaded with the daily CVE refresh (or `refresh-exploits`) into the local database;
   pages never call the sources, a failed download keeps the previous data, Settings · CVE look-up shows each
-  source's last update and error and turns the feature off. Posture only; shared CVE database mode downloads
-  nothing. Sources and licenses: [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
+  source's last update and error and turns the feature off. Posture only; every instance keeps its own copy,
+  also in shared CVE database mode. Sources and licenses: [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 - **Overview tab (What):** KPIs, CVEs over time (stacked by severity, addresses scanned as a line), fix available or
   not, CVEs found.
 - **Analysis tab (Where):** attack surface over time, exposed services (the part with CVEs marked), findings by

@@ -296,7 +296,7 @@ CVE_REFRESH_HOURS = 24
 def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
     """Once a day (from the worker's hourly loop): CVE entries older than a day are fetched again and the latest scan
     of every address is matched against them (posture.refresh_cves), then the exploit data is downloaded again
-    (exploits.refresh; own CVE database mode and the feature on). The result goes to kv `cve_refresh:last`."""
+    (exploits.refresh; feature on, in both CVE database modes). The result goes to kv `cve_refresh:last`."""
     now = time.time() if now is None else now
     with db.connect(settings.db_path) as conn:
         last = json.loads(admin.kv_get(conn, CVE_REFRESH_KEY) or "{}")
@@ -305,7 +305,7 @@ def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
         cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, ttl_days=1)
         with tools.http_client() as client:
             res = posture.refresh_cves(conn, cve_db, client, settings.nvd_api_key)
-            if settings.cve_db_mode == "own" and exploits.enabled(conn):   # shared mode: no downloads
+            if exploits.enabled(conn):   # own copy in both CVE database modes
                 try:
                     exploits.refresh(conn, client)
                 except Exception:

@@ -134,9 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             if "posture" not in components.enabled(conn, settings.components):
                 print("refresh-exploits: the posture component is off or not installed", file=sys.stderr)
                 return 2
-            if settings.cve_db_mode != "own" or not exploits.enabled(conn):
-                print("refresh-exploits: exploit data is off (Settings > CVE look-up) or the CVE database is "
-                      "shared (no downloads)", file=sys.stderr)
+            if not exploits.enabled(conn):
+                print("refresh-exploits: exploit data is off (Settings > CVE look-up)", file=sys.stderr)
                 return 2
             with tools.http_client() as client:
                 st = exploits.refresh(conn, client)

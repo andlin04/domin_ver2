@@ -3,6 +3,13 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-12: Exploit data in shared CVE database mode
+
+- Every instance downloads and keeps its own exploit data, also when it reads a shared CVE database
+  (`DOMIN_CVE_DB_MODE=shared`): no dependency on another instance. The daily refresh and `refresh-exploits` run in
+  both modes.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-12: Exploit data in the posture reports
 
 - The Markdown and PDF posture reports carry the exploit facts the posture pages show: the executive summary counts
