@@ -18,6 +18,11 @@ update in place; the database, `/etc/domin.env` and certificates stay.
 - `deploy/package.sh` also packs LICENSE, THIRD-PARTY-NOTICES.md and docs/*.md.
 - Rollback: `git revert` this commit and run update.sh (footer and CVE look-up texts; the rest is documentation).
 
+## 2026-11-12: Backdrop visible
+
+- The network-graph backdrop was drawn at 3.5 % opacity, too faint to notice; now 10 % (`--backdrop-alpha`).
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-11: Optional hidden sign-in link
 
 - `DOMIN_HIDE_SIGNIN_LINK=1` in /etc/domin.env drops the "Sign in" link from the menu (public sites); /admin still

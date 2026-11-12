@@ -42,7 +42,7 @@ body {
 body.backdrop { position: relative; }
 body.backdrop::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--text); opacity: .035;
+  background: var(--text); opacity: var(--backdrop-alpha, .1);   /* .035 was too faint to notice (owner 2026-11-12) */
   -webkit-mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
   mask: url("backdrop.svg") 0 var(--backdrop-y, 0px) / 720px repeat;
 }
