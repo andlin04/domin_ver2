@@ -3,6 +3,21 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-12: Exploit data for posture CVEs
+
+- Posture CVEs show whether they are exploited in the wild (KEV pill, CISA catalog: date added, ransomware use),
+  have public exploit code (exploit pill: Exploit-DB, Metasploit, NVD references tagged Exploit) or only
+  proof-of-concept repositories (PoC pill: PoC-in-GitHub, labeled unverified third-party code), and their FIRST EPSS
+  score. Overview and Analysis CVE tables: Exploit and EPSS columns (sortable) and KEV / Exploit / PoC chips; CVE
+  details and findings by address: the sources with links (new tab, `rel="noopener noreferrer"`).
+- New `domin/exploits.py`, table `cve_exploits` (created by `db.init`); downloaded with the daily CVE refresh (own CVE
+  database mode) and by `python -m domin refresh-exploits`; a failed source keeps its old rows (status in kv
+  `exploits:status`). Settings · CVE look-up: last update and error per source, on/off for admins (kv
+  `exploits:off`). NVD findings keep their Exploit-tagged references (`xrefs`; filled in by the next daily refresh).
+- THIRD-PARTY-NOTICES.md lists the five sources with their terms.
+- Rollback: `git revert` this commit and run update.sh; the `cve_exploits` table and the two kv keys stay unused
+  (drop with `DROP TABLE cve_exploits` if wanted).
+
 ## 2026-11-11: Documentation for publishing, MIT license
 
 - README shortened to an overview; the details moved to docs/: FEATURES.md, INSTALL.md, CONFIGURATION.md (every

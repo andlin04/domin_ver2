@@ -21,6 +21,7 @@ Below, `domin <command>` stands for that line.
 | `import-csv <file> [--map field=column ...] [--delimiter ,\|;\|tab]` | Load a CSV as imported scans ([FEATURES.md](FEATURES.md#csv-import)); without `--map` the guessed mapping; `--map` overrides it per field by header name or 1-based number |
 | `geoip <csv>` | Load a DB-IP "IP to Country Lite" CSV (`.csv` or `.csv.gz`); the installer does this |
 | `refresh-fixes` | Update the fixed versions on stored posture findings |
+| `refresh-exploits` | Download the exploit data now (CISA KEV, Exploit-DB, Metasploit, FIRST EPSS, PoC-in-GitHub; also part of the daily CVE refresh); prints the status per source, exit 1 when a source failed (its old data stays), 2 when posture or the feature is off |
 | `user-add <name> [--role admin\|power] [--password-stdin] [--own]` | Create a user; password asked twice (or one stdin line); `--own`: your own password, no renewal prompt |
 | `user-list` | List users: role, 2FA, disabled, last sign-in, grants |
 | `user-passwd <name> [--password-stdin]` | Set a password as an admin (the user may keep it for 3 sign-ins); signs the user out |

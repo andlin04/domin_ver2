@@ -131,4 +131,27 @@
     <li>This product uses the NVD API but is not endorsed or certified by the NVD.</li>
   </ul>
 </section>
+
+{# exploit data (domin.exploits): status per source; admins turn it on or off #}
+<section class="card" id="exploits">
+  <h2>Exploit data <small>{{ 'on' if xp.on else 'off' }} · downloaded with the daily CVE refresh, or
+    <span class="mono">python -m domin refresh-exploits</span></small></h2>
+  <p class="muted small-print">Marks posture CVEs that are exploited in the wild (CISA KEV), have public exploit code
+    (Exploit-DB, Metasploit, NVD references tagged Exploit) or proof-of-concept repositories (PoC-in-GitHub,
+    unverified third-party code), with the EPSS exploitation probability. Pages read only the local copy; links
+    open the source's page.{% if not xp.own %} Shared CVE database mode: this instance downloads nothing.{% endif %}</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Source</th><th class="fit">Last updated</th><th class="num fit">CVEs</th><th>Last error</th></tr></thead>
+    <tbody>{% for src in xp.sources %}<tr><td>{{ src.name }}</td><td class="fit">{{ src.at or 'never' }}</td>
+      <td class="num fit">{{ src.n }}</td>
+      <td class="long">{% if src.error %}<span class="pill bad">failed {{ src.failed }}</span> {{ src.error }}{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if user.role == 'admin' %}
+  <form method="post" action="{{ base }}/security/exploits">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick"><input type="checkbox" name="on" {% if xp.on %}checked{% endif %}> Show exploit data and
+      download it daily</label>
+    <button class="btn" type="submit">Save</button>
+  </form>{% endif %}
+</section>
 {% endblock %}

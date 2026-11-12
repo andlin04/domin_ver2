@@ -493,6 +493,13 @@ details.raw { margin: .4rem 0 .8rem; }
 details.raw summary { cursor: pointer; }
 .pill.fix-yes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .pill.fix-no { background: var(--surface-2); color: var(--muted); }
+/* exploit markers (domin.exploits): KEV = exploited in the wild, exploit = public code, PoC = unverified repos */
+.pill.xp-kev { background: var(--down); color: var(--accent-ink); }
+.pill.xp-exploit { background: color-mix(in srgb, var(--accent-2) 20%, transparent); color: var(--accent-2); }
+.pill.xp-poc { background: color-mix(in srgb, var(--chart-4) 16%, transparent); color: var(--chart-4); }
+.xp-cell .pill { margin-right: .15rem; }
+.xp-links { margin: .1rem 0 0; padding-left: 1.1rem; }
+.xp-links li { margin: .1rem 0; overflow-wrap: anywhere; }
 .cve-list { margin: .3rem 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius); }
 details.cve-item { border-top: 1px solid var(--border); }
 details.cve-item:first-child { border-top: 0; }

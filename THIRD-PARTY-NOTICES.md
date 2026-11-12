@@ -66,6 +66,11 @@ terms.
 | DB-IP IP to Country Lite | countries of addresses, visitors and sign-ins | CC BY 4.0, attribution required: every page footer shows "IP Geolocation by DB-IP" linking to https://db-ip.com |
 | NVD (NIST) CVE API | CVE details matched by CPE | NVD terms of use; the CVE look-up page states: "This product uses the NVD API but is not endorsed or certified by the NVD." |
 | OSV.dev | CVEs for packages | Records keep the license of their source database (e.g. GitHub Advisory Database CC BY 4.0, Ubuntu CC BY-SA 4.0), https://google.github.io/osv.dev/data/; each finding links to its OSV/NVD record |
+| CISA Known Exploited Vulnerabilities catalog, https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json | posture: CVEs exploited in the wild (date added, ransomware use) | CC0 1.0 (as stated in https://github.com/cisagov/kev-data); no CISA or DHS endorsement implied; linked pages keep their own terms |
+| FIRST EPSS API, https://api.first.org/data/v1/epss | posture: probability of exploitation and percentile for the local CVEs | free to use, no registration; attribution requested: pages name "FIRST EPSS" next to the score |
+| Exploit-DB `files_exploits.csv`, https://gitlab.com/exploit-database/exploitdb | posture: CVE to Exploit-DB id mapping (ids and titles only; exploit files are never downloaded) | repository GPL-2.0; each entry links to https://www.exploit-db.com/exploits/&lt;id&gt; |
+| Metasploit Framework `db/modules_metadata_base.json`, https://github.com/rapid7/metasploit-framework | posture: CVE to module name mapping (names and paths only) | BSD-3-Clause, Copyright Rapid7, Inc.; each entry links to the module source on GitHub |
+| PoC-in-GitHub, https://github.com/nomi-sec/PoC-in-GitHub | posture: GitHub repositories listed as proof of concept for the local CVEs (name, URL, stars) | CC0 1.0; the repositories are unverified third-party code, linked only and labeled so |
 | crt.sh (certificate transparency) | host name discovery | public service, queried live; no data shipped |
 | RDAP (registries, rdap.org) | ASN, prefix, network name, registration data | public service, queried live; no data shipped |
 | Public DNS resolvers (`domin/resolvers.txt`, e.g. Cloudflare 1.1.1.1, Google 8.8.8.8, Quad9 DoH) | DNS lookups | addresses only, queried live |

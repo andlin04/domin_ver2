@@ -76,13 +76,14 @@ REFS = 8   # reference links kept per finding
 
 def _finding(cve: str, severity: str, score: float | None, fixed: str | None, summary: str, url: str,
              source: str, vector: str = "", published: str = "", cwe: list[str] | None = None,
-             refs: list[str] | None = None) -> dict:
+             refs: list[str] | None = None, xrefs: list[str] | None = None) -> dict:
     """One finding. vector = CVSS vector string, published = YYYY-MM-DD, cwe = weakness ids, refs = reference URLs
-    (https only, at most REFS): the detail shown when a CVE row is opened."""
+    (https only, at most REFS): the detail shown when a CVE row is opened; xrefs = those tagged "Exploit" by NVD."""
     return {"cve": cve, "severity": severity, "score": score, "fixed": fixed,
             "summary": " ".join((summary or "").split())[:1000], "url": url, "source": source,
             "vector": vector or "", "published": (published or "")[:10], "cwe": list(dict.fromkeys(cwe or [])),
-            "refs": [r for r in dict.fromkeys(refs or []) if r.startswith("https://")][:REFS]}
+            "refs": [r for r in dict.fromkeys(refs or []) if r.startswith("https://")][:REFS],
+            "xrefs": [r for r in dict.fromkeys(xrefs or []) if r.startswith("https://")][:REFS]}
 
 
 def osv_cves(client: httpx.Client, ecosystem: str, name: str, version: str) -> list[dict]:
@@ -169,7 +170,9 @@ def nvd_cves(client: httpx.Client, part: str, vendor: str, product: str, version
         out.append(_finding(cid, band(score), score, fixed, desc,
                             f"https://nvd.nist.gov/vuln/detail/{cid}", "NVD", vector=vector,
                             published=cve.get("published", ""), cwe=cwe,
-                            refs=[r.get("url", "") for r in cve.get("references") or []]))
+                            refs=[r.get("url", "") for r in cve.get("references") or []],
+                            xrefs=[r.get("url", "") for r in cve.get("references") or []
+                                   if "Exploit" in (r.get("tags") or [])]))
     return out
 
 

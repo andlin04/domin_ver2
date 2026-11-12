@@ -81,7 +81,7 @@ Admin dashboard, no restart; overrides the environment value while set.
 | General | Domain inventory scope (domain/suffix allow and deny); scan limits; internal domains, internal DNS and internal networks; security posture scope (CIDR and country allow/deny), never scan, network tags, raw network access; sign-in required for (Inventory, Posture); require two-factor per role; sign-in protection (rules, new-place days, trusted ranges); sign-in off (dev/lab, `DOMIN_ALLOW_NO_LOGIN` only); CSV import |
 | Scan profiles | Posture scan profiles: ports, version intensity, timing, route, note |
 | Discovery profiles | nmap discovery profiles and the default ([scheduled-scans.md](scheduled-scans.md)) |
-| CVE look-up | CVEs for a host, product or package; about the CVE database |
+| CVE look-up | CVEs for a host, product or package; about the CVE database; exploit data: last update and error per source, on/off (default on; off hides the markers and skips the daily downloads, kv `exploits:off`) |
 | Routes | Direct, Tor (on/off), Mullvad (account, entry country/city), custom proxies; route per job type; DoH server |
 | Components | Turn installed components on or off |
 | Logging | Syslog server, port, protocol (UDP/TCP/TLS), facility, app-name; test message |

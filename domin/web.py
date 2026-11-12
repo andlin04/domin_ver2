@@ -42,6 +42,7 @@ from . import (
     cve,
     db,
     discovery,
+    exploits,
     fingerprint,
     guard,
     jobs,
@@ -1720,6 +1721,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             rep["changes"] = posture.changes(c, dom, host, scope=grants)
             at = json.loads(admin.kv_get(c, jobs.CVE_REFRESH_KEY) or "{}").get("at")
             rep["cve_refreshed"] = datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M") if at else ""
+            if exploits.annotate_report(c, rep):   # exploit markers and links (feature on in Settings > CVE look-up)
+                rep["xp_updated"] = exploits.last_updated(c)
             routes = proxy.get(c)
             default = posture.profile(c, posture.DEFAULT_PROFILE) or {}
             ctx.update(tab=ctx.get("tab", tab), posture_domains=known, posture_domain=dom, posture_hosts=hosts,
@@ -1781,7 +1784,13 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
     def lookup_view(request, u, s, ctx):
         with conn() as c:
             route = proxy.label(proxy.get(c))   # ad-hoc fingerprints take the default route
-        return shell(request, "lookup.html", u, s, ctx.pop("status", 200), scan_route=route, **ctx)
+            st = exploits.status(c)
+            when = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else ""  # noqa: E731
+            xp = {"on": exploits.enabled(c), "own": settings.cve_db_mode == "own",
+                  "sources": [{"name": exploits.NAMES[k], "at": when(st.get(k, {}).get("at")),
+                               "n": st.get(k, {}).get("n", 0), "error": st.get(k, {}).get("error", ""),
+                               "failed": when(st.get(k, {}).get("failed"))} for k in exploits.SOURCES]}
+        return shell(request, "lookup.html", u, s, ctx.pop("status", 200), scan_route=route, xp=xp, **ctx)
 
     @app.get(base + "/security/lookup", response_class=HTMLResponse, include_in_schema=False)
     def lookup_page(request: Request):
@@ -1790,6 +1799,21 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if not u:
                 return back()
         return lookup_view(request, u, s, security_ctx())
+
+    @app.post(base + "/security/exploits", include_in_schema=False)
+    async def exploits_save(request: Request):
+        """Exploit data (domin.exploits) on or off: off hides the markers and links and skips the daily downloads;
+        the stored data stays."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            on = data.get("on") == "on"
+            if on != exploits.enabled(c):
+                exploits.set_enabled(c, on)
+                access.audit(c, u["name"], "exploit-data", "settings", "on" if on else "off")
+        return back(base + "/security/lookup#exploits", "saved")
 
     @app.get(base + "/security/domain-search", include_in_schema=False)
     def security_domain_search(request: Request):

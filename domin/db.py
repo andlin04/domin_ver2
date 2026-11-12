@@ -219,6 +219,14 @@ CREATE TABLE IF NOT EXISTS schedules (   -- scheduled rescans of one domain (dom
     updated_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS schedules_domain ON schedules(domain);
+CREATE TABLE IF NOT EXISTS cve_exploits (   -- exploit data per CVE and source (domin.exploits)
+    cve TEXT NOT NULL,
+    source TEXT NOT NULL,                   -- kev | edb | msf | epss | poc
+    ref TEXT NOT NULL DEFAULT '',           -- edb id, msf module path, poc repo URL ('' for kev, epss)
+    label TEXT NOT NULL DEFAULT '',         -- kev date added, edb title, msf name, epss score, poc repo name
+    extra TEXT NOT NULL DEFAULT '',         -- kev 'ransomware', edb type, msf full name, epss percentile, poc stars
+    PRIMARY KEY (cve, source, ref)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS audit (    -- who changed users, roles and grants
     id INTEGER PRIMARY KEY,
     at TEXT NOT NULL,

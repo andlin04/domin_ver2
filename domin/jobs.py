@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, components, csvimport, cve, db, guard, posture, proxy, scanner, tools, users
+from . import admin, components, csvimport, cve, db, exploits, guard, posture, proxy, scanner, tools, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -295,7 +295,8 @@ CVE_REFRESH_HOURS = 24
 
 def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
     """Once a day (from the worker's hourly loop): CVE entries older than a day are fetched again and the latest scan
-    of every address is matched against them (posture.refresh_cves). The result goes to kv `cve_refresh:last`."""
+    of every address is matched against them (posture.refresh_cves), then the exploit data is downloaded again
+    (exploits.refresh; own CVE database mode and the feature on). The result goes to kv `cve_refresh:last`."""
     now = time.time() if now is None else now
     with db.connect(settings.db_path) as conn:
         last = json.loads(admin.kv_get(conn, CVE_REFRESH_KEY) or "{}")
@@ -304,6 +305,11 @@ def cve_refresh(settings: Settings, now: float | None = None) -> dict | None:
         cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, ttl_days=1)
         with tools.http_client() as client:
             res = posture.refresh_cves(conn, cve_db, client, settings.nvd_api_key)
+            if settings.cve_db_mode == "own" and exploits.enabled(conn):   # shared mode: no downloads
+                try:
+                    exploits.refresh(conn, client)
+                except Exception:
+                    log.exception("exploit data refresh failed")
         admin.kv_set(conn, CVE_REFRESH_KEY, json.dumps({"at": now, **res}))
     log.info("cve refresh: %d of %d latest scans changed", res["changed"], res["scans"])
     return res

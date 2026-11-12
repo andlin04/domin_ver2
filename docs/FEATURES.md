@@ -44,6 +44,15 @@ Signed-in pages (`/admin`). Finds services on a domain's addresses and matches t
   database (own, or a shared read-only one). Each finding: severity, CVSS score and vector, description, fixed
   versions, NVD/OSV links. CVE look-up page (Settings · CVE look-up) for a host, a product (vendor, product, version) or a
   package (ecosystem, package, version).
+- **Exploit data:** each CVE is marked when it is exploited in the wild (pill **KEV**, CISA catalog, with date added
+  and ransomware use), has public exploit code (**exploit**: Exploit-DB, Metasploit, NVD references tagged Exploit)
+  or only proof-of-concept repositories (**PoC**: PoC-in-GitHub, labeled unverified third-party code), with the FIRST
+  EPSS score. The CVE tables get Exploit (sorts KEV, exploit, PoC, then by EPSS) and EPSS columns and KEV / Exploit /
+  PoC chips; a CVE's details and the findings by address list the sources with links (new tab; nothing third-party
+  is fetched or shown inline). Downloaded with the daily CVE refresh (or `refresh-exploits`) into the local database;
+  pages never call the sources, a failed download keeps the previous data, Settings · CVE look-up shows each
+  source's last update and error and turns the feature off. Posture only; shared CVE database mode downloads
+  nothing. Sources and licenses: [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 - **Overview tab (What):** KPIs, CVEs over time (stacked by severity, addresses scanned as a line), fix available or
   not, CVEs found.
 - **Analysis tab (Where):** attack surface over time, exposed services (the part with CVEs marked), findings by

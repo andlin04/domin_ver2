@@ -2,6 +2,8 @@
    A host name expands a row under it with its addresses' details (moved from #pa-pool by app.js).
    Tab CVEs: the same findings per CVE (rep.vulns, each CVE once) with the addresses it hits. #}
 {% set cves = rep.vulns if rep is defined and rep.vulns else [] %}
+{% set xp = rep is defined and rep.xp_counts is defined %}
+{% from "_exploit.html" import cells, chips, facts %}
 <section class="card host-list" {% if cves %}data-tabs{% endif %}>
   {% if cves %}<div class="tabs" role="tablist">
     <button type="button" role="tab" class="tab active" data-tab="hosts">Hosts <small>{{ host_list|length }}</small></button>
@@ -63,11 +65,13 @@
       <span class="muted small-print">{{ cves|length }} CVEs, each once, worst first · an address opens its host on the Hosts tab</span>
       <input class="filter" placeholder="Filter all columns…" data-filter="#posture-cves" aria-label="Filter CVEs">
     </div>
+    {% if xp and (rep.xp_counts.kev or rep.xp_counts.exploit or rep.xp_counts.poc) %}<div class="chip-row" data-chips="#posture-cves" role="group" aria-label="Exploit filters">{{ chips(rep.xp_counts) }}
+      <span class="muted small-print">exploit data updated {{ rep.xp_updated or 'never' }}</span></div>{% endif %}
     <div class="table-wrap"><table id="posture-cves" class="sortable" data-colfilters>
       <thead><tr><th data-sort="text" class="fit">CVE</th><th data-sort="text" data-match="start" class="fit">Severity</th>
-        <th data-sort="num" class="num fit">Score</th><th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
+        <th data-sort="num" class="num fit">Score</th>{% if xp %}<th data-sort="num" class="fit" title="KEV, then public exploit, then PoC; ties by EPSS">Exploit</th><th data-sort="num" class="num fit" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS</th>{% endif %}<th data-sort="text">Fixed in</th><th data-sort="text">Products</th>
         <th data-sort="num">Addresses</th></tr></thead>
-      <tbody>{% for v in cves %}<tr data-text="{{ v.text }}">
+      <tbody>{% for v in cves %}<tr data-text="{{ v.text }}"{% if xp %} data-xp="{{ v.xp.tier }}"{% endif %}>
         <td class="mono"><a href="#" class="cve-toggle" data-cve-more aria-expanded="false"
           aria-label="{{ v.cve }}: show or hide its details">{{ v.cve }}</a>
           {# the detail panel: cloned into a row under this one when opened (a template's text is not the row's,
@@ -81,7 +85,7 @@
               {% if v.published %}<dt>Published</dt><dd>{{ v.published }}</dd>{% endif %}
               {% if v.cwe %}<dt>Weakness</dt><dd>{% for w in v.cwe %}{% if w.startswith('CWE-') and w[4:].isdigit() %}<a href="https://cwe.mitre.org/data/definitions/{{ w[4:] }}.html" rel="noopener noreferrer" target="_blank">{{ w }}</a>{% else %}{{ w }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
               <dt>Fixed in</dt><dd>{{ v.fixes|join(', ') if v.fixes else 'no fix published yet' }}</dd>
-              <dt>Public exploit</dt><dd class="muted">not checked yet (exploit data comes with KEV / Exploit-DB / PoC sync)</dd>
+              {% if xp %}{{ facts(v.xp) }}{% endif %}
               <dt>Source</dt><dd>{{ v.source or '' }}</dd>
             </dl>
             <h4>Affected here <small class="muted">{{ v.affected|length }}</small></h4>
@@ -95,6 +99,7 @@
           </div></template></td>
         <td class="fit"><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
         <td class="num fit">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+        {% if xp %}{{ cells(v.xp) }}{% endif %}
         <td class="long">{{ v.fixes|join(', ') if v.fixes else 'no fix yet' }}</td>
         <td class="long">{{ v.products|join(', ') }}</td>
         <td data-key="{{ v.addresses|length }}" class="long">{% for ip, name in v.addresses %}<a href="#pa-{{ ip|replace(':', '-')|replace('.', '-') }}" data-open-details title="{{ ip }}">{{ name or ip }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>

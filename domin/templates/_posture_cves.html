@@ -1,7 +1,9 @@
 {# Overview ("what"): one row per CVE across the shown domains/hosts, worst first (severity, then CVSS).
    rep.vulns from posture.report. Chips (severity, fix) and the column filters add up with the Filter box (app.js
-   applyFilters). Exploit flags, EPSS and the Act/Attend/Track tier come with the exploit data (layout plan step 6). #}
+   applyFilters). With exploit data on (rep.xp_counts, domin.exploits): Exploit and EPSS columns and chips. #}
+{% from "_exploit.html" import cells, chips %}
 {% set cves = rep.vulns %}
+{% set xp = rep.xp_counts is defined %}
 {% set nofix = cves|rejectattr('fixable')|list|length %}
 <section class="card cve-overview">
   <div class="card-head"><h2>CVEs found <small><span data-shown="#overview-cves">{{ cves|length }}</span> of
@@ -16,16 +18,19 @@
     {% if nofix and nofix < cves|length %}<span class="chip-sep" aria-hidden="true"></span>
     <button type="button" class="chip" data-attr="fix" data-val="yes" aria-pressed="false">Fix published <small>{{ cves|length - nofix }}</small></button>
     <button type="button" class="chip" data-attr="fix" data-val="no" aria-pressed="false">No fix yet <small>{{ nofix }}</small></button>{% endif %}
+    {% if xp %}{{ chips(rep.xp_counts) }}{% endif %}
   </div>
+  {% if xp %}<p class="muted small-print">Exploit data updated {{ rep.xp_updated or 'never' }} (CISA KEV, Exploit-DB, Metasploit, FIRST EPSS, PoC-in-GitHub)</p>{% endif %}
   <div class="table-wrap"><table id="overview-cves" class="sortable" data-colfilters>
     <thead><tr><th data-sort="text" class="fit">CVE</th><th data-sort="text" data-match="start" class="fit">Severity</th>
-      <th data-sort="num" class="num fit">CVSS</th><th data-sort="text">Product</th><th data-sort="text">Fixed in</th>
+      <th data-sort="num" class="num fit">CVSS</th>{% if xp %}<th data-sort="num" class="fit" title="KEV, then public exploit, then PoC; ties by EPSS">Exploit</th><th data-sort="num" class="num fit" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS</th>{% endif %}<th data-sort="text">Product</th><th data-sort="text">Fixed in</th>
       <th data-sort="num">Addresses</th></tr></thead>
-    <tbody>{% for v in cves %}<tr data-sev="{{ v.severity }}" data-fix="{{ 'yes' if v.fixable else 'no' }}">
+    <tbody>{% for v in cves %}<tr data-sev="{{ v.severity }}" data-fix="{{ 'yes' if v.fixable else 'no' }}"{% if xp %} data-xp="{{ v.xp.tier }}"{% endif %}>
       <td class="mono fit"><a href="{{ 'https://nvd.nist.gov/vuln/detail/' ~ v.cve if v.cve.startswith('CVE-') else 'https://osv.dev/vulnerability/' ~ v.cve }}"
         rel="noopener noreferrer" target="_blank" title="{{ v.summary or '' }}">{{ v.cve }}</a></td>
       <td class="fit"><span class="pill sev-{{ v.severity }}">{{ v.severity }}</span></td>
       <td class="num fit">{{ '%.1f'|format(v.score) if v.score is not none else '' }}</td>
+      {% if xp %}{{ cells(v.xp) }}{% endif %}
       <td class="long">{{ v.products|join(', ') }}</td>
       <td class="long">{% if v.fixes %}{{ v.fixes|join(', ') }}{% else %}<span class="muted">no fix yet</span>{% endif %}</td>
       <td class="cve-where long" data-key="{{ v.addresses|length }}"><b>{{ v.addresses|length }}</b>

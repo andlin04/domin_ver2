@@ -1,5 +1,5 @@
 """CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-csv <csv>|refresh-fixes|
-user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password|totp-rekey}."""
+refresh-exploits|user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password|totp-rekey}."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import access, admin, csvimport, cve, db, importer, jobs, posture, secretbox, tools, users
+from . import access, admin, components, csvimport, cve, db, exploits, importer, jobs, posture, secretbox, tools, users
 from .config import Settings
 from .validate import normalize_domain
 
@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
                          "mapping guessed from the header names; fields: " + ", ".join(csvimport.TARGETS))
     ic.add_argument("--delimiter", choices=(",", ";", "tab"), help="instead of the detected one")
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
+    sub.add_parser("refresh-exploits", help="download the exploit data now (CISA KEV, Exploit-DB, Metasploit, "
+                                            "EPSS, PoC-in-GitHub; also part of the daily CVE refresh)")
     ua = sub.add_parser("user-add", help="create a user with a password (asked twice, or one line on stdin); hand it "
                                          "over yourself: the user may keep it for a few sign-ins, then must renew it")
     ua.add_argument("name")
@@ -127,6 +129,19 @@ def main(argv: list[str] | None = None) -> int:
         cve_db = cve.Database(settings.cve_db_mode, settings.cve_db_file, settings.cve_ttl_days)
         with db.connect(settings.db_path) as conn, tools.http_client() as client:
             print(json.dumps(posture.refresh_fixes(conn, cve_db, client, settings.nvd_api_key)))
+    elif args.cmd == "refresh-exploits":
+        with db.connect(settings.db_path) as conn:
+            if "posture" not in components.enabled(conn, settings.components):
+                print("refresh-exploits: the posture component is off or not installed", file=sys.stderr)
+                return 2
+            if settings.cve_db_mode != "own" or not exploits.enabled(conn):
+                print("refresh-exploits: exploit data is off (Settings > CVE look-up) or the CVE database is "
+                      "shared (no downloads)", file=sys.stderr)
+                return 2
+            with tools.http_client() as client:
+                st = exploits.refresh(conn, client)
+        print(json.dumps(st))
+        return 1 if any(s.get("error") for s in st.values()) else 0
     elif args.cmd == "user-add":
         pw = _read_password(args.password_stdin)
         if pw is None:
