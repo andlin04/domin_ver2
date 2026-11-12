@@ -3,6 +3,17 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-12: Exploit data in the posture reports
+
+- The Markdown and PDF posture reports carry the exploit facts the posture pages show: the executive summary counts
+  CVEs known exploited (CISA KEV), with public exploit code and with only PoC repositories; Top risks and the
+  technical findings get an Exploit column (KEV with date added and ransomware use, exploit, PoC, EPSS %) and per
+  CVE the reference links (CISA KEV, Exploit-DB, Metasploit, NVD exploit references, PoC repositories labeled
+  unverified third-party code); Scope and method names the sources and their last update. Links only, from the
+  local table (`exploits.annotate_report`); nothing is fetched when a report is made.
+- Feature off (Settings · CVE look-up) or no exploit data for the report's CVEs: the report is as before.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-12: Exploit facts left-aligned in findings by address
 
 - The exploit facts under a CVE in the findings by address were centered (small-print); now left-aligned like the

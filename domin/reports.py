@@ -12,7 +12,7 @@ from datetime import datetime
 from fpdf import FPDF
 from fpdf.fonts import FontFace
 
-from . import cve, posture
+from . import cve, exploits, posture
 
 # services that should rarely face the internet: named in the attack-surface recommendation when open
 RISKY_PORTS = {21: "FTP", 23: "Telnet", 69: "TFTP", 111: "RPC", 135: "MS-RPC", 139: "NetBIOS", 445: "SMB",
@@ -40,6 +40,10 @@ def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str 
     names = names[:MAX_HOSTS]
     rep = posture.report(raw)
     rows = rep["rows"]
+    # exploit facts from the local table only (exploits.annotate_report); shown only when the feature is on and
+    # at least one CVE has some, so a report without them reads as before
+    xp = exploits.annotate_report(conn, rep) and any(v["xp"]["tier"] != "none" or "epss" in v["xp"]
+                                                     for v in rep["vulns"])
     hosts = [h for dom in picks for h in posture.with_results([n for n in names if n["domain"] == dom],
                                                                 [r for r in rows if r["domain"] == dom])]
     hosts.sort(key=lambda h: (h["rank"], *(-h["sev_n"].get(s, 0) for s in posture.SEVERITIES), h["host"]))
@@ -61,6 +65,8 @@ def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str 
         "top": [v for v in rep["vulns"] if v["severity"] in ("critical", "high")][:TOP_RISKS],
         "actions": actions(rep["vulns"], rows, hosts),
         "source": cve.SOURCE,
+        "xp": xp, "xp_counts": rep.get("xp_counts", {}) if xp else {},
+        "xp_updated": exploits.last_updated(conn) if xp else "",
     }
 
 
@@ -149,10 +155,52 @@ def summary_lines(m: dict) -> list[str]:
                      f" {k['fixable']} of {k['cves']} CVE(s) are fixed by a published update.")
     else:
         lines.append("No known vulnerabilities were matched to the detected service versions.")
+    if m.get("xp"):
+        n = m["xp_counts"]
+        lines.append(f"Exploit data: {n.get('kev', 0)} CVE(s) known exploited in the wild (CISA KEV),"
+                     f" {n.get('exploit', 0)} more with public exploit code and {n.get('poc', 0)} more with only"
+                     " proof-of-concept repositories.")
     first = [a["title"] for a in m["actions"] if a["priority"] == 1][:3]
     if first:
         lines.append("First actions: " + "; ".join(first) + ".")
     return lines
+
+
+def xp_marks(x: dict) -> str:
+    """A CVE's exploit markers as text (finding.xp from exploits.annotate): KEV (date, ransomware), exploit, PoC,
+    EPSS; '' when it has none."""
+    out = []
+    if x.get("kev"):
+        out.append(f"KEV (added {x['kev']['added']}" + (", ransomware)" if x["kev"]["ransomware"] else ")"))
+    if x.get("edb") or x.get("msf") or x.get("nvd"):
+        out.append("exploit")
+    if x.get("poc"):
+        out.append("PoC")
+    if "epss" in x:
+        out.append(f"EPSS {x['epss'] * 100:.1f}%")
+    return " · ".join(out)
+
+
+POC_NOTE = "PoC, unverified third-party code"
+
+
+def xp_refs(x: dict) -> list[tuple[str, str]]:
+    """A CVE's exploit reference links (label, url): CISA KEV, Exploit-DB, Metasploit, NVD exploit references, PoC
+    repositories. Links only: nothing is fetched, no code is included."""
+    out = []
+    if x.get("kev"):
+        out.append(("CISA KEV", "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+                                f"?search_api_fulltext={x['cve_id']}"))
+    out += [(f"Exploit-DB {e['id']}", e["url"]) for e in x.get("edb") or []]
+    out += [(f"Metasploit {m['module']}", m["url"]) for m in x.get("msf") or []]
+    out += [("NVD exploit reference", u) for u in x.get("nvd") or []]
+    out += [(f"{p['name']} ({POC_NOTE})", p["url"]) for p in x.get("poc") or []]
+    return out
+
+
+def _xp(m: dict, v: dict) -> dict:
+    """The finding's exploit facts when the report shows them, else {}."""
+    return (v.get("xp") or {}) if m.get("xp") else {}
 
 
 def _sev(v: dict) -> str:
@@ -201,6 +249,11 @@ def _dom_cells(d: dict) -> list:
             f"{d['fixable']}/{d['cves']}", f"{d['exposed']}/{d['addresses']}", d["open_ports"]]
 METHOD = ("Method: network service and version detection (scan profiles: {profiles}), matched against known"
           " vulnerabilities ({source}). Scans: {period}.")
+XP_METHOD = ("Exploit data (information only, last updated {updated}): KEV = known exploited in the wild (CISA KEV"
+             " catalog), exploit = public exploit code listed by Exploit-DB, Metasploit or an NVD reference tagged"
+             " Exploit, PoC = proof-of-concept repositories listed by PoC-in-GitHub (unverified third-party code),"
+             " EPSS = FIRST's probability of exploitation in the next 30 days. The report holds links only, no"
+             " exploit code.")
 LIMITS = ("Limits: matches are by product version; vendors that backport fixes can show false positives, and services"
           " that hide their version can hide vulnerabilities. Addresses that answered on no port are not assessed.")
 
@@ -208,9 +261,10 @@ LIMITS = ("Limits: matches are by product version; vendors that backport fixes c
 def _method(m: dict) -> list[str]:
     scope = (SCOPE_MANY.format(n=len(m["domains"]), names=_more(m["domains"], 20)) if m["domain_rows"]
              else SCOPE.format(n=len(m["hosts"]), domain=m["domain"]))
+    xp = [XP_METHOD.format(updated=m["xp_updated"] or "unknown")] if m.get("xp") else []
     return [scope,
             METHOD.format(profiles=", ".join(m["profiles"]) or "none", source=m["source"], period=_period(m)),
-            LIMITS] + ([f"Never scanned: {', '.join(m['never'])}."] if m["never"] else [])
+            *xp, LIMITS] +([f"Never scanned: {', '.join(m['never'])}."] if m["never"] else [])
 
 
 def markdown(m: dict) -> str:
@@ -229,8 +283,11 @@ def markdown(m: dict) -> str:
         md.append("No action needed on the current results.")
     md += ["", f"## {h_['Top risks']}", ""]
     if m["top"]:
-        md += ["| CVE | Severity | Product | Fixed in | Hosts |", "|---|---|---|---|---|"]
-        md += [f"| [{v['cve']}]({posture.links(v)[0][1]}) | {_sev(v)} | {_cell(', '.join(v['products']))} |"
+        xh, xl = (" Exploit |", "---|") if m.get("xp") else ("", "")
+        md += [f"| CVE | Severity |{xh} Product | Fixed in | Hosts |", f"|---|---|{xl}---|---|---|"]
+        md += [f"| [{v['cve']}]({posture.links(v)[0][1]}) | {_sev(v)} |"
+               + (f" {_cell(xp_marks(v['xp']))} |" if m.get("xp") else "")
+               + f" {_cell(', '.join(v['products']))} |"
                f" {_cell(', '.join(v['fixes']) or 'no fix yet')} | {_cell(', '.join(_names(v)))} |" for v in m["top"]]
     else:
         md.append("No critical or high vulnerabilities.")
@@ -259,8 +316,13 @@ def markdown(m: dict) -> str:
                    f" {_cell(' '.join(x for x in (s.get('product'), s.get('version')) if x))} |"
                    f" {len(s.get('findings') or [])} |" for s in r["services"]]
             md.append("")
-        md += [f"- **{v['cve']}** ({_sev(v)}; fixed in {', '.join(v['fixes']) or 'no fix yet'}):"
-               f" {_cell(_cut(v.get('summary'), 300))}" for v in r["vulns"]]
+        for v in r["vulns"]:
+            md.append(f"- **{v['cve']}** ({_sev(v)}; fixed in {', '.join(v['fixes']) or 'no fix yet'}):"
+                      f" {_cell(_cut(v.get('summary'), 300))}")
+            if marks := xp_marks(_xp(m, v)):
+                md.append(f"  - Exploit: {marks}")
+            if refs := xp_refs(_xp(m, v)):
+                md.append("  - References: " + ", ".join(f"[{_cell(label)}]({url})" for label, url in refs))
         md.append("")
     md += [f"## {h_['Scope and method']}", "", *(f"- {x}" for x in _method(m)), ""]
     return "\n".join(md)
@@ -324,8 +386,10 @@ class _Doc(FPDF):
         self.multi_cell(0, size * 0.5, _t(text), new_x="LMARGIN", new_y="NEXT")
         self.ln(1.5)
 
-    def grid(self, head: list[str], rows: list[list], widths: tuple, sev_col: int | None = None, size: float = 8.5):
-        """A table; a (label, severity) value in sev_col is printed bold in the severity's colour."""
+    def grid(self, head: list[str], rows: list[list], widths: tuple, sev_col: int | None = None, size: float = 8.5,
+             links: int | None = None):
+        """A table; a (label, severity) value in sev_col is printed bold in the severity's colour; the URL in column
+        links is clickable."""
         self.set_font("helvetica", "", size)
         self.set_text_color(*INK)
         self.set_draw_color(*LINE)
@@ -339,6 +403,8 @@ class _Doc(FPDF):
                 for i, val in enumerate(r):
                     if i == sev_col and isinstance(val, tuple):
                         row.cell(_t(val[0]), style=FontFace(emphasis="BOLD", color=SEV_RGB.get(val[1], INK)))
+                    elif i == links:
+                        row.cell(_t(val), link=str(val), style=FontFace(color=ACCENT))
                     else:
                         row.cell(_t(val))
         self.ln(3)
@@ -396,9 +462,16 @@ def pdf(m: dict) -> bytes:
         d.para("No action needed on the current results.")
     d.h1(h_["Top risks"])
     if m["top"]:
-        d.grid(["CVE", "Severity", "Product", "Fixed in", "Hosts"],
-               [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["products"]), ", ".join(v["fixes"]) or "no fix yet",
-                 _more(_names(v), 6)] for v in m["top"]], (30, 22, 44, 32, 50), sev_col=1)
+        if m.get("xp"):
+            d.grid(["CVE", "Severity", "Exploit", "Product", "Fixed in", "Hosts"],
+                   [[v["cve"], (_sev(v), v["severity"]), xp_marks(v["xp"]), ", ".join(v["products"]),
+                     ", ".join(v["fixes"]) or "no fix yet", _more(_names(v), 6)] for v in m["top"]],
+                   (28, 20, 30, 36, 26, 38), sev_col=1)
+        else:
+            d.grid(["CVE", "Severity", "Product", "Fixed in", "Hosts"],
+                   [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["products"]),
+                     ", ".join(v["fixes"]) or "no fix yet", _more(_names(v), 6)] for v in m["top"]],
+                   (30, 22, 44, 32, 50), sev_col=1)
     else:
         d.para("No critical or high vulnerabilities.")
     if m["domain_rows"]:
@@ -430,7 +503,14 @@ def pdf(m: dict) -> bytes:
                    [[f"{s['port']}/{s.get('proto') or 'tcp'}", s.get("service") or "",
                      " ".join(x for x in (s.get("product"), s.get("version")) if x), len(s.get("findings") or [])]
                     for s in r["services"]], (20, 30, 116, 12))
-        if r["vulns"]:
+        if r["vulns"] and m.get("xp"):
+            d.grid(["CVE", "Severity", "Fixed in", "Exploit", "Summary"],
+                   [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["fixes"]) or "no fix yet", xp_marks(v["xp"]),
+                     _cut(v.get("summary"), 180)] for v in r["vulns"]], (26, 20, 26, 30, 76), sev_col=1, size=7.5)
+            refs = [[v["cve"], label, url] for v in r["vulns"] for label, url in xp_refs(v["xp"])]
+            if refs:
+                d.grid(["CVE", "Exploit reference", "Link"], refs, (26, 60, 92), size=7, links=2)
+        elif r["vulns"]:
             d.grid(["CVE", "Severity", "Fixed in", "Summary"],
                    [[v["cve"], (_sev(v), v["severity"]), ", ".join(v["fixes"]) or "no fix yet",
                      _cut(v.get("summary"), 220)] for v in r["vulns"]], (28, 22, 30, 98), sev_col=1, size=7.5)
