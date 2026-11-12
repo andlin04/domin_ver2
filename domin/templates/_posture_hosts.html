@@ -65,7 +65,7 @@
       <span class="muted small-print">{{ cves|length }} CVEs, each once, worst first · an address opens its host on the Hosts tab</span>
       <input class="filter" placeholder="Filter all columns…" data-filter="#posture-cves" aria-label="Filter CVEs">
     </div>
-    {% if xp and (rep.xp_counts.kev or rep.xp_counts.exploit or rep.xp_counts.poc) %}<div class="chip-row" data-chips="#posture-cves" role="group" aria-label="Exploit filters">{{ chips(rep.xp_counts) }}
+    {% if xp and (rep.xp_counts.kev or rep.xp_counts.exploit or rep.xp_counts.poc) %}<div class="chip-row" data-chips="#posture-cves" role="group" aria-label="Exploit filters">{{ chips(rep.xp_counts, false) }}
       <span class="muted small-print">exploit data updated {{ rep.xp_updated or 'never' }}</span></div>{% endif %}
     <div class="table-wrap"><table id="posture-cves" class="sortable" data-colfilters>
       <thead><tr><th data-sort="text" class="fit">CVE</th><th data-sort="text" data-match="start" class="fit">Severity</th>

@@ -166,7 +166,7 @@
         <div class="cve-body">
           <p>{{ v.summary or 'No description stored.' }}</p>
           <p class="small-print">Fixed in: {% if v.fixes %}<span class="mono">{{ v.fixes|join(', ') }}</span>{% else %}<span class="muted">no fixed version published yet</span>{% endif %}</p>
-          {% if v.xp %}<dl class="cve-facts small-print">{{ xp_facts(v.xp) }}</dl>{% endif %}
+          {% if v.xp %}<dl class="cve-facts xp-facts">{{ xp_facts(v.xp) }}</dl>{% endif %}
           <p class="small-print">{% for name, url in v.links %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
         </div>
       </details>

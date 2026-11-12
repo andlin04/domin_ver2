@@ -3,6 +3,12 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-12: Exploit facts left-aligned in findings by address
+
+- The exploit facts under a CVE in the findings by address were centered (small-print); now left-aligned like the
+  CVE details. The exploit chips on the Analysis CVEs tab no longer start with a separator.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-12: Exploit data for posture CVEs
 
 - Posture CVEs show whether they are exploited in the wild (KEV pill, CISA catalog: date added, ransomware use),

@@ -499,6 +499,7 @@ details.raw summary { cursor: pointer; }
 .pill.xp-poc { background: color-mix(in srgb, var(--chart-4) 16%, transparent); color: var(--chart-4); }
 .xp-cell .pill { margin-right: .15rem; }
 .xp-links { margin: .1rem 0 0; padding-left: 1.1rem; }
+.cve-facts.xp-facts { font-size: .8rem; margin: .4rem 0; }
 .xp-links li { margin: .1rem 0; overflow-wrap: anywhere; }
 .cve-list { margin: .3rem 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius); }
 details.cve-item { border-top: 1px solid var(--border); }
