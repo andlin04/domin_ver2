@@ -260,6 +260,26 @@ document.addEventListener("click", (ev) => {
   tr.classList.toggle("expanded", !!tr._detail);
   a.setAttribute("aria-expanded", tr._detail ? "true" : "false");
 });
+// A posture report covers what the page shows: the CVEs tab's filters (Filter box, column boxes, exploit chips, the
+// page search) and the host table's Severity column box (applied to each CVE's severity) narrow its findings.
+// Returns the CVE ids left, or null when no filter takes any CVE out (the report then holds them all).
+function reportCves() {
+  const table = $("#posture-cves");
+  if (!table) return null;
+  const sevTh = $$("#posture-hosts thead th").find((th) => th.textContent.trim().startsWith("Severity"));
+  const t = ($(".colf", sevTh || document.createElement("th"))?.value || "").trim().toLowerCase();
+  const sevOk = (v) => !t || (t[0] === "!" ? !t.slice(1) || !v.includes(t.slice(1)) : v.includes(t));
+  let out = 0;
+  const ids = [];
+  for (const tr of table.tBodies[0].rows) {
+    if (tr.classList.contains("detail-row")) continue;
+    const shown = !tr.hidden && !tr.classList.contains("pf-out")
+      && sevOk((tr.cells[1]?.textContent || "").trim().toLowerCase());
+    if (shown) ids.push(($("a", tr.cells[0]) || tr.cells[0]).textContent.trim());
+    else out += 1;
+  }
+  return out ? ids : null;
+}
 // tick tables (posture hosts, posture domains): the header box ticks every visible row; a filter (Filter box,
 // column boxes, chips, the page search) unticks the rows it hides, so a report or scan covers only visible ticked
 // rows. The header box shows the visible rows: ticked when all are, a dash (indeterminate) when some are.
@@ -301,6 +321,13 @@ $$("table[data-picker]").forEach((table) => {
       const names = picked().map((b) => b.value);
       $("input[data-picked-names]", dlg).value = names.join(",");
       $("[data-picked-n]", dlg).textContent = names.length;
+      const cf = $("[data-cve-filter]", dlg);
+      if (cf) {   // Report: the CVEs the page's filters leave (see reportCves)
+        const ids = reportCves();
+        cf.value = ids ? "1" : "";
+        $("[data-cve-ids]", dlg).value = ids ? ids.join(",") : "";
+        $("[data-cve-note]", dlg).textContent = ids ? `, only the ${ids.length} CVE(s) the filters show` : "";
+      }
       dlg.showModal();
     });
     $("[data-cancel]", dlg).addEventListener("click", () => dlg.close());

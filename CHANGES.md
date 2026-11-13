@@ -13,6 +13,15 @@ update in place; the database, `/etc/domin.env` and certificates stay.
   mention exploit data in the posture summary and the reports.
 - Rollback: `git revert` this commit.
 
+## 2026-11-13: Posture report follows the page's CVE filters
+
+- A report from a domain's host table holds only the CVEs the page's filters leave: the CVEs tab (Filter box, column
+  boxes, exploit chips), the page search, and the host table's Severity column box (applied to each CVE's severity).
+  The dialog says how many CVEs that is; the report's Scope says it was filtered. No CVE filter set: all CVEs, as
+  before.
+- An address shared with host names that were not ticked lists only the ticked names in the report.
+- Rollback: `git revert` this commit and run update.sh.
+
 ## 2026-11-12: Exploit data in shared CVE database mode
 
 - Every instance downloads and keeps its own exploit data, also when it reads a shared CVE database

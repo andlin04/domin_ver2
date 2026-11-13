@@ -1863,7 +1863,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                 picks = {dom: split("hosts")} if dom in known and split("hosts") else {}
             if not picks:
                 raise HTTPException(422, "Tick at least one domain or host name.")
-            m = reports.build(c, picks, u["name"])
+            # the page's CVE filters (CVEs tab, host Severity column): only the CVEs they leave, sent when any is set
+            cves = {x.upper() for x in split("cves")} if data.get("cve_filter") == "1" else None
+            m = reports.build(c, picks, u["name"], cves)
         if not m["hosts"]:
             raise HTTPException(422, "None of the ticked names have hosts in the inventory.")
         ext = "pdf" if data.get("format") == "pdf" else "md"

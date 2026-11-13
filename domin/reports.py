@@ -26,16 +26,32 @@ MAX_HOSTS = 3000
 MAX_DOMAINS = 1000
 
 
-def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str = "") -> dict:
+def _only(r: dict, want: set[str], cves: set[str] | None) -> dict:
+    """A posture row narrowed to the report's picks: host names to the ticked ones (an address shared with names
+    not ticked does not list them) and, with cves, findings to those CVEs (the page's filters)."""
+    names = [n for n in (r.get("hosts") or "").split(",") if n in want]
+    r = {**r, "hosts": ",".join(names) if names else r.get("hosts")}
+    if cves is not None:
+        r["services"] = [{**s, "findings": [f for f in s.get("findings") or [] if f["cve"] in cves]}
+                         for s in r["services"]]
+        found = {f["cve"]: f["severity"] for s in r["services"] for f in s["findings"]}
+        r["cves"], r["high"] = len(found), sum(1 for v in found.values() if v in ("critical", "high"))
+    return r
+
+
+def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str = "",
+          cves: set[str] | None = None) -> dict:
     """The report's facts for picked domains: {domain: picked host names, or None for all of them}. Unknown names
-    are ignored. Several domains add a per-domain table, and the technical findings keep only the addresses with
-    CVEs, errors or notes (a clean address is a row in the host table)."""
+    are ignored. cves: only these CVEs (the CVEs the page's filters leave), None = all. Several domains add a
+    per-domain table, and the technical findings keep only the addresses with CVEs, errors or notes (a clean
+    address is a row in the host table)."""
     names: list[dict] = []
     raw: list[dict] = []
     for dom, want in list(picks.items())[:MAX_DOMAINS]:
         found = [h for h in posture.host_list(conn, dom) if want is None or h["host"] in set(want)]
         ips = {ip for h in found for ip in h["ips"]}
-        raw += [r for r in posture.current(conn, dom) if r["ip"] in ips]
+        keep = {h["host"] for h in found}
+        raw += [_only(r, keep, cves) for r in posture.current(conn, dom) if r["ip"] in ips]
         names += [{**h, "domain": dom} for h in found]
     names = names[:MAX_HOSTS]
     rep = posture.report(raw)
@@ -66,6 +82,7 @@ def build(conn: sqlite3.Connection, picks: dict[str, list[str] | None], by: str 
         "actions": actions(rep["vulns"], rows, hosts),
         "source": cve.SOURCE,
         "xp": xp, "xp_counts": rep.get("xp_counts", {}) if xp else {},
+        "filtered": cves is not None,
         "xp_updated": exploits.last_updated(conn) if xp else "",
     }
 
@@ -262,6 +279,8 @@ def _method(m: dict) -> list[str]:
     scope = (SCOPE_MANY.format(n=len(m["domains"]), names=_more(m["domains"], 20)) if m["domain_rows"]
              else SCOPE.format(n=len(m["hosts"]), domain=m["domain"]))
     xp = [XP_METHOD.format(updated=m["xp_updated"] or "unknown")] if m.get("xp") else []
+    if m.get("filtered"):
+        scope += " Filtered: only the CVEs the posture view's filters showed when the report was made."
     return [scope,
             METHOD.format(profiles=", ".join(m["profiles"]) or "none", source=m["source"], period=_period(m)),
             *xp, LIMITS] +([f"Never scanned: {', '.join(m['never'])}."] if m["never"] else [])

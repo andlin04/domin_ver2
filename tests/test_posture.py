@@ -964,6 +964,12 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         assert pdf.content.startswith(b"%PDF") and len(pdf.content) > 2000
         assert h.post("/admin/security/report", data={**form, "hosts": ""}).status_code == 422
         assert h.post("/admin/security/report", data={**form, "hosts": "other.example"}).status_code == 422
+        # the page's CVE filters: only the CVEs they left; none left = no findings, and the report says so
+        none = h.post("/admin/security/report", data={**form, "format": "md", "cve_filter": "1", "cves": ""}).text
+        assert "CVE-2024-9999" not in none and "Filtered: only the CVEs" in none
+        kept = h.post("/admin/security/report", data={**form, "format": "md", "cve_filter": "1",
+                                                      "cves": "cve-2024-9999"}).text
+        assert "CVE-2024-9999" in kept and "Filtered:" not in text
     with app_client(settings) as h:   # viewers may export what they can see
         csrf = sign_in(h, "vee")
         page = h.get(f"/admin/security/analysis?domain={DOM}").text
