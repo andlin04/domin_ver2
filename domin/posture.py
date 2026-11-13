@@ -509,10 +509,11 @@ def domain_summary(rows: list[dict]) -> list[dict]:
 TREND_DAYS = 90
 
 
-def trend(conn: sqlite3.Connection, domain: str = "", host: str = "", scope=None) -> list[dict]:
+def trend(conn: sqlite3.Connection, domain: str = "", host: str = "", scope=None,
+          only: set[tuple[str, str]] | None = None, cves: set[str] | None = None) -> list[dict]:
     """Exposure over time: per day with a finished scan, across the addresses' latest successful scans as of that
     day (the last TREND_DAYS such days): distinct CVEs per severity, open ports and addresses scanned. One day says
-    nothing: empty then."""
+    nothing: empty then. only: just these (domain, address) pairs; cves: just these CVEs (a report's picks)."""
     where, args = _where(domain, scope)
     state: dict[tuple[str, str], tuple[dict[str, str], int]] = {}   # (domain, ip) -> ({cve: severity}, open ports)
     days: dict[str, dict] = {}
@@ -520,9 +521,11 @@ def trend(conn: sqlite3.Connection, domain: str = "", host: str = "", scope=None
                               WHERE status = 'done' AND finished IS NOT NULL {where} ORDER BY finished, id""", args):
         if host and host not in (r["hosts"] or "").split(","):
             continue
+        if only is not None and (r["domain"], r["ip"]) not in only:
+            continue
         svcs = json.loads(r["services"] or "[]")
-        state[(r["domain"], r["ip"])] = ({f["cve"]: f["severity"] for s in svcs for f in s.get("findings") or []},
-                                         len(svcs))
+        state[(r["domain"], r["ip"])] = ({f["cve"]: f["severity"] for s in svcs for f in s.get("findings") or []
+                                          if cves is None or f["cve"] in cves}, len(svcs))
         sevs = list({c: sev for found, _ in state.values() for c, sev in found.items()}.values())
         days[r["finished"][:10]] = {"day": r["finished"][:10], **{s: sevs.count(s) for s in SEVERITIES[:4]},
                                     "ports": sum(n for _, n in state.values()), "addresses": len(state)}

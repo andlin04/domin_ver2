@@ -149,7 +149,9 @@ Settings > Logging (admin); off until a server is set.
 - **Posture report:** executive and technical report on the ticked host names (or domains) of the posture tables, as
   PDF or Markdown. A table filter unticks the rows it hides, so the report covers the visible ticked rows. With
   exploit data on: KEV / exploit / PoC counts in the summary, an Exploit column with EPSS, and the source links per
-  CVE.
+  CVE. Sections: summary, recommendations, charts (CVEs and attack surface over time, fixes, services; tables in
+  Markdown), top risks, hosts, then one section per host name (facts, services, CVEs, references, what to do; PDF
+  bookmarks and links from the host table). A report on one host name is titled and named after it.
 - **CSV:** every inventory table, the drilldown and the search results; cells a spreadsheet would run as a formula
   are prefixed with `'`. A CSV export can be imported into another domin ([CSV import](#csv-import)).
 

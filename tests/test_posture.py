@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_fingerprint import PW, SCAN_XML, transport
 
-from domin import access, admin, cve, db, fingerprint, jobs, posture, users
+from domin import access, admin, cve, db, fingerprint, jobs, posture, reports, users
 from domin.config import Settings
 from domin.web import COOKIE, create_app
 
@@ -909,7 +909,8 @@ def test_domain_summary_is_one_row_per_domain_worst_first():
 
 
 def add_done(c, ip, day, findings, hosts="www.corp.example"):
-    services = [{"port": 443, "service": "https", "findings": [{"cve": cid, "severity": sev} for cid, sev in findings]}]
+    services = [{"port": 443, "service": "https",
+                 "findings": [{"cve": cid, "severity": sev, "score": 5.0} for cid, sev in findings]}]
     c.execute("""INSERT INTO posture_scans (domain, ip, hosts, ports, status, created, finished, services)
                  VALUES (?, ?, ?, '443', 'done', ?, ?, ?)""", (DOM, ip, hosts, day, day, json.dumps(services)))
 
@@ -928,6 +929,27 @@ def test_trend_counts_severities_ports_and_addresses_per_scan_day(settings):
         assert posture.trend(c, "other.example") == []
         assert [t["critical"] for t in posture.trend(c, DOM, host="www.corp.example")] == [1, 0]
         assert posture.trend(c, DOM, host="nas.corp.example") == []          # its only scan day
+
+
+def test_report_statistics_follow_the_picked_hosts_and_cve_filter(settings):
+    with db.connect(settings.db_path) as c:
+        add_done(c, "172.20.4.50", "2026-10-01T10:00:00", [("CVE-2099-0001", "critical"), ("CVE-2099-0002", "high")])
+        add_done(c, "172.20.4.50", "2026-10-05T10:00:00", [("CVE-2099-0002", "high")])
+        add_done(c, "172.20.4.60", "2026-10-03T10:00:00", [("CVE-2099-0003", "medium")], hosts="nas.corp.example")
+        m = reports.build(c, {DOM: ["www.corp.example"]})
+        kept = reports.build(c, {DOM: ["www.corp.example"]}, cves={"CVE-2099-0001"})
+    assert [(t["day"], t["critical"], t["high"], t["medium"]) for t in m["charts"]["trend"]] == [
+        ("2026-10-01", 1, 1, 0), ("2026-10-05", 0, 1, 0)]                    # nas (not picked) left out
+    assert [(t["critical"], t["high"]) for t in kept["charts"]["trend"]] == [(1, 0), (0, 0)]
+    md = reports.markdown(m)
+    stats = md.split("## 3. Statistics")[1].split("## 4.")[0]
+    for part in ("| Day | Critical | High | Medium | Low | Open ports | Addresses |", "| 2026-10-01 | 1 | 1 | 0 | 0 | 1 | 1 |",
+                 "| 2026-10-05 | 0 | 1 | 0 | 0 | 1 | 1 |", "| high | 0 | 1 |", "| https | 1 | 1 |"):
+        assert part in stats, part
+    assert "2026-10-03" not in stats and "### www.corp.example" in md and "### nas.corp.example" not in md
+    pdf = reports.pdf(m)
+    assert pdf.startswith(b"%PDF") and b"/Outlines" in pdf and b"3. Statistics" in pdf   # bookmarked section
+    assert b"www.corp.example" in pdf   # its host section's bookmark
 
 
 def test_posture_page_carries_trend_data(settings):
@@ -953,12 +975,27 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
         assert f'filename="posture-report-{DOM}-' in md.headers["content-disposition"]
         text = md.text
-        for part in ("# Security posture report: corp.example", "## 1. Executive summary", "Overall risk:",
-                     "## 2. Recommendations", "## 3. Top risks", "## 4. Hosts", "## 5. Technical findings",
-                     "## 6. Scope and method", "CVE-2024-9999"):
+        for part in ("# Security posture report: corp.example (2 hosts)", "## 1. Executive summary", "Overall risk:",
+                     "## 2. Recommendations", "## 3. Statistics", "## 4. Top risks", "## 5. Hosts",
+                     "## 6. Host findings", "## 7. Scope and method", "CVE-2024-9999", "### Fix available?",
+                     "| Severity | Fix published | No fix yet |", "| critical | 0 | 1 |", "### Exposed services",
+                     "| Service | Open ports | With CVEs |", "| ssh | 2 | 2 |",
+                     "Trends need finished scans on two or more days."):
             assert part in text, part
-        assert "| nas.corp.example |" in text and "| www.corp.example |" in text
-        assert "mail.corp.example |" not in text.split("## 4. Hosts")[1].split("## 5.")[0]   # not ticked
+        assert "| [nas.corp.example](#host-nas-corp-example) |" in text
+        assert "| [www.corp.example](#host-www-corp-example) |" in text
+        assert "mail.corp.example" not in text.split("## 5. Hosts")[1].split("## 7.")[0]   # not ticked
+        # one section per ticked host name (host table order), each with its facts, tables, references and actions
+        found = text.split("## 6. Host findings")[1].split("## 7.")[0]
+        assert re.findall(r"^### (.+)$", found, re.M) == ["nas.corp.example", "www.corp.example"]
+        nas, www = found.split("### www.corp.example")
+        assert '<a id="host-nas-corp-example"></a>' in nas and "172.20.4.50" not in nas
+        for part in ("**Rating:** Critical", "**Addresses:** 172.20.4.50", "**Scan profile:** default", "**Services**",
+                     "| 22/tcp | ssh | OpenSSH 9.2p1 | 1 |", "**Vulnerabilities**",
+                     "| CVE-2024-9999 | critical | 9.8 | no fix yet | OpenSSH 9.2p1 (22/tcp); Apache httpd",
+                     "**References**", "[NVD](https://nvd.nist.gov/vuln/detail/CVE-2024-9999)",
+                     "**What to do on this host**", "Mitigate vulnerabilities without a published fix"):
+            assert part in www, part
         pdf = h.post("/admin/security/report", data={**form, "format": "pdf"})
         assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
         assert pdf.content.startswith(b"%PDF") and len(pdf.content) > 2000
@@ -967,6 +1004,8 @@ def test_report_on_ticked_hosts_as_markdown_and_pdf(settings, nmap):
         # the page's CVE filters: only the CVEs they left; none left = no findings, and the report says so
         none = h.post("/admin/security/report", data={**form, "format": "md", "cve_filter": "1", "cves": ""}).text
         assert "CVE-2024-9999" not in none and "Filtered: only the CVEs" in none
+        # no CVE left: every ticked host still has its section, saying so
+        assert none.count('<a id="host-') == 2 and none.count("No known vulnerabilities; 3 open port(s): 22/tcp ssh") == 2
         kept = h.post("/admin/security/report", data={**form, "format": "md", "cve_filter": "1",
                                                       "cves": "cve-2024-9999"}).text
         assert "CVE-2024-9999" in kept and "Filtered:" not in text
@@ -992,9 +1031,11 @@ def test_report_on_ticked_domains(settings, nmap):
         md = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other},nope.example",
                                                      "format": "md"})
         assert md.status_code == 200 and "# Security posture report: 2 domains" in md.text
-        assert "## 4. Domains" in md.text and "## 5. Hosts" in md.text and "## 7. Scope and method" in md.text
+        assert "## 5. Domains" in md.text and "## 6. Hosts" in md.text and "## 8. Scope and method" in md.text
         assert md.headers["content-type"] == "text/markdown; charset=utf-8" and "by ana · scans" in md.text
-        assert f"| {DOM} |" in md.text and f"| {other} |" in md.text and "| web.corp2.example |" in md.text
+        assert f"| {DOM} |" in md.text and f"| {other} |" in md.text
+        assert "| [web.corp2.example](#host-web-corp2-example-corp2-example) |" in md.text
+        assert f"### web.corp2.example ({other})" in md.text and f"### www.corp.example ({DOM})" in md.text
         pdf = h.post("/admin/security/report", data={"csrf": csrf, "domains": f"{DOM},{other}", "format": "pdf"})
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
         assert h.post("/admin/security/report", data={"csrf": csrf, "domains": "nope.example"}).status_code == 422
@@ -1019,13 +1060,26 @@ def test_report_holds_only_the_posted_names(settings, nmap):
         for d in (DOM, other):
             h.post("/admin/security/posture", data={"csrf": csrf, "domain": d})
         run_queue(settings)
-        md = h.post("/admin/security/report", data={"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example",
-                                                     "format": "md"}).text
-        assert "| nas.corp.example |" in md and "172.20.4.60" in md
+        one = {"csrf": csrf, "domain": DOM, "hosts": "nas.corp.example"}
+        got = h.post("/admin/security/report", data={**one, "format": "md"})
+        md = got.text
+        # one host name: the title and the file name name it, not the domain
+        assert 'filename="posture-report-nas.corp.example-' in got.headers["content-disposition"]
+        assert md.startswith("# Security posture report: nas.corp.example\n")
+        pdf = h.post("/admin/security/report", data={**one, "format": "pdf"})
+        assert 'filename="posture-report-nas.corp.example-' in pdf.headers["content-disposition"]
+        assert "| [nas.corp.example](#host-nas-corp-example) |" in md and "172.20.4.60" in md
+        # one ticked row = one machine, even when it carries aliases (names sharing its address): named after it
+        row = h.post("/admin/security/report", data={**one, "hosts": "mail.corp.example,www.corp.example",
+                                                      "format": "md"})
+        assert 'filename="posture-report-mail.corp.example-' in row.headers["content-disposition"]
+        assert row.text.startswith("# Security posture report: mail.corp.example (+ 1 alias)\n")
+        assert row.text.count('<a id="host-') == 2
+        assert md.count('<a id="host-') == 1 and "### nas.corp.example" in md
         for gone in ("www.corp.example", "mail.corp.example", "172.20.4.50", "web.corp2.example"):
             assert gone not in md, gone
         md = h.post("/admin/security/report", data={"csrf": csrf, "domains": other, "format": "md"}).text
-        assert "# Security posture report: corp2.example" in md and "| web.corp2.example |" in md
+        assert "# Security posture report: web.corp2.example" in md and "| [web.corp2.example](#" in md
         for gone in ("nas.corp.example", "www.corp.example", "172.20.4.50", "172.20.4.60"):
             assert gone not in md, gone
 

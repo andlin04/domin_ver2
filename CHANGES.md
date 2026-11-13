@@ -3,6 +3,20 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-13: Posture report per host, with charts
+
+- The posture report (PDF and Markdown) has a section per host name instead of the per-address technical findings:
+  facts (rating, addresses, open ports, CVEs by severity, fixable, last scan, scan profile, tags), status notes
+  (never scanned, failed, potentially blocked, stale), services, vulnerabilities (score, exploit data when on, fixed
+  in, product and port), references per CVE and what to do on that host. A host without CVEs gets a short section.
+  Sections follow the host table's order; the host table links to them; PDF bookmarks per section and host.
+- New Statistics section with the posture page's charts for the report's hosts and CVE filter: CVEs over time per
+  severity, fix available per severity, attack surface over time, exposed services (drawn in the PDF, tables in
+  Markdown). `posture.trend()` takes the report's addresses and CVEs.
+- A report on one host name (one ticked row, aliases included) is titled and named after it:
+  `posture-report-<host>-<date>`; several host names of a domain: "<domain> (N hosts)".
+- Rollback: `git revert` this commit.
+
 ## 2026-11-13: Screenshot gallery in the README
 
 - README has a Screenshots section: a 2-column table of 33 views (inventory, posture, admin and settings, users,
