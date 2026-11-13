@@ -28,7 +28,29 @@ expose and which known CVEs those services carry, and how all of it changes over
 
 All features: [docs/FEATURES.md](docs/FEATURES.md).
 
-![Security posture, Analysis](docs/screenshots/posture-analysis.png)
+## Screenshots
+Made-up demo data: documentation domains, addresses and AS numbers (example.com, 192.0.2.0/24, 2001:db8::/32,
+AS64496-64511). Reproduce with `python scripts/screenshots.py`.
+
+| | |
+| --- | --- |
+| ![Domain](docs/screenshots/domain.png) Domain page: footprint, changes, countries, providers, records | ![Compare](docs/screenshots/domain-compare.png) Compare two scans of a domain |
+| ![Drilldown](docs/screenshots/drilldown.png) Drilldown: every domain, filters, charts, table | ![CSV import](docs/screenshots/csv-map.png) CSV import: map another tool's columns to domin's fields |
+| ![Domain viewers](docs/screenshots/domain-viewers.png) Domain viewers: a maintainer grants viewers on own domains | ![Posture overview](docs/screenshots/posture-overview.png) Security posture, Overview: KPIs, CVEs over time |
+| ![Posture analysis](docs/screenshots/posture-analysis.png) Security posture, Analysis: attack surface, services, findings | ![Posture, one domain](docs/screenshots/posture-domain.png) Analysis narrowed to one domain |
+| ![CVE details](docs/screenshots/posture-cve.png) A host's services and a CVE opened: KEV, EPSS, exploit and PoC links | ![Posture CVEs](docs/screenshots/posture-cves.png) Analysis, CVEs tab: Exploit and EPSS columns, KEV / Exploit / PoC chips |
+| ![CVEs found](docs/screenshots/posture-cves-found.png) Overview, CVEs found: exploit data per CVE | ![Posture, power user](docs/screenshots/posture-power.png) A power user sees only the granted domains |
+| ![Posture scans](docs/screenshots/posture-scans.png) Scans tab: posture scans and activity | ![nmap discovery](docs/screenshots/posture-discovery.png) nmap discovery: live addresses, open ports, the command line |
+| ![Scheduled rescans](docs/screenshots/posture-schedules.png) Scheduled rescans: inventory, nmap and posture, route check | ![Schedule](docs/screenshots/schedule-edit.png) One schedule: recurrence, profiles, chosen hosts |
+| ![Profiles](docs/screenshots/profiles.png) Scan profiles: ports, intensity, timing, route | ![Discovery profiles](docs/screenshots/discovery-profiles.png) Discovery profiles: host discovery, port check, timing, route |
+| ![Routes](docs/screenshots/routes.png) Routes: Direct, Tor, Mullvad, proxy per job type | ![Settings](docs/screenshots/settings.png) Settings: inventory scope, scan limits, internal domains |
+| ![Posture scope](docs/screenshots/settings-posture.png) Settings: posture scope, never scan, network tags | ![Components](docs/screenshots/settings-components.png) Components: inventory and posture on or off |
+| ![Logging](docs/screenshots/settings-logging.png) Logging: audit and security events to syslog (UDP, TCP, TLS) | ![Exploit data sources](docs/screenshots/lookup-exploits.png) CVE look-up: exploit data sources, last update, on/off |
+| ![Operations](docs/screenshots/operations.png) Admin dashboard: visits, usage, scan jobs, tuning | ![Users](docs/screenshots/users.png) Users: roles, two-factor |
+| ![User](docs/screenshots/user-edit.png) One user: role, feature rights, password, two-factor, sessions, domain grants | ![Account](docs/screenshots/account.png) Own account: password, two-factor |
+| ![Sign in](docs/screenshots/signin.png) Sign in (password, optional authenticator code) | ![Overview, light](docs/screenshots/overview-light.png) Light theme: overview |
+| ![Posture, light](docs/screenshots/posture-overview-light.png) Light theme: security posture | ![Posture analysis, light](docs/screenshots/posture-analysis-light.png) Light theme: posture analysis |
+| ![Phone](docs/screenshots/header-390.png) Phone width: header and Admin menu |  |
 
 ## Quick start
 Public host (Debian 12/13 or Ubuntu 24.04, a DNS record for the host name), as root:

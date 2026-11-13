@@ -196,19 +196,4 @@ Settings > Logging (admin); off until a server is set.
   DNS records.
 
 ## Screenshots
-Made-up demo data: documentation domains, addresses and AS numbers (example.com, 192.0.2.0/24, 2001:db8::/32,
-AS64496-64511). Reproduce with `python scripts/screenshots.py`.
-
-| | |
-| --- | --- |
-| ![Domain](screenshots/domain.png) Domain page: footprint, changes, countries, providers, records | ![Compare](screenshots/domain-compare.png) Compare two scans of a domain |
-| ![Drilldown](screenshots/drilldown.png) Drilldown: every domain, filters, charts, table | ![Overview, light](screenshots/overview-light.png) Light theme: overview |
-| ![Posture overview](screenshots/posture-overview.png) Security posture, Overview: KPIs, CVEs over time | ![Posture analysis](screenshots/posture-analysis.png) Security posture, Analysis: attack surface, services, findings |
-| ![Posture, one domain](screenshots/posture-domain.png) Analysis narrowed to one domain | ![CVE details](screenshots/posture-cve.png) A host's services and a CVE opened: KEV, EPSS, exploit and PoC links |
-| ![Posture scans](screenshots/posture-scans.png) Scans tab: posture scans and activity | ![Posture, light](screenshots/posture-overview-light.png) Light theme: security posture |
-| ![Profiles](screenshots/profiles.png) Scan profiles: ports, intensity, timing, route | ![Profiles list](screenshots/profiles-list.png) Scan profiles list |
-| ![Routes](screenshots/routes.png) Routes: Direct, Tor, Mullvad, proxy per job type | ![Settings](screenshots/settings.png) Settings: inventory scope, scan limits, internal domains |
-| ![Posture scope](screenshots/settings-posture.png) Settings: posture scope, never scan, network tags | ![Operations](screenshots/operations.png) Admin dashboard: visits, usage, scan jobs, tuning |
-| ![Users](screenshots/users.png) Users: roles, two-factor | ![Account](screenshots/account.png) Own account: password, two-factor |
-| ![Sign in](screenshots/signin.png) Sign in (password, optional authenticator code) | ![Posture CVEs](screenshots/posture-cves.png) Analysis, CVEs tab: Exploit and EPSS columns, KEV / Exploit / PoC chips |
-| ![CVEs found](screenshots/posture-cves-found.png) Overview, CVEs found: exploit data per CVE | ![Exploit data sources](screenshots/lookup-exploits.png) CVE look-up: exploit data sources, last update, on/off |
+Screenshots of every main view: [README, Screenshots](../README.md#screenshots).

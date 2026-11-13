@@ -628,7 +628,8 @@ SHOTS = {
                            "document.querySelector('[data-pw-generate]').click();" + from_card("Add a user")),
     "pw-renew": ("/admin/account/renew", "gina", 620, ""),
 }
-LIGHT = ("overview", "posture-overview", "header", "csv-map")   # also shot in the light theme: NAME-light.png
+# also shot in the light theme: NAME-light.png
+LIGHT = ("overview", "posture-overview", "posture-analysis", "header", "csv-map")
 # another tool's export for the mapping dialog: renamed, reordered, semicolons, a column domin has no field for
 DEMO_CSV = (b"Hostname;Address;Owner;AS;Country;Seen at;Ticket\r\n"
             b"www.example.com;192.0.2.10;EXAMPLE-NET;64500;Sweden;2026-11-01 08:00;OPS-1041\r\n"

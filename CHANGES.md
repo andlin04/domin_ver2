@@ -3,6 +3,17 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-13: Screenshot gallery in the README
+
+- README has a Screenshots section: a 2-column table of 33 views (inventory, posture, admin and settings, users,
+  light theme, phone width); the second inline image moved into it. docs/FEATURES.md links to it instead of its own
+  table.
+- New shots in `docs/screenshots/`: csv-map, domain-viewers, posture-power, posture-discovery, posture-schedules,
+  schedule-edit, discovery-profiles, settings-components, settings-logging, user-edit, posture-analysis-light,
+  header-390. profiles-list removed (part of profiles). All shots regenerated from the current code.
+- `scripts/screenshots.py` also shoots posture-analysis in the light theme.
+- Rollback: `git revert` this commit.
+
 ## 2026-11-13: Screenshots and docs with exploit data
 
 - `scripts/screenshots.py` seeds made-up exploit data for the demo CVEs (KEV with ransomware use, Exploit-DB,
