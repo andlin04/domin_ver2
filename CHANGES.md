@@ -3,6 +3,12 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-13: Posture report charts: labels inside the frame
+
+- PDF charts: the first and last day of a trend line sit flush with the plot (the last was cut), and the fix chart
+  leaves room above the tallest bar for its label (it overlapped the legend).
+- Rollback: `git revert` this commit.
+
 ## 2026-11-13: Posture report per host, with charts
 
 - The posture report (PDF and Markdown) has a section per host name instead of the per-address technical findings:

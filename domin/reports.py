@@ -656,15 +656,17 @@ def _chart_lines(d: _Doc, x: float, y: float, w: float, title: str, trend: list[
     d.set_line_width(0.2)
     d.set_font("helvetica", "", 6)
     d.set_text_color(*MUTED)
-    for i in sorted({0, n // 2, n - 1}):
+    for i in sorted({0, n // 2, n - 1}):   # first and last day flush with the plot's edges, so none is cut
         cx = px + (i * pw / (n - 1) if n > 1 else pw / 2)
-        d.set_xy(cx - 9, py + ph + 1)
-        d.cell(18, 3.2, trend[i]["day"], align="C")
+        at, align = (cx, "L") if i == 0 else (cx - 18, "R") if i == n - 1 else (cx - 9, "C")
+        d.set_xy(at, py + ph + 1)
+        d.cell(18, 3.2, trend[i]["day"], align=align)
 
 
 def _chart_fix(d: _Doc, x: float, y: float, w: float, fix: list[dict]):
     """Stacked bars per severity: CVEs with a published fix (solid) and without (light)."""
-    top = max([f["fix"] + f["nofix"] for f in fix] + [1])
+    top = int(max([f["fix"] + f["nofix"] for f in fix] + [1]) * 1.15) + 1   # room for the labels above the bars
+    top += top % 2
     px, py, pw, ph = _plot_frame(d, x, y, w, CHART_H, CHART_TITLES["fix"],
                                  [("fix published", INK, False), ("no fix yet", _tint(INK), False)], top)
     slot = pw / max(len(fix), 1)
