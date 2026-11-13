@@ -3,6 +3,16 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-13: Screenshots and docs with exploit data
+
+- `scripts/screenshots.py` seeds made-up exploit data for the demo CVEs (KEV with ransomware use, Exploit-DB,
+  Metasploit, PoC repositories, EPSS) and every source's status, and adds the views `posture-cves` (Analysis, CVEs
+  tab), `posture-cves-found` (Overview, CVEs found) and `lookup-exploits` (CVE look-up, exploit data sources);
+  `posture-cve` opens at the top of the page.
+- `docs/screenshots/` regenerated (current header and backdrop) with the three new views; README and FEATURES
+  mention exploit data in the posture summary and the reports.
+- Rollback: `git revert` this commit.
+
 ## 2026-11-12: Exploit data in shared CVE database mode
 
 - Every instance downloads and keeps its own exploit data, also when it reads a shared CVE database

@@ -147,7 +147,9 @@ Settings > Logging (admin); off until a server is set.
 
 ## Reports and export
 - **Posture report:** executive and technical report on the ticked host names (or domains) of the posture tables, as
-  PDF or Markdown. A table filter unticks the rows it hides, so the report covers the visible ticked rows.
+  PDF or Markdown. A table filter unticks the rows it hides, so the report covers the visible ticked rows. With
+  exploit data on: KEV / exploit / PoC counts in the summary, an Exploit column with EPSS, and the source links per
+  CVE.
 - **CSV:** every inventory table, the drilldown and the search results; cells a spreadsheet would run as a formula
   are prefixed with `'`. A CSV export can be imported into another domin ([CSV import](#csv-import)).
 
@@ -202,10 +204,11 @@ AS64496-64511). Reproduce with `python scripts/screenshots.py`.
 | ![Domain](screenshots/domain.png) Domain page: footprint, changes, countries, providers, records | ![Compare](screenshots/domain-compare.png) Compare two scans of a domain |
 | ![Drilldown](screenshots/drilldown.png) Drilldown: every domain, filters, charts, table | ![Overview, light](screenshots/overview-light.png) Light theme: overview |
 | ![Posture overview](screenshots/posture-overview.png) Security posture, Overview: KPIs, CVEs over time | ![Posture analysis](screenshots/posture-analysis.png) Security posture, Analysis: attack surface, services, findings |
-| ![Posture, one domain](screenshots/posture-domain.png) Analysis narrowed to one domain | ![CVE details](screenshots/posture-cve.png) A host's services and a CVE opened |
+| ![Posture, one domain](screenshots/posture-domain.png) Analysis narrowed to one domain | ![CVE details](screenshots/posture-cve.png) A host's services and a CVE opened: KEV, EPSS, exploit and PoC links |
 | ![Posture scans](screenshots/posture-scans.png) Scans tab: posture scans and activity | ![Posture, light](screenshots/posture-overview-light.png) Light theme: security posture |
 | ![Profiles](screenshots/profiles.png) Scan profiles: ports, intensity, timing, route | ![Profiles list](screenshots/profiles-list.png) Scan profiles list |
 | ![Routes](screenshots/routes.png) Routes: Direct, Tor, Mullvad, proxy per job type | ![Settings](screenshots/settings.png) Settings: inventory scope, scan limits, internal domains |
 | ![Posture scope](screenshots/settings-posture.png) Settings: posture scope, never scan, network tags | ![Operations](screenshots/operations.png) Admin dashboard: visits, usage, scan jobs, tuning |
 | ![Users](screenshots/users.png) Users: roles, two-factor | ![Account](screenshots/account.png) Own account: password, two-factor |
-| ![Sign in](screenshots/signin.png) Sign in (password, optional authenticator code) | |
+| ![Sign in](screenshots/signin.png) Sign in (password, optional authenticator code) | ![Posture CVEs](screenshots/posture-cves.png) Analysis, CVEs tab: Exploit and EPSS columns, KEV / Exploit / PoC chips |
+| ![CVEs found](screenshots/posture-cves-found.png) Overview, CVEs found: exploit data per CVE | ![Exploit data sources](screenshots/lookup-exploits.png) CVE look-up: exploit data sources, last update, on/off |

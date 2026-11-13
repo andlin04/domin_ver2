@@ -272,6 +272,55 @@ def seed_posture(c, cve_file: Path) -> None:
                  WHERE ip = '192.0.2.53'""", ((NOW - timedelta(minutes=2)).isoformat(timespec="seconds"),))
 
 
+# exploit data for the demo CVEs (domin.exploits): (cve, source, ref, label, extra) as the parsers store them;
+# Exploit-DB ids, Metasploit module paths and PoC repositories are made up
+EXPLOITS = [
+    ("CVE-2021-42013", "kev", "", "2021-11-03", "ransomware"),
+    ("CVE-2021-42013", "edb", "90001", "Demo HTTP Server 2.4.49 - Path Traversal and Remote Code Execution",
+     "webapps, verified"),
+    ("CVE-2021-42013", "msf", "/modules/exploits/multi/http/demo_path_traversal_rce.rb",
+     "Demo HTTP Server path traversal RCE", "exploit/multi/http/demo_path_traversal_rce"),
+    ("CVE-2021-42013", "poc", "https://github.com/example/poc-path-traversal", "example/poc-path-traversal", "412"),
+    ("CVE-2021-42013", "poc", "https://github.com/example-lab/poc-httpd-rce", "example-lab/poc-httpd-rce", "87"),
+    ("CVE-2021-42013", "epss", "", "0.94402", "0.99961"),
+    ("CVE-2021-41773", "kev", "", "2021-11-03", ""),
+    ("CVE-2021-41773", "edb", "90002", "Demo HTTP Server 2.4.49 - Path Traversal", "webapps"),
+    ("CVE-2021-41773", "poc", "https://github.com/example/poc-path-normalization", "example/poc-path-normalization",
+     "158"),
+    ("CVE-2021-41773", "epss", "", "0.94375", "0.99952"),
+    ("CVE-2023-44487", "kev", "", "2023-10-10", ""),
+    ("CVE-2023-44487", "poc", "https://github.com/example/poc-rapid-reset", "example/poc-rapid-reset", "64"),
+    ("CVE-2023-44487", "epss", "", "0.81230", "0.99211"),
+    ("CVE-2023-38408", "edb", "90003", "Demo ssh-agent - Remote Code Execution via forwarded agent", "remote"),
+    ("CVE-2023-38408", "epss", "", "0.07914", "0.91843"),
+    ("CVE-2024-6387", "poc", "https://github.com/example/poc-sshd-race", "example/poc-sshd-race", "236"),
+    ("CVE-2024-6387", "poc", "https://github.com/example-sec/poc-signal-race", "example-sec/poc-signal-race", "41"),
+    ("CVE-2024-6387", "epss", "", "0.38117", "0.97302"),
+    ("CVE-2023-42115", "msf", "/modules/exploits/linux/smtp/demo_smtp_auth_oob.rb",
+     "Demo SMTP AUTH out-of-bounds write", "exploit/linux/smtp/demo_smtp_auth_oob"),
+    ("CVE-2023-42115", "epss", "", "0.21045", "0.95870"),
+    ("CVE-2023-48795", "poc", "https://github.com/example/poc-terrapin-scan", "example/poc-terrapin-scan", "19"),
+    ("CVE-2023-48795", "epss", "", "0.62118", "0.98247"),
+    ("CVE-2022-0778", "poc", "https://github.com/example/poc-modsqrt-loop", "example/poc-modsqrt-loop", "12"),
+    ("CVE-2022-0778", "epss", "", "0.00412", "0.71236"),
+    ("CVE-2021-23017", "epss", "", "0.01880", "0.82511"),
+    ("CVE-2022-22720", "epss", "", "0.00936", "0.77104"),
+    ("CVE-2022-37452", "epss", "", "0.00521", "0.73402"),
+    ("CVE-2023-0286", "epss", "", "0.00298", "0.68920"),
+    ("CVE-2021-36368", "epss", "", "0.00121", "0.46837"),
+]
+
+
+def seed_exploits(c) -> None:
+    """Exploit data for the demo CVEs, and every source updated a few hours ago (Settings > CVE look-up)."""
+    from domin import exploits
+    c.executemany("INSERT INTO cve_exploits (cve, source, ref, label, extra) VALUES (?, ?, ?, ?, ?)", EXPLOITS)
+    at = (NOW - timedelta(hours=5)).timestamp()
+    admin.kv_set(c, exploits.STATUS_KEY, json.dumps({
+        src: {"at": at + i * 40, "n": len({r[0] for r in EXPLOITS if r[1] == src}), "error": ""}
+        for i, src in enumerate(exploits.SOURCES)}))
+
+
 def seed_schedules(c) -> None:
     """Discovery profiles, an nmap stage on example.com's latest scan, and schedules with past runs."""
     from domin import discovery, schedules
@@ -503,9 +552,10 @@ def hide_card(heading: str) -> str:
     return f"{{ const c = {_card(heading)}; if (c) c.style.display = 'none'; }}"
 
 
-# ?host= opens that name's findings in the host table; then open its first service group and CVE
+# ?host= opens that name's findings in the host table; then open its first service group and CVE, back at the top
 OPEN_CVE = ("setTimeout(() => { for (const s of ['details.posture-detail', 'details.svc-group', 'details.cve-item'])"
-            " { const d = document.querySelector('#posture-hosts ' + s); if (d) d.open = true; } }, 500);")
+            " { const d = document.querySelector('#posture-hosts ' + s); if (d) d.open = true; }"
+            " window.scrollTo(0, 0); }, 500);")
 
 OPEN_SCHEDULE = "document.querySelector('details.add-schedule').open = true;"
 # the add form on lab.example.test with a posture scan, sent once: the answer is the form with the route warning
@@ -525,7 +575,7 @@ SHOTS = {
     "posture-overview": ("/admin/security", True, 1600, ""),
     "posture-analysis": ("/admin/security/analysis", True, 1750, ""),
     "posture-domain": ("/admin/security/analysis?domain=example.com", True, 1500, ""),
-    "posture-cve": ("/admin/security/analysis?domain=example.com&host=api.example.com", True, 900,
+    "posture-cve": ("/admin/security/analysis?domain=example.com&host=api.example.com", True, 1100,
                     OPEN_CVE + show_from("section.host-list")),
     "posture-scans": ("/admin/security/scans", True, 760, ""),
     "operations": ("/admin", True, 1300, ""),
@@ -564,6 +614,12 @@ SHOTS = {
     "schedule-route-warning":("/admin/security/scans?domain=lab.example.test", True, 1000, SUBMIT_LAB),
     "tools": ("/tools", True, 900, ""),
     "lookup": ("/admin/security/lookup", True, 1100, ""),
+    # exploit data: the CVEs tab of Analysis (Exploit and EPSS columns, KEV/Exploit/PoC chips), the Overview's
+    # CVEs found card, and the sources' status on the CVE look-up page
+    "posture-cves": ("/admin/security/analysis?domain=example.com", True, 900,
+                     "document.querySelector('[data-tab=cves]')?.click();" + show_from("section.host-list")),
+    "posture-cves-found": ("/admin/security", True, 900, from_card("CVEs found")),
+    "lookup-exploits": ("/admin/security/lookup", True, 560, from_card("Exploit data")),
     "public-overview": ("/", False, 1200, ""),
     "public-domain": ("/d/example.com", False, 1400, ""),
     "not-found": ("/d/no-such-domain.example", True, 500, ""),   # error.html
@@ -648,6 +704,7 @@ def main() -> int:
             secret = seed_settings(c)
             seed_inventory(c)
             seed_posture(c, settings.cve_db_file)
+            seed_exploits(c)
             seed_schedules(c)
             ids = [r[0] for r in c.execute("""SELECT s.id FROM scans s JOIN domains d ON d.id = s.domain_id
                                               WHERE d.name = 'example.com' ORDER BY s.started""")]

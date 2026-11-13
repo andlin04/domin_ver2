@@ -14,7 +14,8 @@ expose and which known CVEs those services carry, and how all of it changes over
 - **DNS inventory:** host names from certificate transparency, common names, MX/NS and amass; addresses, ASNs,
   prefixes, countries and hosting providers per scan; changes between scans; drilldown over every domain; CSV.
 - **Security posture** (optional component): nmap service and version detection per address, CVE matching against
-  OSV.dev and NVD, attack surface over time, changes between scans, PDF/Markdown reports.
+  OSV.dev and NVD, exploit data per CVE (CISA KEV, Exploit-DB, Metasploit, PoC repositories, EPSS), attack surface
+  over time, changes between scans, PDF/Markdown reports.
 - **Scheduling:** scheduled rescans per domain (inventory, nmap discovery profiles, posture scans), automatic
   refreshes.
 - **Routes:** direct, Tor, Mullvad (WireGuard) or a custom SOCKS/HTTP proxy, chosen per job type.
