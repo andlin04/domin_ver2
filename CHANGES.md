@@ -3,6 +3,14 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-14: Dependency updates (dnspython security fix)
+
+- `deploy/requirements.txt`: dnspython 2.9.1 -> 2.9.2 (high-severity advisory, GitHub Dependabot alert 1), fastapi
+  0.162.0 -> 0.162.7, pydantic 2.14.2 -> 2.14.3, pydantic_core 2.50.2 -> 2.50.4, anyio 4.15.1 -> 4.16.0, click
+  8.5.0 -> 8.5.1, annotated-doc 0.0.5 -> 0.0.6, typing-inspection 0.4.4 -> 0.4.5. Hashes regenerated from PyPI;
+  pip-audit: no known vulnerabilities.
+- Rollback: `git revert` this commit, then `deploy/install.sh` again.
+
 ## 2026-11-13: Posture report charts: labels inside the frame
 
 - PDF charts: the first and last day of a trend line sit flush with the plot (the last was cut), and the fix chart
