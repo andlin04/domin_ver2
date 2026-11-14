@@ -127,7 +127,8 @@ fi
 if [ -f /etc/domin.env ] && grep -q '^DOMIN_PUBLIC_SYNC=' /etc/domin.env; then
   sed -i '/^DOMIN_PUBLIC_SYNC=/d' /etc/domin.env
 fi
-web=$(printf '%s\n' "$changed" | grep '^domin/' || true)
+# changed dependencies: both services restart so they load the new versions
+web=$(printf '%s\n' "$changed" | grep -E '^domin/|^deploy/requirements\.txt$' || true)
 worker=$(printf '%s\n' "$web" | grep -Ev '^domin/(templates|static)/|^domin/web\.py$' || true)
 if [ -n "$web" ]; then
   systemctl restart domin

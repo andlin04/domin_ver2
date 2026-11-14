@@ -3,6 +3,12 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-14: update.sh restarts the services after a dependency change
+
+- `deploy/update.sh`: a changed `deploy/requirements.txt` restarts the web app and the worker, so they load the new
+  versions (before, both kept running on the old ones until the next code change).
+- Rollback: `git revert` this commit.
+
 ## 2026-11-14: Dependency updates (dnspython security fix)
 
 - `deploy/requirements.txt`: dnspython 2.9.1 -> 2.9.2 (high-severity advisory, GitHub Dependabot alert 1), fastapi

@@ -289,6 +289,14 @@ def test_update_script_checks_entries_owns_the_code_and_never_evals_the_env_file
     assert body[:2] == ["{", "set -euo pipefail"] and body[-2:] == ["exit 0", "}"]
 
 
+def test_update_script_restarts_both_services_after_a_dependency_change():
+    text = (ROOT / "deploy" / "update.sh").read_text()
+    web = next(x for x in text.splitlines() if x.startswith("web=$("))
+    assert "deploy/requirements" in web   # new packages load only after a restart
+    worker = next(x for x in text.splitlines() if x.startswith("worker=$("))
+    assert "requirements" not in worker   # the worker list filters web's, so requirements stays in it
+
+
 def test_the_cli_runs_as_the_app_user_without_writing_bytecode():
     for script in ("install.sh", "mullvad-tunnel.sh"):
         lines = [x for x in (ROOT / "deploy" / script).read_text().splitlines() if "runuser -u domin" in x]
