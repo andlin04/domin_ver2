@@ -1,18 +1,19 @@
 {# Posture · Analysis, one domain in the filter: domain info card (domin.domaininfo; loaded by app.js into
-   [data-domain-card]). RDAP and security.txt text is third-party input: escaped, only http(s) URLs are links. #}
+   [data-domain-card]). RDAP, WHOIS and security.txt text is third-party input: escaped, only http(s) URLs are links. #}
 {% macro link(v) -%}
 {% if v[:8]|lower == 'https://' or v[:7]|lower == 'http://' %}<a href="{{ v }}" rel="noopener noreferrer" target="_blank">{{ v }}</a>{% else %}{{ v }}{% endif %}
 {%- endmacro %}
 <section class="card domain-card" aria-label="Domain information">
+  {% set split = internal and info and info.rdap.found %}{% set public = info and (not internal or split) %}
   <div class="card-head">
-    <h2>{{ card_domain }} <small>{% if internal %}internal zone{% else %}fetched {{ info.fetched }}{% if info.cached %} · stored result{% endif %}{% endif %}</small></h2>
-    {% if not internal %}<a href="{{ base }}/security/domain-card?domain={{ card_domain|urlencode }}&amp;refresh=1" data-card-refresh>Refresh</a>{% endif %}
+    <h2>{{ card_domain }} <small>{% if internal %}internal zone{% endif %}{% if info %}{% if internal %} · {% endif %}fetched {{ info.fetched }}{% if info.cached %} · stored result{% endif %}{% endif %}</small>{% if split %} <span class="pill warn">Split domain: also registered publicly</span>{% endif %}</h2>
+    {% if info %}<a href="{{ base }}/security/domain-card?domain={{ card_domain|urlencode }}&amp;refresh=1" data-card-refresh>Refresh</a>{% endif %}
   </div>
   <div class="grid g3">
     <div>
       <h3>Domain</h3>
       <dl class="facts">
-        {% if not internal %}{% set r = info.rdap %}
+        {% if public %}{% set r = info.rdap %}
         {% if r.found %}
         <dt>Registrar</dt><dd>{{ r.registrar or '—' }}</dd>
         <dt>Created</dt><dd>{{ r.created or '—' }}</dd>
@@ -20,7 +21,10 @@
         <dt>Status</dt><dd>{% for st in r.status %}<span class="pill">{{ st }}</span> {% else %}—{% endfor %}</dd>
         <dt>Name servers</dt><dd class="mono">{{ r.nameservers|join(', ') or '—' }}</dd>
         <dt>DNSSEC</dt><dd>{% if r.dnssec %}<span class="pill ok">signed</span>{% else %}<span class="pill warn">unsigned</span>{% endif %}</dd>
-        {% else %}<dt>Registration</dt><dd class="muted">{{ info.rdap_error or 'Not found in RDAP' }}</dd>{% endif %}
+        <dt>Modified</dt><dd>{{ r.modified or '—' }}</dd>
+        <dt>Source</dt><dd class="small-print">{{ r.via or 'RDAP' }}{% if r.source %} · <span class="mono">{{ r.source }}</span>{% endif %}</dd>
+        {% else %}<dt>Registration</dt><dd class="muted">{{ info.rdap_error or r.note or 'Not found in ' ~ (r.via or 'RDAP') }}</dd>{% endif %}
+        {% elif info and info.rdap_error %}<dt>Public registration</dt><dd class="muted">{{ info.rdap_error }}</dd>
         {% endif %}
         <dt>Hosts</dt><dd>{{ hosts }} with an address · {{ summary.addresses or 0 }} address(es) scanned</dd>
         <dt>Open CVEs</dt><dd>{{ summary.cves or 0 }}{% for sv, n in (summary.sev_n or {}).items() %} <span class="pill sev-{{ sv }}">{{ n }} {{ sv }}</span>{% endfor %}</dd>
@@ -28,7 +32,8 @@
     </div>
     <div>
       <h3>Owner</h3>
-      {% if internal %}<p class="muted small-print">Internal zone: no registration look-up.</p>
+      {% if not info %}<p class="muted small-print">Internal zone: no registration look-up.</p>
+      {% elif internal and not split %}<p class="muted small-print">Internal zone: {{ 'public registration unknown (' ~ info.rdap_error ~ ')' if info.rdap_error else 'not registered publicly' }}.</p>
       {% elif info.rdap.found %}{% set r = info.rdap %}
       <dl class="facts">
         <dt>Registrant</dt><dd>{% if r.owner %}{{ r.owner }}{% else %}<span class="muted">redacted</span>{% endif %}</dd>
@@ -36,11 +41,11 @@
         <dt>Abuse e-mail</dt><dd>{{ r.abuse_email or '—' }}</dd>
         <dt>Abuse phone</dt><dd>{{ r.abuse_tel or '—' }}</dd>
       </dl>
-      {% else %}<p class="muted small-print">{{ info.rdap_error or 'Not found in RDAP' }}</p>{% endif %}
+      {% else %}<p class="muted small-print">{{ info.rdap_error or info.rdap.note or 'Not found in ' ~ (info.rdap.via or 'RDAP') }}</p>{% endif %}
     </div>
     <div>
       <h3>security.txt</h3>
-      {% if internal %}<p class="muted small-print">Internal zone: not fetched.</p>
+      {% if internal %}<p class="muted small-print">security.txt: not checked (internal zone).</p>
       {% elif info.sectxt.found %}{% set t = info.sectxt %}
       <dl class="facts">
         {% for f in ('Contact', 'Expires', 'Policy', 'Encryption', 'Acknowledgments', 'Preferred-Languages', 'Canonical', 'Hiring') if t.fields[f] %}

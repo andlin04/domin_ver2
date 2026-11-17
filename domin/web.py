@@ -1902,9 +1902,9 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             rows = posture.report(posture.current(c, dom, scope=grants))["rows"]
             summary = (posture.domain_summary(rows) or [{}])[0]
             hosts = len(posture.hosts(c, dom))
-        info = None if internal else domaininfo.view(domaininfo.get(
+        info = None if internal and domaininfo.special_use(dom) else domaininfo.view(domaininfo.get(
             conn, dom, lambda: domaininfo.inventory_client(conn, http),
-            refresh=request.query_params.get("refresh") == "1"))
+            refresh=request.query_params.get("refresh") == "1", internal=internal))
         return shell(request, "_domain_card.html", u, s, card_domain=dom, internal=internal, info=info,
                      hosts=hosts, summary=summary)
 

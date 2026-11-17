@@ -1,16 +1,23 @@
-"""Domain info card (Posture · Analysis, one domain in the filter): registration data (RDAP), the owner and the
-registrar's abuse contact, and the domain's security.txt (RFC 9116).
+"""Domain info card (Posture · Analysis, one domain in the filter): registration data (RDAP, else WHOIS for TLDs
+without an RDAP server), the owner and the registrar's abuse contact, and the domain's security.txt (RFC 9116).
 
 Look-ups go out on the inventory route (Settings · Routes) through the same client and public-address guard as an
-inventory scan; internal zones never leave the LAN, so they get no look-ups at all. One result per domain is kept in
-the kv table for a day; Refresh fetches again. RDAP and security.txt text is third-party input: the template escapes
-it and links only http(s) URLs."""
+inventory scan. An internal zone gets the public registration look-up only (a split domain is also registered
+publicly); its security.txt is not fetched, since internal DNS would send that to internal hosts. Special-use names
+(home.arpa, .local, .internal, ...) get no look-ups at all. One result per domain is kept in the kv table for a day;
+Refresh fetches again. RDAP, WHOIS and security.txt text is third-party input: the template escapes it and links only
+http(s) URLs."""
 from __future__ import annotations
 
+import base64
+import ipaddress
 import json
 import re
+import socket
 import sqlite3
 import time
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
@@ -30,6 +37,19 @@ FIELDS = ("Contact", "Expires", "Policy", "Encryption", "Acknowledgments", "Pref
 SINGLE = {"Expires", "Preferred-Languages"}   # RFC 9116: at most once; the first counts
 EXPIRY_WARN_DAYS = 30
 REDACTED = re.compile(r"redact|privacy|private|protected|withheld|not disclosed|gdpr", re.I)
+REG_BUDGET = 20.0          # seconds for the whole registration stage (RDAP, bootstrap, WHOIS); security.txt adds 10
+WHOIS_PORT = 43
+IANA_WHOIS = "whois.iana.org"
+BOOTSTRAP = "https://data.iana.org/rdap/dns.json"
+BOOTSTRAP_TTL = 7 * 24 * 3600
+SPECIAL_USE = {"arpa", "local", "localhost", "internal", "test", "example", "invalid", "onion", "lan", "home", "corp",
+               "intranet", "private", "localdomain"}   # RFC 6761/6762/8375 and names ICANN keeps out of the root
+_cache: dict[str, tuple[float, object]] = {}   # bootstrap TLD set and WHOIS servers per TLD (per process)
+
+
+def special_use(domain: str) -> bool:
+    """A name no public registry holds (home.arpa, .local, .internal, ...): no registration look-up."""
+    return domain.rstrip(".").rsplit(".", 1)[-1].lower() in SPECIAL_USE
 
 
 # ---- security.txt ----
@@ -135,7 +155,227 @@ def registration(r: dict) -> dict:
             "country": "" if REDACTED.search(country) else country,
             "abuse_email": (registrar.get("abuse") or {}).get("email") or abuse.get("email", ""),
             "abuse_tel": (registrar.get("abuse") or {}).get("tel") or abuse.get("tel", ""),
-            "source": r.get("source", "")}
+            "modified": r.get("changed", ""), "via": "RDAP", "source": r.get("source", "")}
+
+
+# ---- registration (WHOIS, for TLDs without an RDAP server) ----
+
+class WhoisError(Exception):
+    """kind 'blocked': no connection (refused, unreachable, the proxy said no); 'timeout': connected, no answer."""
+
+    def __init__(self, kind: str, detail: str = ""):
+        super().__init__(f"{kind}: {detail}" if detail else kind)
+        self.kind = kind
+
+
+WHOIS_KEYS = {
+    "registrar": ("registrar", "registrar name", "sponsoring registrar"),
+    "created": ("created", "creation date", "registered", "registered on", "registration time",
+                "domain record activated"),
+    "expires": ("expires", "expire", "expiry date", "registry expiry date", "expiration date", "paid-till",
+                "registrar registration expiration date"),
+    "modified": ("modified", "updated date", "last updated", "last modified", "changed", "last-update"),
+    "status": ("status", "domain status"),
+    "nameservers": ("nserver", "name server", "nameserver", "nameservers"),
+    "dnssec": ("dnssec",),
+    "owner": ("holder", "registrant", "registrant name", "registrant organization", "registrant organisation"),
+    "country": ("registrant country",),
+    "abuse_email": ("registrar abuse contact email",),
+    "abuse_tel": ("registrar abuse contact phone",),
+}
+_WHOIS_ALIAS = {alias: field for field, aliases in WHOIS_KEYS.items() for alias in aliases}
+
+
+def parse_whois(text: str, server: str) -> dict:
+    """The card's view of a WHOIS answer (the same keys as registration()); found=False when it holds no domain
+    record (not registered). Comment lines (#, %) and unknown keys are skipped."""
+    got: dict[str, list[str]] = {}
+    for ln in text.splitlines():
+        if ln.lstrip().startswith(("#", "%", ">>>")):
+            continue
+        key, sep, value = ln.partition(":")
+        field, value = _WHOIS_ALIAS.get(key.strip().lower()), value.strip()
+        if sep and field and value:
+            got.setdefault(field, []).append(value[:200])
+    if not any(got.get(f) for f in ("created", "expires", "nameservers", "registrar")):
+        return {"found": False, "via": "WHOIS", "source": f"whois://{server}"}
+
+    def first(f: str) -> str:
+        return (got.get(f) or [""])[0]
+
+    def day(v: str) -> str:
+        return v[:10] if re.match(r"\d{4}-\d\d-\d\d", v) else v
+    owner, dnssec = first("owner"), first("dnssec").lower()
+    return {"found": True, "registrar": first("registrar"), "created": day(first("created")),
+            "expires": day(first("expires")), "modified": day(first("modified")),
+            "status": list(dict.fromkeys(v.split()[0] for v in got.get("status", []))),
+            "nameservers": sorted({v.split()[0].lower().rstrip(".") for v in got.get("nameservers", [])}),
+            "dnssec": ("signed" in dnssec and "unsigned" not in dnssec) or dnssec == "yes",
+            "owner": "" if REDACTED.search(owner) else owner,
+            "country": "" if REDACTED.search(first("country")) else first("country"),
+            "abuse_email": first("abuse_email"), "abuse_tel": first("abuse_tel"), "via": "WHOIS",
+            "source": f"whois://{server}"}
+
+
+def route_hop(client: httpx.Client) -> dict | None:
+    """The proxy a WHOIS connection takes: the inventory route's hop (inventory_client sets it), else the
+    environment's HTTPS proxy when the client honours the environment, else None (direct)."""
+    hop = getattr(client, "domin_hop", None)
+    if hop or not getattr(client, "trust_env", False):
+        return hop
+    env = urllib.request.getproxies()
+    url = env.get("https") or env.get("http")
+    if not url:
+        return None
+    u = urllib.parse.urlsplit(url if "://" in url else "http://" + url)
+    kind = {"http": "http", "socks5": "socks5", "socks5h": "socks5"}.get(u.scheme)
+    if not kind or not u.hostname:
+        return None
+    return {"type": kind, "host": u.hostname, "port": u.port or (1080 if kind == "socks5" else 80),
+            "username": urllib.parse.unquote(u.username or ""), "password": urllib.parse.unquote(u.password or "")}
+
+
+def _tunnel(s: socket.socket, hop: dict, host: str, port: int) -> None:
+    """Open a TCP tunnel to host:port through the hop (HTTP CONNECT or SOCKS5; the hop resolves the name)."""
+    user, pw = (hop.get("username") or "").encode(), (hop.get("password") or "").encode()
+    if hop["type"] == "http":
+        req = f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n"
+        if user:
+            req += "Proxy-Authorization: Basic " + base64.b64encode(user + b":" + pw).decode() + "\r\n"
+        s.sendall((req + "\r\n").encode())
+        head = b""
+        while b"\r\n\r\n" not in head and len(head) < 8192:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            head += chunk
+        status = head.split(b"\r\n", 1)[0].decode("latin-1")
+        if status.split()[1:2] != ["200"]:
+            raise WhoisError("blocked", f"the proxy answered {status[:60] or 'nothing'}")
+        return
+    if hop["type"] != "socks5":
+        raise WhoisError("blocked", f"a {hop['type']} proxy can't carry WHOIS")
+    s.sendall(b"\x05\x02\x00\x02" if user else b"\x05\x01\x00")
+    _, method = proxy._recv(s, 2)
+    if method == 2:
+        s.sendall(b"\x01" + bytes([len(user)]) + user + bytes([len(pw)]) + pw)
+        if proxy._recv(s, 2)[1] != 0:
+            raise WhoisError("blocked", "the proxy refused the user name or password")
+    elif method != 0:
+        raise WhoisError("blocked", "the proxy accepts none of the offered methods")
+    name = host.encode()
+    s.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + port.to_bytes(2, "big"))
+    reply = proxy._recv(s, 4)
+    if reply[1] != 0:
+        raise WhoisError("blocked", f"the proxy refused the connection (SOCKS reply {reply[1]})")
+    proxy._recv(s, {1: 4, 4: 16}.get(reply[3], 0) or proxy._recv(s, 1)[0])
+    proxy._recv(s, 2)
+
+
+def _connect(host: str, port: int, hop: dict | None, timeout: float) -> socket.socket:
+    """A TCP connection to a public host:port, direct or through the hop. WhoisError('blocked') when it can't be
+    made."""
+    try:
+        if not hop:
+            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            if any(not ipaddress.ip_address(str(i[4][0]).split("%")[0]).is_global for i in infos):
+                raise WhoisError("blocked", f"{host} is not a public address")
+            return socket.create_connection((host, port), timeout=timeout)
+        s = socket.create_connection((hop["host"], int(hop["port"])), timeout=timeout)
+    except OSError as exc:
+        raise WhoisError("blocked", f"{type(exc).__name__}") from None
+    try:
+        _tunnel(s, hop, host, port)
+    except (OSError, proxy.ProxyError, WhoisError) as exc:
+        s.close()
+        if isinstance(exc, WhoisError):
+            raise
+        raise WhoisError("blocked", f"proxy: {type(exc).__name__}") from None
+    return s
+
+
+def whois_query(server: str, query: str, hop: dict | None, deadline: float) -> str:
+    """One WHOIS query (RFC 3912) to server:43: the answer as text, capped at MAX_TEXT, within TIMEOUT seconds and
+    the stage deadline (time.monotonic)."""
+    deadline = min(deadline, time.monotonic() + TIMEOUT)
+    left = deadline - time.monotonic()
+    if left < 1:
+        raise WhoisError("timeout", "no time left")
+    body = bytearray()
+    with _connect(server, WHOIS_PORT, hop, left) as s:
+        try:
+            s.sendall(query.encode("ascii", "replace") + b"\r\n")
+            while len(body) < MAX_TEXT:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise WhoisError("timeout", f"{server} answered too slowly")
+                s.settimeout(left)
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                body += chunk
+        except TimeoutError:
+            raise WhoisError("timeout", f"{server} did not answer in time") from None
+        except OSError as exc:
+            raise WhoisError("blocked", f"{type(exc).__name__}") from None
+    return bytes(body[:MAX_TEXT]).decode("utf-8", "replace")
+
+
+def _cached(key: str, ttl: float, make: Callable[[], object]) -> object:
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    value = make()
+    _cache[key] = (time.time(), value)
+    return value
+
+
+def whois_server(tld: str, hop: dict | None, deadline: float) -> str:
+    """The TLD's WHOIS server as IANA lists it ('' when it has none); kept for a week per process."""
+    def ask() -> str:
+        text = whois_query(IANA_WHOIS, tld, hop, deadline)
+        return next((ln.split(":", 1)[1].strip().lower() for ln in text.splitlines()
+                     if ln.lower().startswith("whois:") and ln.split(":", 1)[1].strip()), "")
+    return str(_cached("whois:" + tld, BOOTSTRAP_TTL, ask))
+
+
+def has_rdap(tld: str, client: httpx.Client, deadline: float) -> bool | None:
+    """Whether the IANA RDAP bootstrap (dns.json) lists the TLD; None when the bootstrap can't be read."""
+    left = min(TIMEOUT, deadline - time.monotonic())
+    if left < 1 and "rdap-bootstrap" not in _cache:
+        return None
+
+    def load() -> frozenset[str]:
+        got = tools.get_json(client, BOOTSTRAP, timeout=max(1.0, left))
+        if got is None or not isinstance(got[1], dict):
+            raise ValueError("no bootstrap")
+        return frozenset(t.lower() for s in got[1].get("services") or [] for t in s[0])
+    try:
+        return tld in _cached("rdap-bootstrap", BOOTSTRAP_TTL, load)   # type: ignore[operator]
+    except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
+        return None
+
+
+def lookup_registration(domain: str, client: httpx.Client, deadline: float) -> tuple[dict, str]:
+    """(card view, error) of the domain's registration: RDAP; for a TLD the RDAP bootstrap doesn't list (or when it
+    can't be read), WHOIS at the TLD's IANA-listed server through the same route. error is set for a network failure
+    (the result is then not stored)."""
+    try:
+        reg = registration(tools.rdap(domain, client))
+    except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # a body that isn't RDAP JSON
+        return {"found": False}, f"RDAP look-up failed: {type(exc).__name__}"
+    tld = domain.rstrip(".").rsplit(".", 1)[-1].lower()
+    if reg["found"] or has_rdap(tld, client, deadline):
+        return reg, ""
+    hop = route_hop(client)
+    try:
+        server = whois_server(tld, hop, deadline)
+        if not server:
+            return {"found": False, "note": f"No RDAP or WHOIS server for .{tld}"}, ""
+        return parse_whois(whois_query(server, domain, hop, deadline), server), ""
+    except WhoisError as exc:
+        what = "WHOIS blocked" if exc.kind == "blocked" else "WHOIS timed out"
+        return {"found": False}, f"registration data unavailable (no RDAP; {what})"
 
 
 # ---- fetch, cache, view ----
@@ -152,43 +392,52 @@ def inventory_client(connect: Callable[[], AbstractContextManager[sqlite3.Connec
         return
     proxy.handshake(via)
     with tools.http_client(proxy=proxy.http_proxy(via)) as routed:
+        routed.domin_hop = via   # type: ignore[attr-defined]  (route_hop: WHOIS takes the same hop)
         yield routed
 
 
+INTERNAL_SECTXT = {"found": False, "error": "not checked (internal zone)"}
+
+
 def fetch(domain: str, open_client: Callable[[], AbstractContextManager[httpx.Client]],
-          now: float | None = None) -> dict:
-    """Both look-ups for one domain (RDAP through tools.rdap, as the Tools page). ok=False when a look-up failed for
-    a network reason (not stored)."""
-    out = {"domain": domain, "at": now or time.time(), "ok": True, "rdap": {"found": False}, "rdap_error": "",
-           "sectxt": {"found": False, "error": ""}}
+          now: float | None = None, internal: bool = False) -> dict:
+    """The look-ups for one domain (RDAP through tools.rdap as the Tools page, else WHOIS; security.txt unless the
+    domain is an internal zone). ok=False when a look-up failed for a network reason (not stored). Worst case:
+    REG_BUDGET for the registration stage plus TIMEOUT for security.txt."""
+    out = {"domain": domain, "at": now or time.time(), "ok": True, "internal": internal, "rdap": {"found": False},
+           "rdap_error": "", "sectxt": dict(INTERNAL_SECTXT) if internal else {"found": False, "error": ""}}
+    deadline = time.monotonic() + REG_BUDGET
     try:
         with open_client() as client:
-            try:
-                out["rdap"] = registration(tools.rdap(domain, client))
-            except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # a body that isn't RDAP JSON
-                out["ok"], out["rdap_error"] = False, f"RDAP look-up failed: {type(exc).__name__}"
-            out["sectxt"] = fetch_security_txt(domain, client)
+            out["rdap"], err = lookup_registration(domain, client, deadline)
+            if err:
+                out["ok"], out["rdap_error"] = False, err
+            if not internal:
+                out["sectxt"] = fetch_security_txt(domain, client)
     except proxy.ProxyError as exc:
         out["ok"], out["rdap_error"] = False, f"Inventory route unavailable: {exc}"
-        out["sectxt"] = {"found": False, "error": "not fetched (inventory route unavailable)"}
+        if not internal:
+            out["sectxt"] = {"found": False, "error": "not fetched (inventory route unavailable)"}
     return out
 
 
 def get(connect: Callable[[], AbstractContextManager[sqlite3.Connection]], domain: str,
         open_client: Callable[[], AbstractContextManager[httpx.Client]], refresh: bool = False,
-        now: float | None = None) -> dict:
+        now: float | None = None, internal: bool = False) -> dict:
     """The stored result when younger than a day (Refresh: younger than a minute), else a fresh one, stored when
-    both look-ups got an answer. No database connection is held during the look-ups."""
+    every look-up got an answer. No database connection is held during the look-ups. internal: an internal zone
+    (registration only; stored under its own key)."""
     now = now or time.time()
+    key = KEY + domain + ("#internal" if internal else "")
     with connect() as c:
-        raw = admin.kv_get(c, KEY + domain)
+        raw = admin.kv_get(c, key)
     hit = json.loads(raw) if raw else None
     if hit and now - hit["at"] < (MIN_REFRESH if refresh else TTL):
         return {**hit, "cached": True}
-    data = fetch(domain, open_client, now)
+    data = fetch(domain, open_client, now, internal)
     if data["ok"]:
         with connect() as c:
-            admin.kv_set(c, KEY + domain, json.dumps(data))
+            admin.kv_set(c, key, json.dumps(data))
     return {**data, "cached": False}
 
 

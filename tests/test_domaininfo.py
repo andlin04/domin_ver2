@@ -214,3 +214,197 @@ def test_analysis_page_carries_the_card_slot(settings):
         assert 'data-domain-card="/admin/security/domain-card" data-domain="" hidden' in h.get(
             "/admin/security/analysis").text
         assert "data-domain-card" not in h.get("/admin/security").text   # Overview: no card
+
+
+# ---- WHOIS fallback (TLDs without RDAP) and split domains ----
+
+WHOIS_SE = """# Copyright (c) 1997- The Swedish Internet Foundation.
+# All rights reserved.
+state:            active
+domain:           shop-example.se
+holder:           exampl1234-00001
+created:          2004-05-06
+modified:         2025-03-08
+expires:          2027-03-09
+nserver:          ns1.dns-example.net
+nserver:          ns2.dns-example.net
+dnssec:           signed delegation
+status:           ok
+registrar:        Example Registrar AB
+"""
+
+WHOIS_GTLD = """Domain Name: SHOP-EXAMPLE.NU
+Registrar: Example Registrar Inc.
+Updated Date: 2025-01-02T03:04:05Z
+Creation Date: 1999-09-09T00:00:00Z
+Registry Expiry Date: 2026-09-09T00:00:00Z
+Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited
+Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited
+Registrant Organization: REDACTED FOR PRIVACY
+Registrant Country: SE
+Name Server: NS1.DNS-EXAMPLE.NET.
+DNSSEC: unsigned
+Registrar Abuse Contact Email: abuse@registrar.example
+>>> Last update of WHOIS database: 2025-01-02T03:04:05Z <<<
+"""
+
+IANA_SE = "% IANA WHOIS server\n\ndomain:       SE\n\nwhois:        whois.iis.se\n\nstatus:       ACTIVE\n"
+BOOT = {"services": [[["com", "net", "example"], ["https://rdap.registry.example/"]]]}
+
+
+class FakeSock:
+    """A connected socket that answers with the given chunks (an exception in the list is raised)."""
+
+    def __init__(self, chunks):
+        self.chunks, self.sent = list(chunks), []
+
+    def sendall(self, data):
+        self.sent.append(data)
+
+    def recv(self, n):
+        if not self.chunks:
+            return b""
+        got = self.chunks.pop(0)
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    def settimeout(self, t):
+        pass
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def fake_whois(monkeypatch, answers: dict, seen: list):
+    monkeypatch.setattr(domaininfo, "_cache", {})
+
+    def connect(host, port, hop, timeout):
+        assert port == 43 and timeout <= domaininfo.TIMEOUT
+        seen.append((host, hop))
+        got = answers[host]
+        if isinstance(got, Exception):
+            raise got
+        return FakeSock(got if isinstance(got, list) else [got.encode()])
+    monkeypatch.setattr(domaininfo, "_connect", connect)
+
+
+def no_rdap(calls: list, sectxt=None, boot=BOOT):
+    def handle(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if req.url.host == "rdap.org":
+            return httpx.Response(404, json={"errorCode": 404})
+        if req.url.host == "data.iana.org":
+            return httpx.Response(200, json=boot)
+        if req.url.path == "/security.txt" and sectxt is not None:
+            return httpx.Response(200, text=sectxt, headers={"content-type": "text/plain"})
+        return httpx.Response(404)
+    return httpx.MockTransport(handle)
+
+
+def test_whois_parses_a_se_answer():
+    reg = domaininfo.parse_whois(WHOIS_SE, "whois.iis.se")
+    assert reg["found"] and reg["via"] == "WHOIS" and reg["source"] == "whois://whois.iis.se"
+    assert (reg["registrar"], reg["created"], reg["expires"], reg["modified"]) == (
+        "Example Registrar AB", "2004-05-06", "2027-03-09", "2025-03-08")
+    assert reg["nameservers"] == ["ns1.dns-example.net", "ns2.dns-example.net"] and reg["dnssec"]
+    assert reg["status"] == ["ok"] and reg["owner"] == "exampl1234-00001"
+    assert domaininfo.view({"rdap": reg, "at": NOW}, now=NOW)["rdap"]["expires_days"] > 30
+
+
+def test_whois_hides_a_redacted_holder_and_reads_gtld_keys():
+    reg = domaininfo.parse_whois(WHOIS_GTLD, "whois.example")
+    assert reg["owner"] == "" and reg["country"] == "SE" and not reg["dnssec"]
+    assert reg["status"] == ["clientTransferProhibited"] and reg["nameservers"] == ["ns1.dns-example.net"]
+    assert (reg["created"], reg["expires"], reg["modified"]) == ("1999-09-09", "2026-09-09", "2025-01-02")
+    assert reg["abuse_email"] == "abuse@registrar.example"
+    assert not domaininfo.parse_whois('domain "free-example.se" not found.\n', "whois.iis.se")["found"]
+
+
+def test_lookup_falls_back_to_whois_for_a_tld_without_rdap(monkeypatch):
+    calls, seen = [], []
+    fake_whois(monkeypatch, {"whois.iana.org": IANA_SE, "whois.iis.se": WHOIS_SE}, seen)
+    with httpx.Client(transport=no_rdap(calls), trust_env=False) as c:
+        reg, err = domaininfo.lookup_registration("shop-example.se", c, domaininfo.time.monotonic() + 20)
+        assert err == "" and reg["found"] and reg["registrar"] == "Example Registrar AB"
+        assert seen == [("whois.iana.org", None), ("whois.iis.se", None)]
+        assert domaininfo.BOOTSTRAP in calls
+        c.domin_hop = {"type": "http", "host": "proxy.example", "port": 3128}   # the inventory route's hop
+        seen.clear()
+        domaininfo.lookup_registration("other-example.se", c, domaininfo.time.monotonic() + 20)
+        assert seen == [("whois.iis.se", c.domin_hop)]   # the TLD's server is kept; same hop as the route
+    calls.clear()
+    domaininfo._cache.clear()   # a fresh bootstrap that lists .se
+    with httpx.Client(transport=no_rdap(calls, boot={"services": [[["se"], ["https://x.example/"]]]})) as c:
+        seen.clear()
+        reg, err = domaininfo.lookup_registration("free-example.se", c, domaininfo.time.monotonic() + 20)
+    assert not reg["found"] and err == "" and seen == []   # the registry has RDAP: not registered, no WHOIS
+
+
+def test_whois_timeout_and_blocked_port_show_the_reason(monkeypatch):
+    seen = []
+    fake_whois(monkeypatch, {"whois.iana.org": IANA_SE, "whois.iis.se": [TimeoutError("timed out")]}, seen)
+    with httpx.Client(transport=no_rdap([]), trust_env=False) as c:
+        reg, err = domaininfo.lookup_registration("shop-example.se", c, domaininfo.time.monotonic() + 20)
+    assert not reg["found"] and err == "registration data unavailable (no RDAP; WHOIS timed out)"
+    fake_whois(monkeypatch, {"whois.iana.org": domaininfo.WhoisError("blocked", "refused")}, seen)
+    with httpx.Client(transport=no_rdap([]), trust_env=False) as c:
+        got = domaininfo.fetch("shop-example.se", lambda: _same(c), now=NOW)
+    assert not got["ok"] and got["rdap_error"] == "registration data unavailable (no RDAP; WHOIS blocked)"
+
+
+def _same(c):
+    from contextlib import nullcontext
+    return nullcontext(c)
+
+
+def test_whois_through_a_proxy_that_refuses_port_43(monkeypatch):
+    sock = FakeSock([b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"])
+    monkeypatch.setattr(domaininfo.socket, "create_connection", lambda addr, timeout: sock)
+    hop = {"type": "http", "host": "proxy.example", "port": 3128}
+    try:
+        domaininfo.whois_query("whois.iis.se", "shop-example.se", hop, domaininfo.time.monotonic() + 20)
+        raise AssertionError("no error")
+    except domaininfo.WhoisError as exc:
+        assert exc.kind == "blocked" and "403" in str(exc)
+    assert sock.sent[0].startswith(b"CONNECT whois.iis.se:43 HTTP/1.1")
+    ok = FakeSock([b"HTTP/1.1 200 Connection established\r\n\r\n", WHOIS_SE.encode()])
+    monkeypatch.setattr(domaininfo.socket, "create_connection", lambda addr, timeout: ok)
+    assert "Example Registrar AB" in domaininfo.whois_query("whois.iis.se", "shop-example.se", hop,
+                                                            domaininfo.time.monotonic() + 20)
+    assert ok.sent[1] == b"shop-example.se\r\n"
+
+
+def test_special_use_names_get_no_lookup():
+    assert all(domaininfo.special_use(d) for d in ("home.arpa", "lab.home.arpa", "nas.local", "x.internal"))
+    assert not any(domaininfo.special_use(d) for d in ("hem.net", "shop-example.se"))
+
+
+def test_split_domain_card_shows_the_public_registration(settings, monkeypatch):
+    monkeypatch.setattr(domaininfo, "SPECIAL_USE", set())   # corp.example stands in for a registered name
+    calls = []
+    with client_for(replace(settings, internal_zones=(DOM,)), calls) as h:
+        sign_in(h, "ana")
+        page = h.get(URL).text
+    assert "Split domain: also registered publicly" in page and "Example Registrar AB" in page
+    assert "internal zone" in page and "Refresh" in page and "redacted" in page
+    assert "security.txt: not checked (internal zone)." in page
+    assert not any("security.txt" in u for u in calls) and any("rdap.org" in u for u in calls)
+
+
+def test_internal_zone_not_registered_publicly_keeps_internal(settings, monkeypatch):
+    monkeypatch.setattr(domaininfo, "SPECIAL_USE", set())
+    monkeypatch.setattr(domaininfo, "_cache", {})
+    calls = []
+    app = create_app(replace(settings, internal_zones=(DOM,)), http=httpx.Client(transport=no_rdap(calls)))
+    with TestClient(app, base_url="https://testserver", client=("127.0.0.1", 50000)) as h:
+        sign_in(h, "ana")
+        page = h.get(URL).text
+    assert "Split domain" not in page and "Internal zone: not registered publicly." in page
+    assert "security.txt: not checked (internal zone)." in page and not any("security.txt" in u for u in calls)

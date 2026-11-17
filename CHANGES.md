@@ -3,6 +3,20 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-17: Domain info card: WHOIS fallback and split domains
+
+- TLDs the IANA RDAP bootstrap doesn't list (.se, .nu, ...): registration data from WHOIS (port 43) at the TLD's
+  IANA-listed server, over the inventory route (its HTTP CONNECT or SOCKS5 hop, else the environment's HTTPS proxy,
+  else direct; public addresses only). 10 s and 64 KB per query; registration stage within 20 s, the whole card
+  within 30 s. Registrar, created, expires, modified, status, name servers, DNSSEC, holder (redacted hidden). A
+  blocked port 43 shows "registration data unavailable (no RDAP; WHOIS blocked)". The card adds Modified and Source
+  (RDAP or WHOIS and the server).
+- Internal zones get the public registration look-up too (special-use names such as home.arpa, .local, .internal
+  excepted): a zone that is also registered publicly shows "Split domain: also registered publicly" with its
+  registration and owner. security.txt is not fetched for internal zones ("not checked (internal zone)"). Stored as
+  `domaininfo:<domain>#internal`.
+- Rollback: `git revert` this commit.
+
 ## 2026-11-17: Update check
 
 - Daily (worker), `python -m domin check-update` or Settings > Update check > "Check for updates": asks GitHub's
