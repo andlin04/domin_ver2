@@ -1,0 +1,56 @@
+{# Posture · Analysis, one domain in the filter: domain info card (domin.domaininfo; loaded by app.js into
+   [data-domain-card]). RDAP and security.txt text is third-party input: escaped, only http(s) URLs are links. #}
+{% macro link(v) -%}
+{% if v[:8]|lower == 'https://' or v[:7]|lower == 'http://' %}<a href="{{ v }}" rel="noopener noreferrer" target="_blank">{{ v }}</a>{% else %}{{ v }}{% endif %}
+{%- endmacro %}
+<section class="card domain-card" aria-label="Domain information">
+  <div class="card-head">
+    <h2>{{ card_domain }} <small>{% if internal %}internal zone{% else %}fetched {{ info.fetched }}{% if info.cached %} · stored result{% endif %}{% endif %}</small></h2>
+    {% if not internal %}<a href="{{ base }}/security/domain-card?domain={{ card_domain|urlencode }}&amp;refresh=1" data-card-refresh>Refresh</a>{% endif %}
+  </div>
+  <div class="grid g3">
+    <div>
+      <h3>Domain</h3>
+      <dl class="facts">
+        {% if not internal %}{% set r = info.rdap %}
+        {% if r.found %}
+        <dt>Registrar</dt><dd>{{ r.registrar or '—' }}</dd>
+        <dt>Created</dt><dd>{{ r.created or '—' }}</dd>
+        <dt>Expires</dt><dd>{{ r.expires or '—' }}{% if r.expires_soon %} <span class="pill warn">{{ 'expired' if r.expires_days < 0 else r.expires_days ~ ' days left' }}</span>{% endif %}</dd>
+        <dt>Status</dt><dd>{% for st in r.status %}<span class="pill">{{ st }}</span> {% else %}—{% endfor %}</dd>
+        <dt>Name servers</dt><dd class="mono">{{ r.nameservers|join(', ') or '—' }}</dd>
+        <dt>DNSSEC</dt><dd>{% if r.dnssec %}<span class="pill ok">signed</span>{% else %}<span class="pill warn">unsigned</span>{% endif %}</dd>
+        {% else %}<dt>Registration</dt><dd class="muted">{{ info.rdap_error or 'Not found in RDAP' }}</dd>{% endif %}
+        {% endif %}
+        <dt>Hosts</dt><dd>{{ hosts }} with an address · {{ summary.addresses or 0 }} address(es) scanned</dd>
+        <dt>Open CVEs</dt><dd>{{ summary.cves or 0 }}{% for sv, n in (summary.sev_n or {}).items() %} <span class="pill sev-{{ sv }}">{{ n }} {{ sv }}</span>{% endfor %}</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>Owner</h3>
+      {% if internal %}<p class="muted small-print">Internal zone: no registration look-up.</p>
+      {% elif info.rdap.found %}{% set r = info.rdap %}
+      <dl class="facts">
+        <dt>Registrant</dt><dd>{% if r.owner %}{{ r.owner }}{% else %}<span class="muted">redacted</span>{% endif %}</dd>
+        <dt>Country</dt><dd>{{ r.country or '—' }}</dd>
+        <dt>Abuse e-mail</dt><dd>{{ r.abuse_email or '—' }}</dd>
+        <dt>Abuse phone</dt><dd>{{ r.abuse_tel or '—' }}</dd>
+      </dl>
+      {% else %}<p class="muted small-print">{{ info.rdap_error or 'Not found in RDAP' }}</p>{% endif %}
+    </div>
+    <div>
+      <h3>security.txt</h3>
+      {% if internal %}<p class="muted small-print">Internal zone: not fetched.</p>
+      {% elif info.sectxt.found %}{% set t = info.sectxt %}
+      <dl class="facts">
+        {% for f in ('Contact', 'Expires', 'Policy', 'Encryption', 'Acknowledgments', 'Preferred-Languages', 'Canonical', 'Hiring') if t.fields[f] %}
+        <dt>{{ f }}</dt><dd>{% if f == 'Expires' %}{{ t.expires or t.fields[f][0] }}{% if t.expired %} <span class="pill warn">expired</span>{% endif %}
+          {% else %}{% for v in t.fields[f] %}{{ link(v) }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% endif %}</dd>
+        {% endfor %}
+        <dt>PGP-signed</dt><dd>{{ 'yes (not verified)' if t.signed else 'no' }}</dd>
+        <dt>Source</dt><dd class="mono small-print">{{ link(t.url) }}</dd>
+      </dl>
+      {% else %}<p class="muted small-print">No valid security.txt{% if info.sectxt.error %} ({{ info.sectxt.error }}){% endif %}.</p>{% endif %}
+    </div>
+  </div>
+</section>

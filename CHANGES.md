@@ -3,6 +3,22 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-17: Domain info card on Posture · Analysis
+
+- With one domain in the filter (picked, or the Filter box names exactly one), the Analysis tab shows a card above
+  the domain and host tables: registration (registrar, created, expires with a warning under 30 days, status, name
+  servers, DNSSEC), hosts and open CVEs, the owner (registrant or "redacted", country, registrar abuse e-mail and
+  phone) and the domain's security.txt (RFC 9116: Contact, Expires with an expired warning, Policy, Encryption,
+  Acknowledgments, Preferred-Languages, Canonical, Hiring; PGP-signed yes/no, the signature is not verified).
+- New endpoint `GET /admin/security/domain-card?domain=` (posture read right, as the Analysis page). RDAP and
+  security.txt go out on the inventory route through the inventory client (public addresses only, https only, its
+  redirect limit); security.txt: `/.well-known/` then the top level, 10 s, 64 KB, text/plain only. One result per
+  domain is kept in the kv table (`domaininfo:<domain>`) for 24 hours; Refresh fetches again (at most once a
+  minute). Internal zones get no look-ups. Third-party text is escaped; only http(s) URLs are links.
+- `tools.rdap` also returns each entity's org, country, e-mail, phone, the registrar's abuse contact and the RFC 9537
+  redaction list.
+- Rollback: `git revert` this commit (the stored `domaininfo:*` kv rows are unused afterwards).
+
 ## 2026-11-14: update.sh restarts the services after a dependency change
 
 - `deploy/update.sh`: a changed `deploy/requirements.txt` restarts the web app and the worker, so they load the new

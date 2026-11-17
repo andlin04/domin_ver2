@@ -42,6 +42,7 @@ from . import (
     cve,
     db,
     discovery,
+    domaininfo,
     exploits,
     fingerprint,
     guard,
@@ -1842,6 +1843,27 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         tab = request.query_params.get("tab", "")
         return shell(request, "_posture_kpis.html", u, s, rep=rep, filter=q,
                      tab=tab if tab in ("overview", "analysis") else "overview")
+
+    @app.get(base + "/security/domain-card", response_class=HTMLResponse, include_in_schema=False)
+    def security_domain_card(request: Request):
+        """Posture · Analysis, one domain in the filter: its info card (domin.domaininfo; HTML section). Registration
+        data and security.txt come from the day's stored result; refresh=1 fetches them again."""
+        dom = request.query_params.get("domain", "").strip().lower()
+        with conn() as c:
+            s, u = current(request, c)
+            if not u:
+                return HTMLResponse("", status_code=401)
+            grants = request.state.scope
+            if dom not in posture.domains(c, grants):
+                raise HTTPException(404, "No posture results for that domain")
+            internal = internal_check(c)(dom)
+            summary = (posture.domain_summary(posture.current(c, dom, scope=grants)) or [{}])[0]
+            hosts = len(posture.hosts(c, dom))
+        info = None if internal else domaininfo.view(domaininfo.get(
+            conn, dom, lambda: domaininfo.inventory_client(conn, http),
+            refresh=request.query_params.get("refresh") == "1"))
+        return shell(request, "_domain_card.html", u, s, card_domain=dom, internal=internal, info=info,
+                     hosts=hosts, summary=summary)
 
     @app.post(base + "/security/report", include_in_schema=False)
     async def security_report(request: Request):

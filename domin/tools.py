@@ -56,18 +56,42 @@ def rdap(domain: str, client: httpx.Client) -> dict:
     events = {e.get("eventAction"): e.get("eventDate", "")[:10] for e in data.get("events", [])}
     entities = []
     for ent in data.get("entities", []):
-        name = ""
-        for item in (ent.get("vcardArray") or [None, []])[1]:
-            if item and item[0] in ("fn", "org") and item[3]:
-                name = item[3]
-                break
-        entities.append({"roles": ent.get("roles", []), "name": name, "handle": ent.get("handle", "")})
+        card = _vcard(ent)
+        abuse = next((_vcard(e) for e in ent.get("entities") or [] if "abuse" in (e.get("roles") or [])), {})
+        entities.append({"roles": ent.get("roles", []), "name": card["fn"] or card["org"], "org": card["org"],
+                         "country": card["country"], "email": card["email"], "tel": card["tel"],
+                         "abuse": {"email": abuse.get("email", ""), "tel": abuse.get("tel", "")},
+                         "handle": ent.get("handle", "")})
+    redacted = [str((r.get("name") or {}).get("description") or (r.get("name") or {}).get("type") or "")
+                for r in data.get("redacted") or [] if isinstance(r, dict)]   # RFC 9537
     return {"found": True, "name": data.get("ldhName", domain).lower(), "status": data.get("status", []),
             "registered": events.get("registration", ""), "changed": events.get("last changed", ""),
             "expires": events.get("expiration", ""),
             "nameservers": sorted(n.get("ldhName", "").lower() for n in data.get("nameservers", [])),
             "dnssec": bool((data.get("secureDNS") or {}).get("delegationSigned")), "entities": entities,
-            "source": source}
+            "redacted": [r for r in redacted if r], "source": source}
+
+
+def _vcard(ent: dict) -> dict:
+    """fn, org, country, email, tel of an RDAP entity's jCard (RFC 7095); '' where absent."""
+    out = dict.fromkeys(("fn", "org", "country", "email", "tel"), "")
+    for item in (ent.get("vcardArray") or [None, []])[1] or []:
+        if not isinstance(item, list) or len(item) < 4:
+            continue
+        key, params, value = item[0], item[1] if isinstance(item[1], dict) else {}, item[3]
+        if key == "adr":
+            value = params.get("cc") or (value[6] if isinstance(value, list) and len(value) > 6 else "")
+            key = "country"
+        if isinstance(value, list):
+            value = " ".join(str(v) for v in value if v)
+        value = str(value or "").strip()
+        if key == "tel":
+            value = value.removeprefix("tel:")
+        elif key == "email":
+            value = value.removeprefix("mailto:")
+        if key in out and value and not out[key]:
+            out[key] = value
+    return out
 
 
 def _txt(resolver: dns.resolver.Resolver, name: str) -> list[str]:

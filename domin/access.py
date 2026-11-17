@@ -172,7 +172,7 @@ ROUTES = [(re.compile(p), f, lv) for p, f, lv in (
     (r"/admin/security/profiles(/.*)?", "profiles", None),
     (r"/admin/security/discovery-profiles(/.*)?", "discovery", None),
     (r"/admin/security/scan-settings(/.*)?", "settings", None),
-    (r"/admin/security(/analysis|/kpis|/domain-search)?", "posture", "read"),
+    (r"/admin/security(/analysis|/kpis|/domain-search|/domain-card)?", "posture", "read"),
     (r"/admin/(schedules(/.*)?|discovery/scan)", "scans", None),
     (r"/admin/tags", "tags", "write"),
     (r"/admin/(tune|jobs/.*|domains/[^/]+/delete)", "operations", "write"),

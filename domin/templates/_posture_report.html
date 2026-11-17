@@ -7,8 +7,12 @@
 {% set k = rep.kpi %}
 {% from "_exploit.html" import pills as xp_pills, facts as xp_facts %}
 {% set tab = tab or 'analysis' %}
+{# Analysis: the info card of the one domain in the filter (the picked one, or the one domain the Filter box names);
+   app.js loads it, hidden otherwise #}
+{% set card_slot %}<div data-domain-card="{{ renew_base }}/security/domain-card" data-domain="{{ posture_domain or '' }}" hidden></div>{% endset %}
 {% if not rep.rows %}
 <p class="muted card">No posture scans yet.</p>
+{% if tab == 'analysis' %}{{ card_slot }}{% endif %}
 {% if host_list and tab == 'analysis' %}{% include "_posture_hosts.html" %}{% endif %}
 {% else %}
 {% with filter="" %}{% include "_posture_kpis.html" %}{% endwith %}
@@ -63,6 +67,7 @@
 {% if tab == 'overview' %}{% include "_posture_cves.html" %}{% endif %}
 <script type="application/json" id="posture-data">{{ rep.charts|tojson }}</script>
 
+{% if tab == 'analysis' %}{{ card_slot }}{% endif %}
 {% if tab != 'analysis' %}{# the domain and host tables are the "where": Analysis only #}
 {% elif show_domain %}
 {# all domains: one row per domain; a name opens its domain view #}

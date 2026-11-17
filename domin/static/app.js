@@ -382,6 +382,32 @@ $$("[data-tabs]").forEach((card) => {
   const named = tabs.find((b) => `#${b.dataset.tab}` === location.hash);
   if (named) show(named.dataset.tab);
 });
+// Posture · Analysis: the info card of the one domain in the filter (the picked domain, else a Filter box that names
+// exactly one domain: event "domainfilter"); hidden otherwise. Refresh fetches the look-ups again; no timed reload.
+$$("[data-domain-card]").forEach((slot) => {
+  let shown = "";
+  let seq = 0;
+  const load = async (dom, refresh = false) => {
+    if (dom === shown && !refresh) return;
+    const mine = ++seq;
+    shown = dom;
+    if (!dom) { slot.hidden = true; slot.replaceChildren(); return; }
+    try {
+      const r = await fetch(`${slot.dataset.domainCard}?domain=${encodeURIComponent(dom)}${refresh ? "&refresh=1" : ""}`);
+      if (mine !== seq) return;
+      if (!r.ok) { slot.hidden = true; return; }
+      slot.innerHTML = await r.text();   // server-rendered, every third-party value escaped there
+      slot.hidden = false;
+    } catch { if (mine === seq) slot.hidden = true; }
+  };
+  slot.addEventListener("click", (ev) => {
+    if (!ev.target.closest("[data-card-refresh]")) return;
+    ev.preventDefault();
+    load(shown, true);
+  });
+  document.addEventListener("domainfilter", (ev) => { if (!slot.dataset.domain) load(ev.detail.length === 1 ? ev.detail[0] : ""); });
+  load(slot.dataset.domain);
+});
 // Posture domain search: the server says which domains hold every typed word (any case, any attribute); the Domain
 // list keeps only those. Options are taken out, not hidden (iOS ignores hidden options). Enter opens the first match.
 // The same box filters the page's lists: domain rows by the server's answer, host and CVE rows by their data-text
@@ -411,6 +437,9 @@ $$("[data-domain-search]").forEach((box) => {
     count.textContent = parts.join(" · ");
     box.dispatchEvent(new Event("pagefilter", { bubbles: true }));   // the host picker recounts its ticks
     kpis(names ? box.value.trim() : "");
+    // the Filter words that are domain names (a chip, or a domain typed in full): exactly one shows its info card
+    const doms = [...new Set(words.filter((w) => all.some((o) => o.value === w)))];
+    document.dispatchEvent(new CustomEvent("domainfilter", { detail: doms }));
   };
   // the KPI tiles follow the Filter: the server counts what it leaves; an empty box puts the page's own tiles back
   const tiles = $("[data-kpis]");
