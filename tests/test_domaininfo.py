@@ -383,7 +383,7 @@ def test_whois_through_a_proxy_that_refuses_port_43(monkeypatch):
 
 def test_special_use_names_get_no_lookup():
     assert all(domaininfo.special_use(d) for d in ("home.arpa", "lab.home.arpa", "nas.local", "x.internal"))
-    assert not any(domaininfo.special_use(d) for d in ("hem.net", "shop-example.se"))
+    assert not any(domaininfo.special_use(d) for d in ("shop-example.net", "shop-example.se"))
 
 
 def test_split_domain_card_shows_the_public_registration(settings, monkeypatch):
