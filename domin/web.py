@@ -1857,7 +1857,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             if dom not in posture.domains(c, grants):
                 raise HTTPException(404, "No posture results for that domain")
             internal = internal_check(c)(dom)
-            summary = (posture.domain_summary(posture.current(c, dom, scope=grants)) or [{}])[0]
+            rows = posture.report(posture.current(c, dom, scope=grants))["rows"]
+            summary = (posture.domain_summary(rows) or [{}])[0]
             hosts = len(posture.hosts(c, dom))
         info = None if internal else domaininfo.view(domaininfo.get(
             conn, dom, lambda: domaininfo.inventory_client(conn, http),

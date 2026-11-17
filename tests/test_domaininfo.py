@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import httpx
 from fastapi.testclient import TestClient
-from test_posture import DOM, sign_in
+from test_posture import DOM, add_done, sign_in
 from test_posture import settings as settings  # noqa: F401  (the fixture)
 
 from domin import db, domaininfo
@@ -161,6 +161,16 @@ def test_card_shows_the_lookups_and_stores_them_for_a_day(settings):
             c.execute("UPDATE kv SET value = json_set(value, '$.at', ?) WHERE key = ?",
                       (domaininfo.time.time() - 120, domaininfo.KEY + DOM))
         assert "stored result" not in h.get(URL + "&refresh=1").text and len(calls) > n   # refresh bypasses
+
+
+def test_card_counts_the_domains_posture_results(settings):
+    with db.connect(settings.db_path) as c:
+        add_done(c, "172.20.4.50", "2026-11-01T10:00:00", [("CVE-2099-0001", "critical"), ("CVE-2099-0002", "high")])
+    with client_for(settings, []) as h:
+        sign_in(h, "ana")
+        r = h.get(URL)
+    assert r.status_code == 200
+    assert "Open CVEs</dt><dd>2" in r.text and "1 critical" in r.text and "1 address(es) scanned" in r.text
 
 
 def test_card_on_a_failed_lookup_shows_the_reason_and_stores_nothing(settings):
