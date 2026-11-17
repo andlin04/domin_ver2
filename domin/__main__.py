@@ -1,5 +1,5 @@
 """CLI: python -m domin {worker|import <dir>|scan <domain>|init|geoip <csv>|import-csv <csv>|refresh-fixes|
-refresh-exploits|user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password|totp-rekey}."""
+refresh-exploits|check-update|user-add|user-list|user-passwd|user-role|user-grant|user-2fa-reset|admin-password|totp-rekey}."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,22 @@ import logging
 import sys
 from pathlib import Path
 
-from . import access, admin, components, csvimport, cve, db, exploits, importer, jobs, posture, secretbox, tools, users
+from . import (
+    access,
+    admin,
+    components,
+    csvimport,
+    cve,
+    db,
+    exploits,
+    importer,
+    jobs,
+    posture,
+    secretbox,
+    tools,
+    updates,
+    users,
+)
 from .config import Settings
 from .validate import normalize_domain
 
@@ -51,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("refresh-fixes", help="update the fixed versions on stored posture findings")
     sub.add_parser("refresh-exploits", help="download the exploit data now (CISA KEV, Exploit-DB, Metasploit, "
                                             "EPSS, PoC-in-GitHub; also part of the daily CVE refresh)")
+    sub.add_parser("check-update", help="ask GitHub once whether a newer domin release exists (also daily from the "
+                                        "worker while Settings > Update check is on); downloads nothing")
     ua = sub.add_parser("user-add", help="create a user with a password (asked twice, or one line on stdin); hand it "
                                          "over yourself: the user may keep it for a few sign-ins, then must renew it")
     ua.add_argument("name")
@@ -141,6 +158,14 @@ def main(argv: list[str] | None = None) -> int:
                 st = exploits.refresh(conn, client)
         print(json.dumps(st))
         return 1 if any(s.get("error") for s in st.values()) else 0
+    elif args.cmd == "check-update":
+        with db.connect(settings.db_path) as conn, tools.http_client() as client:
+            updates.check(conn, client)
+            st = updates.status(conn, settings.update_check, settings.install_mode)
+        line = {"available": f"domin v{st['version']} available (you run v{st['installed']})",
+                "latest": "Running latest", "error": f"Could not check for updates: {st['error']}"}[st["state"]]
+        print(line)
+        return 1 if st["state"] == "error" else 0
     elif args.cmd == "user-add":
         pw = _read_password(args.password_stdin)
         if pw is None:

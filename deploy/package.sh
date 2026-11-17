@@ -10,7 +10,7 @@ if [ "$REF" = HEAD ] && [ -n "$(git status --porcelain --untracked-files=no)" ];
   echo "package.sh: uncommitted changes; commit first or pass a ref" >&2
   exit 1
 fi
-VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)
+VERSION=$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' domin/__init__.py | head -n1)
 COMMIT=$(git rev-parse --short "$REF")
 NAME=domin-$VERSION-$COMMIT
 mkdir -p dist

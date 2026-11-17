@@ -58,6 +58,7 @@ class Settings:
     scan_nets: tuple[str, ...] = ()   # on-prem: private networks the scans may reach (install --scan-nets)
     components: tuple[str, ...] = COMPONENTS   # installed parts (install.sh --components); Settings turns them on/off
     totp_key: Path = Path(TOTP_KEY)   # two-factor secrets' encryption key (read per use by domin.secretbox)
+    update_check: bool = True     # default of Settings > Update check until an admin flips it (domin.updates)
 
     @property
     def internal_mode(self) -> bool:
@@ -120,4 +121,5 @@ class Settings:
             scan_nets=tuple(x.strip() for x in env("DOMIN_SCAN_NETS", "").split(",") if x.strip()),
             components=parse_components(env("DOMIN_COMPONENTS", "")),
             totp_key=totp_key_path(),
+            update_check=env("DOMIN_UPDATE_CHECK", "on").strip().lower() not in ("0", "false", "no", "off"),
         )

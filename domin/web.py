@@ -56,6 +56,7 @@ from . import (
     tags,
     tools,
     totp,
+    updates,
     users,
 )
 from .config import Settings
@@ -721,7 +722,8 @@ def create_app(settings: Settings | None = None, http: httpx.Client | None = Non
     return app
 
 
-NOTICES = {"tuned": "Settings saved; they apply at once.", "cancelled": "Job cancelled.", "retried": "Job queued.",
+NOTICES = {"tuned": "Settings saved; they apply at once.", "update-checked": "Update check done; the result is below.",
+"cancelled": "Job cancelled.", "retried": "Job queued.",
            "gone": "That job had already finished.", "saved": "Saved.", "user-added": "User created.",
            "tunnel-requested": "Saved. The tunnel settings were handed to the host; its result shows below.",
            "tor-requested": "Handed to the host: the Tor service switches within a few seconds (reload this page).",
@@ -841,10 +843,19 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             path = f"{path}{'&' if '?' in path else '?'}ok={notice}{hsh}{frag}"
         return priv(RedirectResponse(path, status_code=303))
 
+    def update_banner(request: Request) -> dict | None:
+        """The "newer release" line (domin.updates) for admins and maintainers; None for everyone else."""
+        scope = getattr(request.state, "scope", None)
+        if not (scope and scope.manages_any):
+            return None
+        with conn() as c:
+            st = updates.status(c, settings.update_check, settings.install_mode)
+        return st if st["state"] == "available" else None
+
     def shell(request: Request, name: str, u: dict, s: dict, status: int = 200, **ctx) -> HTMLResponse:
         notice = NOTICES.get(request.query_params.get("ok", ""), "")
         return priv(page(request, name, status, base=base, user=u, csrf=s["csrf"], notice=notice,
-                         no_login=s.get("token_hash") == "", **ctx))
+                         no_login=s.get("token_hash") == "", update=update_banner(request), **ctx))
 
     def where_from(request: Request, c) -> tuple[str, str, str]:
         """(address, country code, user agent) of a sign-in, for the session list and sign-in protection."""
@@ -1423,7 +1434,38 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
                      csv_import=csvimport.status(c), csv_max_mb=csvimport.MAX_BYTES // (1024 * 1024),
                      allow_no_login=settings.allow_no_login, no_login_on=admin.no_login_session(c) is not None,
                      signin=users.signin_required(c), guard=guard.config(c),
-                     guard_days=(guard.DAYS_MIN, guard.DAYS_MAX), travel_kmh=guard.TRAVEL_KMH)
+                     guard_days=(guard.DAYS_MIN, guard.DAYS_MAX), travel_kmh=guard.TRAVEL_KMH,
+                     upd=updates.status(c, settings.update_check, settings.install_mode),
+                     upd_when=lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
+
+    @app.post(base + "/settings/update-check", include_in_schema=False)
+    async def settings_update_check(request: Request):
+        """Automatic update check (domin.updates) on or off; off: the worker's daily check makes no request."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+            on = data.get("on") == "1"
+            if on != updates.enabled(c, settings.update_check):
+                updates.set_enabled(c, on)
+                access.audit(c, u["name"], "update check", "settings", "on" if on else "off")
+        return back(base + "/settings#updates", "saved")
+
+    @app.post(base + "/settings/update-check/now", include_in_schema=False)
+    async def settings_update_check_now(request: Request):
+        """"Check for updates": ask GitHub once now, also while the automatic check is off."""
+        data = await form(request)
+        with conn() as c:
+            s, u, redirect = admin_only(request, c, data)
+            if redirect:
+                return redirect
+
+        def run() -> None:
+            with conn() as c, tools.http_client() as client:
+                updates.check(c, client)
+        await run_in_threadpool(run)
+        return back(base + "/settings#updates", "update-checked")
 
     @app.post(base + "/settings/guard", include_in_schema=False)
     async def settings_guard(request: Request):

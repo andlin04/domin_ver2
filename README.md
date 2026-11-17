@@ -87,6 +87,15 @@ Main flags:
 Re-running `install.sh` updates in place (database, settings and certificates kept). First admin on a public host,
 update, uninstall, Cloudflare, backup: [docs/INSTALL.md](docs/INSTALL.md).
 
+### Update check
+- Once a day the worker asks `https://api.github.com/repos/andlin04/domin_ver2/releases/latest` (unauthenticated,
+  through the app's proxy setting) whether a newer release exists; nothing is downloaded or installed.
+- Admins and maintainers see a one-line banner with the new version, the release notes link and the upgrade command;
+  Settings shows the installed version, the last result and a "Check for updates" button
+  (CLI: `python -m domin check-update`).
+- Turn it off under Settings > Update check, or set `DOMIN_UPDATE_CHECK=off` in `/etc/domin.env` before the first
+  start (the default until an admin changes the setting). Off: no request at all; the button still asks once.
+
 ## Requirements
 - Debian 12/13 or Ubuntu 24.04 or newer, Python 3.12+, root for the installer; on-prem 2 CPU / 2 GB / 16 GB.
 - The installer brings nginx, the pinned Python packages, amass, and with posture nmap, tor and wireguard-tools.

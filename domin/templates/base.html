@@ -77,6 +77,12 @@
     </button>
   </div></header>
   <main class="wrap">
+    {% if update %}{# domin.updates: admins and maintainers; the release name and notes are untrusted text #}
+    <p class="note warn" role="status" data-update-banner>{% if update.security %}<span class="pill bad">security</span> {% endif %}domin v{{ update.version }} available (you run v{{ update.installed }})
+      {% if update.url %}· <a href="{{ update.url }}" rel="noopener noreferrer">Release notes</a>{% endif %}
+      {% if update.major %}· {% if update.url %}<a href="{{ update.url }}" rel="noopener noreferrer">Major upgrade: read the upgrade notes first</a>{% else %}Major upgrade: read the upgrade notes first{% endif %}{% endif %}
+      · upgrade: <span class="mono">{{ update.command }}</span></p>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="foot">domin · domain inventory · data from certificate transparency, DNS and RDAP ·

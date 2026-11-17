@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import admin, components, csvimport, cve, db, exploits, guard, posture, proxy, scanner, tools, users
+from . import admin, components, csvimport, cve, db, exploits, guard, posture, proxy, scanner, tools, updates, users
 from .config import Settings
 
 log = logging.getLogger("domin.worker")
@@ -389,3 +389,8 @@ def worker(settings: Settings, once: bool = False, idle: float = 3.0) -> None:
             cve_refresh(settings)
         except Exception:
             log.exception("cve refresh failed")
+        try:   # once a day, nothing while Settings > Update check is off (domin.updates)
+            with db.connect(settings.db_path) as conn:
+                updates.run(conn, settings.update_check)
+        except Exception:
+            log.exception("update check failed")

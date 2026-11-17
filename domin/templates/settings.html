@@ -174,6 +174,33 @@
   </form>
 </section>
 
+<section class="card" id="updates">
+  <h2>Update check <small>asks GitHub (api.github.com) once a day whether a newer domin release exists; downloads
+    nothing</small></h2>
+  <form method="post" action="{{ base }}/settings/update-check" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="tick enabled-toggle"><input type="checkbox" name="on" value="1" data-autosubmit
+      aria-label="Automatic update check" {% if upd.on %}checked{% endif %}> Automatic update check
+      {% if upd.on %}<span class="pill ok">on</span>{% else %}<span class="pill bad">off</span>{% endif %}</label>
+    <noscript><button class="btn small" type="submit">Save</button></noscript></form>
+  <form method="post" action="{{ base }}/settings/update-check/now" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn small" type="submit">Check for updates</button></form>
+  <p role="status" data-update-status>
+    <b>Version {{ upd.installed }}</b> ·
+    {% if upd.state == 'available' %}{% if upd.security %}<span class="pill bad">security</span> {% endif %}<span class="pill warn">update</span>
+      domin v{{ upd.version }} available (you run v{{ upd.installed }}){% if upd.url %} ·
+      <a href="{{ upd.url }}" rel="noopener noreferrer">Release notes</a>{% endif %} · upgrade:
+      <span class="mono">{{ upd.command }}</span>{% if upd.major %} · <b>Major upgrade: read the upgrade notes first</b>{% endif %}
+    {% elif upd.state == 'latest' %}<span class="pill ok">Running latest</span>
+    {% elif upd.state == 'error' %}<span class="pill bad">Could not check for updates</span>
+    {% else %}<span class="pill">not checked yet</span>{% endif %}
+    {% if upd.checked_at %}<small class="muted">· last check {{ upd_when(upd.checked_at) }}</small>{% endif %}</p>
+  {% if upd.state == 'error' %}<p class="muted small-print">{{ upd.error }}</p>{% endif %}
+  <p class="muted small-print">Off: no automatic request; "Check for updates" still asks once. The first install's
+    default comes from DOMIN_UPDATE_CHECK (default on).</p>
+</section>
+
 {% if allow_no_login %}
 <section class="card warn-card">
   <h2>Sign-in <small>development and lab only</small></h2>
