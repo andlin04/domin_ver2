@@ -7,7 +7,7 @@ The security model in detail. Reporting a vulnerability: [SECURITY.md](../SECURI
 | --- | --- | --- |
 | nginx | `www-data` | TLS (Let's Encrypt, or a Cloudflare Origin CA certificate with Cloudflare's client certificate required), rate limits, proxies to 127.0.0.1:8000 |
 | domin (web, uvicorn) | `domin`, systemd sandbox | Reads and writes only `/var/lib/domin`; outbound HTTPS for the RDAP and e-mail tools |
-| domin-worker (scans) | `domin`, systemd sandbox | Same files; DNS, crt.sh, RDAP and amass towards public addresses only |
+| domin-worker (scans) | `domin`, systemd sandbox | Same files; DNS, crt.sh, RDAP and amass towards public addresses only; daily update check to api.github.com (off under Settings) |
 | amass | child of the worker | Gets only `PATH` and a temporary `HOME`, none of the app's settings |
 
 - **No root at run time.** install.sh runs as root once; both services run as the unprivileged `domin` user. The

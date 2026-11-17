@@ -3,6 +3,16 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-17: Update check
+
+- Daily (worker), `python -m domin check-update` or Settings > Update check > "Check for updates": asks GitHub's
+  latest-release API whether a newer domin release exists; downloads nothing. Admins and maintainers get a one-line
+  banner (version, release notes link, upgrade command; security pill; major-upgrade note). Settings shows the
+  installed version, "Running latest" / "Could not check for updates", the last check and an on/off switch
+  (default from `DOMIN_UPDATE_CHECK`, on).
+- The version lives in `domin/__init__.py` (`__version__`); `pyproject.toml` and `deploy/package.sh` read it.
+- Rollback: `git revert` this commit.
+
 ## 2026-11-17: Domain info card on Posture · Analysis
 
 - With one domain in the filter (picked, or the Filter box names exactly one), the Analysis tab shows a card above

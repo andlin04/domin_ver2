@@ -35,6 +35,7 @@ options. Booleans: `1`, `true`, `yes` or `on`. Lists: comma-separated.
 | `DOMIN_CVE_DB_PATH` | next to `DOMIN_DB` (`cve_db.json`) | CVE database file (shared mode: the file to read) |
 | `DOMIN_CVE_TTL_DAYS` | `7` | Own mode: re-query a target whose cached result is older |
 | `DOMIN_NVD_API_KEY` | empty | Optional NVD API key (higher rate limit) |
+| `DOMIN_UPDATE_CHECK` | on | Daily check for a newer release on GitHub (README, Update check); only the default until an admin sets Settings > Update check |
 | `DOMIN_ALLOW_NO_LOGIN` | off | Dev/lab only: Settings may turn sign-in off. Refused unless `DOMIN_ADMIN_IPS` is set (public install: private networks only); the stand-in session counts only for those addresses |
 | `DOMIN_INSTALL_MODE` | `public` | `internal` = on-prem (`install.sh --internal`) |
 | `DOMIN_SCAN_NETS` | empty | On-prem: private networks the scans may reach (`--scan-nets`) |

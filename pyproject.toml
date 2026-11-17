@@ -1,6 +1,6 @@
 [project]
 name = "domin"
-version = "2.0.0"
+dynamic = ["version"]   # domin/__init__.py __version__ (deploy/update.sh ships only domin/ and deploy/)
 description = "Domain DNS and security posture inventory: host names, hosting, exposed services and CVEs per domain, over time"
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["domin"]
+
+[tool.setuptools.dynamic]
+version = { attr = "domin.__version__" }
 
 [tool.setuptools.package-data]
 domin = ["templates/*.html", "static/*", "static/vendor/*", "resolvers.txt"]
