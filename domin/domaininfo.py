@@ -105,6 +105,8 @@ def fetch_security_txt(domain: str, client: httpx.Client) -> dict:
             continue
         except httpx.HTTPError as exc:
             reasons.append(f"{path}: {type(exc).__name__}")
+            if isinstance(exc, httpx.TransportError):
+                break   # host or route unreachable: the fallback would wait out the same timeout
             continue
         got = parse_security_txt(text)
         if got["valid"]:

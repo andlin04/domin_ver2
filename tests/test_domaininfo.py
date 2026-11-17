@@ -101,6 +101,18 @@ def test_fetch_falls_back_to_the_top_level_and_needs_text_plain():
     assert not got["found"] and "not text/plain (text/html)" in got["error"]
 
 
+def test_fetch_skips_the_fallback_when_the_host_is_unreachable():
+    calls = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        raise httpx.ConnectTimeout("timed out", request=req)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as c:
+        got = domaininfo.fetch_security_txt(DOM, c)
+    assert not got["found"] and got["error"] == "/.well-known/security.txt: ConnectTimeout"
+    assert calls == ["/.well-known/security.txt"]
+
+
 def test_fetch_caps_the_size():
     with httpx.Client(transport=transport([], sectxt="Contact: x" + "#" * 70_000)) as c:
         got = domaininfo.fetch_security_txt(DOM, c)
