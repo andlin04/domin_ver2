@@ -2,11 +2,12 @@
 without an RDAP server), the owner and the registrar's abuse contact, and the domain's security.txt (RFC 9116).
 
 Look-ups go out on the inventory route (Settings · Routes) through the same client and public-address guard as an
-inventory scan. An internal zone gets the public registration look-up only (a split domain is also registered
-publicly); its security.txt is not fetched, since internal DNS would send that to internal hosts. Special-use names
-(home.arpa, .local, .internal, ...) get no look-ups at all. One result per domain is kept in the kv table for a day;
-Refresh fetches again. RDAP, WHOIS and security.txt text is third-party input: the template escapes it and links only
-http(s) URLs."""
+inventory scan; WHOIS (TCP 43) on the WHOIS route there (Direct, or a SOCKS5/HTTP CONNECT hop that resolves the
+server's name; an unavailable route fails, never falls back to direct). An internal zone gets the public
+registration look-up only (a split domain is also registered publicly); its security.txt is not fetched, since
+internal DNS would send that to internal hosts. Special-use names (home.arpa, .local, .internal, ...) get no
+look-ups at all. One result per domain is kept in the kv table for a day; Refresh fetches again. RDAP, WHOIS and
+security.txt text is third-party input: the template escapes it and links only http(s) URLs."""
 from __future__ import annotations
 
 import base64
@@ -220,9 +221,13 @@ def parse_whois(text: str, server: str) -> dict:
 def route_hop(client: httpx.Client) -> dict | None:
     """The proxy a WHOIS connection takes: the inventory route's hop (inventory_client sets it), else the
     environment's HTTPS proxy when the client honours the environment, else None (direct)."""
-    hop = getattr(client, "domin_hop", None)
-    if hop or not getattr(client, "trust_env", False):
-        return hop
+    return getattr(client, "domin_hop", None) or env_hop(client)
+
+
+def env_hop(client: httpx.Client) -> dict | None:
+    """The environment's HTTPS proxy as a hop when the client honours the environment, else None (direct)."""
+    if not getattr(client, "trust_env", False):
+        return None
     env = urllib.request.getproxies()
     url = env.get("https") or env.get("http")
     if not url:
@@ -281,9 +286,14 @@ def _connect(host: str, port: int, hop: dict | None, timeout: float) -> socket.s
             if any(not ipaddress.ip_address(str(i[4][0]).split("%")[0]).is_global for i in infos):
                 raise WhoisError("blocked", f"{host} is not a public address")
             return socket.create_connection((host, port), timeout=timeout)
-        s = socket.create_connection((hop["host"], int(hop["port"])), timeout=timeout)
+        addr = hop["host"]
+        if addr.lower().endswith(proxy.MULLVAD_SUFFIX):   # relay names: public DNS, else Mullvad's in-tunnel one
+            addr = proxy.resolve(addr)
+        s = socket.create_connection((addr, int(hop["port"])), timeout=timeout)
     except OSError as exc:
         raise WhoisError("blocked", f"{type(exc).__name__}") from None
+    except proxy.ProxyError as exc:   # a Mullvad relay name only its in-tunnel resolver knows, and it didn't
+        raise WhoisError("blocked", str(exc)) from None
     try:
         _tunnel(s, hop, host, port)
     except (OSError, proxy.ProxyError, WhoisError) as exc:
@@ -356,10 +366,15 @@ def has_rdap(tld: str, client: httpx.Client, deadline: float) -> bool | None:
         return None
 
 
-def lookup_registration(domain: str, client: httpx.Client, deadline: float) -> tuple[dict, str]:
+WhoisHop = Callable[[], "dict | None"]   # the WHOIS route's hop (None = direct); raises proxy.ProxyError
+
+
+def lookup_registration(domain: str, client: httpx.Client, deadline: float,
+                        whois: WhoisHop | None = None) -> tuple[dict, str]:
     """(card view, error) of the domain's registration: RDAP; for a TLD the RDAP bootstrap doesn't list (or when it
-    can't be read), WHOIS at the TLD's IANA-listed server through the same route. error is set for a network failure
-    (the result is then not stored)."""
+    can't be read), WHOIS at the TLD's IANA-listed server. whois: the WHOIS route (Settings · Routes), resolved only
+    when WHOIS is needed; Direct still honours the environment's proxy. Without it WHOIS takes the client's route.
+    error is set for a network failure or an unavailable WHOIS route (the result is then not stored)."""
     try:
         reg = registration(tools.rdap(domain, client))
     except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:   # a body that isn't RDAP JSON
@@ -367,7 +382,13 @@ def lookup_registration(domain: str, client: httpx.Client, deadline: float) -> t
     tld = domain.rstrip(".").rsplit(".", 1)[-1].lower()
     if reg["found"] or has_rdap(tld, client, deadline):
         return reg, ""
-    hop = route_hop(client)
+    if whois is None:
+        hop = route_hop(client)
+    else:
+        try:
+            hop = whois() or env_hop(client)
+        except proxy.ProxyError as exc:
+            return {"found": False}, str(exc)
     try:
         server = whois_server(tld, hop, deadline)
         if not server:
@@ -399,8 +420,17 @@ def inventory_client(connect: Callable[[], AbstractContextManager[sqlite3.Connec
 INTERNAL_SECTXT = {"found": False, "error": "not checked (internal zone)"}
 
 
+def whois_route(connect: Callable[[], AbstractContextManager[sqlite3.Connection]],
+                client: httpx.Client | None = None) -> WhoisHop:
+    """The WHOIS route's hop, looked up when called (lookup_registration's whois)."""
+    def resolve() -> dict | None:
+        with connect() as conn:
+            return proxy.whois_hop(conn, client)
+    return resolve
+
+
 def fetch(domain: str, open_client: Callable[[], AbstractContextManager[httpx.Client]],
-          now: float | None = None, internal: bool = False) -> dict:
+          now: float | None = None, internal: bool = False, whois: WhoisHop | None = None) -> dict:
     """The look-ups for one domain (RDAP through tools.rdap as the Tools page, else WHOIS; security.txt unless the
     domain is an internal zone). ok=False when a look-up failed for a network reason (not stored). Worst case:
     REG_BUDGET for the registration stage plus TIMEOUT for security.txt."""
@@ -409,7 +439,7 @@ def fetch(domain: str, open_client: Callable[[], AbstractContextManager[httpx.Cl
     deadline = time.monotonic() + REG_BUDGET
     try:
         with open_client() as client:
-            out["rdap"], err = lookup_registration(domain, client, deadline)
+            out["rdap"], err = lookup_registration(domain, client, deadline, whois)
             if err:
                 out["ok"], out["rdap_error"] = False, err
             if not internal:
@@ -423,10 +453,10 @@ def fetch(domain: str, open_client: Callable[[], AbstractContextManager[httpx.Cl
 
 def get(connect: Callable[[], AbstractContextManager[sqlite3.Connection]], domain: str,
         open_client: Callable[[], AbstractContextManager[httpx.Client]], refresh: bool = False,
-        now: float | None = None, internal: bool = False) -> dict:
+        now: float | None = None, internal: bool = False, whois: WhoisHop | None = None) -> dict:
     """The stored result when younger than a day (Refresh: younger than a minute), else a fresh one, stored when
     every look-up got an answer. No database connection is held during the look-ups. internal: an internal zone
-    (registration only; stored under its own key)."""
+    (registration only; stored under its own key). whois: the WHOIS route (whois_route)."""
     now = now or time.time()
     key = KEY + domain + ("#internal" if internal else "")
     with connect() as c:
@@ -434,7 +464,7 @@ def get(connect: Callable[[], AbstractContextManager[sqlite3.Connection]], domai
     hit = json.loads(raw) if raw else None
     if hit and now - hit["at"] < (MIN_REFRESH if refresh else TTL):
         return {**hit, "cached": True}
-    data = fetch(domain, open_client, now, internal)
+    data = fetch(domain, open_client, now, internal, whois)
     if data["ok"]:
         with connect() as c:
             admin.kv_set(c, key, json.dumps(data))

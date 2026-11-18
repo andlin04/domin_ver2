@@ -3,6 +3,15 @@
 All notable changes, newest first, one dated entry per change with a Rollback line. `deploy/install.sh` applies an
 update in place; the database, `/etc/domin.env` and certificates stay.
 
+## 2026-11-18: WHOIS route
+
+- Settings > Routes > Shared settings: "WHOIS route" for the domain info card's WHOIS look-ups (port 43): Direct
+  (default) or any enabled route (Tor, Mullvad, a SOCKS5 or HTTP CONNECT proxy). Through a route the proxy resolves
+  the WHOIS server's name. A disabled, deleted or unresolvable route shows "WHOIS route <name> not available" on the
+  card, never a direct look-up. RDAP and security.txt stay on the inventory route. Change: WHOIS used to follow the
+  inventory route; it is now Direct until a WHOIS route is picked.
+- Rollback: `git revert` this commit.
+
 ## 2026-11-17: Domain info card: WHOIS fallback and split domains
 
 - TLDs the IANA RDAP bootstrap doesn't list (.se, .nu, ...): registration data from WHOIS (port 43) at the TLD's

@@ -381,6 +381,70 @@ def test_whois_through_a_proxy_that_refuses_port_43(monkeypatch):
     assert ok.sent[1] == b"shop-example.se\r\n"
 
 
+def socks5_server(answer: bytes, got: dict):
+    """A one-connection SOCKS5 server on loopback (no auth): records the CONNECT target, then answers the query."""
+    import socket
+    import threading
+    srv = socket.create_server(("127.0.0.1", 0))
+
+    def serve():
+        with srv, srv.accept()[0] as s:
+            got["greeting"] = s.recv(3)
+            s.sendall(b"\x05\x00")
+            head = s.recv(5)
+            name = s.recv(head[4])
+            got["target"] = (head[3], name.decode(), int.from_bytes(s.recv(2), "big"))
+            s.sendall(b"\x05\x00\x00\x01" + bytes(4) + bytes(2))
+            got["query"] = s.recv(256)
+            s.sendall(answer)
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    return srv.getsockname()[1], t
+
+
+def test_whois_through_socks5_lets_the_proxy_resolve_the_name(monkeypatch):
+    def loopback(addr, timeout):   # conftest refuses every connection; this test reaches its own fake only
+        assert addr[0] == "127.0.0.1"
+        s = domaininfo.socket.socket()
+        s.settimeout(timeout)
+        s.connect(addr)
+        return s
+    monkeypatch.setattr(domaininfo.socket, "create_connection", loopback)
+    got = {}
+    port, t = socks5_server(WHOIS_SE.encode(), got)
+    hop = {"type": "socks5", "host": "127.0.0.1", "port": port}
+    text = domaininfo.whois_query("whois.iis.se", "shop-example.se", hop, domaininfo.time.monotonic() + 20)
+    t.join(5)
+    assert "Example Registrar AB" in text and got["greeting"] == bytes([5, 1, 0])
+    assert got["target"] == (3, "whois.iis.se", 43)   # ATYP 3: a name, resolved by the proxy (socks5h)
+    assert got["query"] == b"shop-example.se\r\n"
+
+
+def test_whois_route_unavailable_shows_the_reason_and_never_goes_direct(monkeypatch):
+    seen = []
+    fake_whois(monkeypatch, {"whois.iana.org": IANA_SE, "whois.iis.se": WHOIS_SE}, seen)
+
+    def down():
+        raise domaininfo.proxy.ProxyError("WHOIS route Tor not available (the scan route Tor is disabled)")
+    with httpx.Client(transport=no_rdap([]), trust_env=False) as c:
+        got = domaininfo.fetch("shop-example.se", lambda: _same(c), now=NOW, whois=down)
+    assert not got["ok"] and got["rdap_error"].startswith("WHOIS route Tor not available") and seen == []
+
+
+def test_whois_route_direct_and_routed(monkeypatch):
+    seen = []
+    fake_whois(monkeypatch, {"whois.iana.org": IANA_SE, "whois.iis.se": WHOIS_SE}, seen)
+    tor = {"type": "socks5", "host": "127.0.0.1", "port": 9050}
+    with httpx.Client(transport=no_rdap([]), trust_env=False) as c:
+        c.domin_hop = {"type": "http", "host": "proxy.example", "port": 3128}   # the inventory route's hop
+        reg, err = domaininfo.lookup_registration("shop-example.se", c, domaininfo.time.monotonic() + 20,
+                                                  whois=lambda: None)
+        assert err == "" and reg["found"] and seen == [("whois.iana.org", None), ("whois.iis.se", None)]
+        seen.clear()
+        domaininfo.lookup_registration("shop-example.se", c, domaininfo.time.monotonic() + 20, whois=lambda: tor)
+    assert seen == [("whois.iis.se", tor)]
+
+
 def test_special_use_names_get_no_lookup():
     assert all(domaininfo.special_use(d) for d in ("home.arpa", "lab.home.arpa", "nas.local", "x.internal"))
     assert not any(domaininfo.special_use(d) for d in ("shop-example.net", "shop-example.se"))

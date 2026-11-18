@@ -56,7 +56,8 @@
       <td><b>Direct</b></td><td>built in: no proxy</td><td><span class="pill ok">always</span></td><td></td>
       <td>{% if cfg.posture == 'direct' %}<span class="pill">Default for posture</span>{% endif %}
         {% if cfg.inventory == 'direct' %}<span class="pill">Inventory</span>{% endif %}
-        {% if cfg.cve == 'direct' %}<span class="pill">CVE look-ups</span>{% endif %}</td><td></td></tr>
+        {% if cfg.cve == 'direct' %}<span class="pill">CVE look-ups</span>{% endif %}
+        {% if cfg.whois == 'direct' %}<span class="pill">WHOIS</span>{% endif %}</td><td></td></tr>
     {% for r in rows %}<tr>
       <td><label class="tick"><input type="radio" name="posture" value="{{ r.id }}" form="default-form"
         {% if cfg.posture == r.id %}checked{% endif %}>{% if cfg.posture == r.id %} <span class="pill {{ 'bad' if r.warning else 'ok' }}">default</span>{% endif %}</label></td>
@@ -176,6 +177,8 @@
       <select name="inventory">{% for rid, name in route_names.items() if rid %}<option value="{{ rid }}" {% if cfg.inventory == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">CVE look-ups through <small>OSV, NVD; the scan's own hop when it is the scan's route</small>
       <select name="cve">{% for rid, name in route_names.items() if rid %}<option value="{{ rid }}" {% if cfg.cve == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label class="field">WHOIS route <small>domain info card, TCP 43; enabled routes only, no fallback to direct</small>
+      <select name="whois">{% for rid, name in whois_names.items() %}<option value="{{ rid }}" {% if cfg.whois == rid %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
     <label class="field">DoH server <small>inventory jobs' DNS when routed</small>
       <input name="doh" value="{{ cfg.doh }}" maxlength="250" spellcheck="false" autocapitalize="off"></label>
   </div>

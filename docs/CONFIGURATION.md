@@ -83,7 +83,7 @@ Admin dashboard, no restart; overrides the environment value while set.
 | Scan profiles | Posture scan profiles: ports, version intensity, timing, route, note |
 | Discovery profiles | nmap discovery profiles and the default ([scheduled-scans.md](scheduled-scans.md)) |
 | CVE look-up | CVEs for a host, product or package; about the CVE database; exploit data: last update and error per source, on/off (default on; off hides the markers and skips the daily downloads, kv `exploits:off`) |
-| Routes | Direct, Tor (on/off), Mullvad (account, entry country/city), custom proxies; route per job type; DoH server |
+| Routes | Direct, Tor (on/off), Mullvad (account, entry country/city), custom proxies; route per job type; WHOIS route (Direct default; Tor, Mullvad or a SOCKS5/HTTP proxy for networks that block port 43); DoH server |
 | Components | Turn installed components on or off |
 | Logging | Syslog server, port, protocol (UDP/TCP/TLS), facility, app-name; test message |
 

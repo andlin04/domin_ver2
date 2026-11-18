@@ -40,15 +40,16 @@ LEGACY_KEY = "scan_proxy"   # the single route before named routes: read for the
 TYPES = ("socks5", "socks4", "http")
 KINDS = {"custom": "Custom proxy", "tor": "Tor", "mullvad": "Mullvad"}
 DIRECT = "direct"
-USES = {"posture": "default route", "inventory": "inventory jobs", "cve": "CVE look-ups"}
-ROLES = {"posture": "Default for posture", "inventory": "Inventory", "cve": "CVE look-ups"}   # the Routes table
+USES = {"posture": "default route", "inventory": "inventory jobs", "cve": "CVE look-ups", "whois": "WHOIS look-ups"}
+ROLES = {"posture": "Default for posture", "inventory": "Inventory", "cve": "CVE look-ups",
+         "whois": "WHOIS"}   # the Routes table
 DOH = "https://dns.quad9.net/dns-query"
 ROUTE_DEFAULT = {"id": "", "name": "", "kind": "custom", "enabled": True, "type": "socks5", "host": "", "port": 1080,
                  "username": "", "password": "", "tor_host": "127.0.0.1", "tor_port": 9050, "mullvad_mode": "auto",
                  "mullvad_country": "", "mullvad_city": "", "mullvad_fallback": ""}
 TESTS_KEY = "scan_route_tests"   # {route id: {at, ok, message}}: the last Test per route; dropped when it changes
 MULLVAD_FALLBACK = "se"   # prefilled for a new Mullvad route
-DEFAULT = {"routes": [], "next": 1, "posture": DIRECT, "inventory": DIRECT, "cve": DIRECT, "doh": DOH}
+DEFAULT = {"routes": [], "next": 1, "posture": DIRECT, "inventory": DIRECT, "cve": DIRECT, "whois": DIRECT, "doh": DOH}
 LEGACY_DEFAULT = {"route": "direct", "posture": True, "inventory": False, "cve": False, "doh": DOH,
                   **{k: v for k, v in ROUTE_DEFAULT.items() if k not in ("id", "name", "kind")}}
 TIMEOUT = 5.0   # seconds, handshake test and pre-flight check
@@ -159,6 +160,29 @@ def picker_names(cfg: dict, tests: dict | None = None) -> dict[str, str]:
     return {DIRECT: "Direct", **{r["id"]: f"{r['name']} — {state(r)}" for r in cfg["routes"]}}
 
 
+def whois_names(cfg: dict) -> dict[str, str]:
+    """The WHOIS route picker: Direct and every enabled route; the saved choice stays listed when it is disabled."""
+    return {DIRECT: "Direct", **{r["id"]: r["name"] + ("" if r.get("enabled", True) else " (disabled)")
+                                 for r in cfg["routes"] if r.get("enabled", True) or r["id"] == cfg["whois"]}}
+
+
+def whois_hop(conn: sqlite3.Connection, client: httpx.Client | None = None) -> dict | None:
+    """The hop for WHOIS (TCP port 43) on the WHOIS route; None = direct. A route that is deleted, disabled or can't
+    be resolved raises ProxyError('WHOIS route <name> not available'): never a direct fallback."""
+    cfg = get(conn)
+    if cfg["whois"] == DIRECT:
+        return None
+    r = find(cfg, cfg["whois"])
+    name = r["name"] if r else "(deleted)"
+    try:
+        h = hop(conn, pick(cfg, "", "whois"), client=client)
+    except ProxyError as exc:
+        raise ProxyError(f"WHOIS route {name} not available ({exc})") from None
+    if not h or h["type"] not in ("socks5", "http"):
+        raise ProxyError(f"WHOIS route {name} not available (a {h and h['type']} proxy can't carry WHOIS)")
+    return h
+
+
 def label(cfg: dict, rid: str = "", use: str = "posture") -> str:
     """How a scan on this route goes out ('' = direct), for a page."""
     try:
@@ -250,7 +274,7 @@ def check_route(form: dict[str, str], cfg: dict, countries: set[str] | None = No
         if pw and not user:
             raise ValueError("A password needs a user name.")
         r.update(type=typ, host=host, port=port, username=user, password=pw)
-        uses = [USES[u] for u in ("inventory", "cve") if cfg[u] == r["id"]]
+        uses = [USES[u] for u in ("inventory", "cve", "whois") if cfg[u] == r["id"]]
         if typ == "socks4" and uses:
             raise ValueError(f"A socks4 proxy can't carry HTTPS look-ups ({' and '.join(uses)} use this route): use "
                              "socks5 or http.")
@@ -399,7 +423,8 @@ def describe(r: dict | None, inventory: bool = False) -> str:
 
 def state_line(cfg: dict) -> str:
     return " · ".join(f"{name}: {label(cfg, '', use) or 'direct'}" for name, use in (
-        ("Posture scans (default)", "posture"), ("Inventory jobs", "inventory"), ("CVE look-ups", "cve")))
+        ("Posture scans (default)", "posture"), ("Inventory jobs", "inventory"), ("CVE look-ups", "cve"),
+        ("WHOIS", "whois")))
 
 
 def _hop(kind: str, host: str, port: int, label: str, user: str = "", pw: str = "") -> dict:

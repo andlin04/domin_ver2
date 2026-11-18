@@ -117,6 +117,36 @@ def test_only_admins_see_and_change_routes(settings):
         assert proxy.find(proxy.get(c), "r1")["port"] == 1080 and proxy.get(c)["posture"] == "r1"
 
 
+def test_whois_route_is_saved_and_lists_only_enabled_routes(settings):
+    with app_client(settings) as h:
+        csrf = sign_in(h, "adm")
+        for name, host in (("Office", "192.0.2.10"), ("Spare", "192.0.2.11")):
+            assert h.post("/admin/security/scan-settings/routes", data={"csrf": csrf, **form(name=name, host=host)},
+                          follow_redirects=False).status_code == 303
+        with db.connect(settings.db_path) as c:
+            assert proxy.get(c)["whois"] == "direct"   # the default
+            proxy.set_enabled(c, "r2", False)
+        page = h.get("/admin/security/scan-settings").text
+        picker = page.split('<select name="whois">', 1)[1].split("</select>", 1)[0]
+        assert '"direct" selected>Direct' in picker and ">Office<" in picker and "Spare" not in picker
+        assert h.post("/admin/security/scan-settings", data={"csrf": csrf, **shared(whois="r1")},
+                      follow_redirects=False).status_code == 303
+        page = h.get("/admin/security/scan-settings").text
+        assert '"r1" selected>Office' in page and "WHOIS: Office: socks5 192.0.2.10:1080" in page
+        r = h.post("/admin/security/scan-settings/routes/r1/delete", data={"csrf": csrf}, follow_redirects=False)
+        assert "WHOIS look-ups" in r.text   # in use: not deleted
+    with db.connect(settings.db_path) as c:
+        assert proxy.get(c)["whois"] == "r1" and proxy.whois_hop(c)["host"] == "192.0.2.10"
+        proxy.set_enabled(c, "r1", False)
+        with pytest.raises(proxy.ProxyError, match="WHOIS route Office not available"):
+            proxy.whois_hop(c)   # disabled: no direct fallback
+        assert proxy.whois_names(proxy.get(c)) == {"direct": "Direct", "r1": "Office (disabled)"}
+        cfg = proxy.get(c)
+        proxy.put(c, {**cfg, "routes": [], "whois": "r9"})
+        with pytest.raises(proxy.ProxyError, match=r"WHOIS route \(deleted\) not available"):
+            proxy.whois_hop(c)
+
+
 def test_off_shows_no_route(settings):
     with app_client(settings) as h:
         sign_in(h, "ana")

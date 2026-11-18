@@ -509,7 +509,7 @@ def test_settings_saved_before_routes_still_apply(settings):
                                                                                      "http")]
     assert (got["posture"], got["inventory"], got["cve"]) == ("r1", "direct", "r1")
     assert proxy.state_line(got) == ("Posture scans (default): Custom proxy: http 192.0.2.10:3128 · Inventory jobs: "
-                                     "direct · CVE look-ups: Custom proxy: http 192.0.2.10:3128")
+                                     "direct · CVE look-ups: Custom proxy: http 192.0.2.10:3128 · WHOIS: direct")
 
 
 @pytest.mark.parametrize("old, want", [

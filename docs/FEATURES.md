@@ -85,7 +85,8 @@ Design detail: [scheduled-scans.md](scheduled-scans.md).
 Settings · Routes (admin).
 
 - Direct, Tor, Mullvad (WireGuard tunnel, entry country/city), custom proxy (SOCKS5, SOCKS4, HTTP).
-- Separate route choice for posture scans, inventory jobs and CVE look-ups; DoH server.
+- Separate route choice for posture scans, inventory jobs, CVE look-ups and WHOIS (the domain info card's port 43
+  look-ups; Direct or an enabled route, no fallback to direct); DoH server.
 - Tor is installed but off; an admin switches it here (kept across updates). Tor and the Mullvad tunnel are switched
   by root helper units, never by the app ([ARCHITECTURE.md](ARCHITECTURE.md#root-helpers)).
 - Internal zones always go direct.

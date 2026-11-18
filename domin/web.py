@@ -1904,7 +1904,8 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
             hosts = len(posture.hosts(c, dom))
         info = None if internal and domaininfo.special_use(dom) else domaininfo.view(domaininfo.get(
             conn, dom, lambda: domaininfo.inventory_client(conn, http),
-            refresh=request.query_params.get("refresh") == "1", internal=internal))
+            refresh=request.query_params.get("refresh") == "1", internal=internal,
+            whois=domaininfo.whois_route(conn, http)))
         return shell(request, "_domain_card.html", u, s, card_domain=dom, internal=internal, info=info,
                      hosts=hosts, summary=summary)
 
@@ -2379,6 +2380,7 @@ def add_admin(app: FastAPI, settings: Settings, conn, page, client_ip, http: htt
         return shell(request, "scan_settings.html", u, s, status, cfg=cfg, rows=rows, edit=edit, types=proxy.TYPES,
                      kinds=proxy.KINDS, kind_choices=proxy.kinds(cap, edit.get("kind", "")), cap=cap,
                      warnings=warnings, route_names=proxy.picker_names(saved, done), error=error, test=test,
+                     whois_names=proxy.whois_names({**saved, "whois": cfg["whois"]}),
                      state=proxy.state_line(saved),
                      modes=mullvad.MODE_NAMES, countries=countries, cities=mullvad.cities(relays),
                      tun=tun, apply=apply, last=mullvad.explain(apply))
